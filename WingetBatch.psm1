@@ -1487,6 +1487,12 @@ function Set-WingetBatchGitHubToken {
     Write-Host "✓ GitHub token saved successfully!" -ForegroundColor Green
     Write-Host "  Location: $tokenFile" -ForegroundColor DarkGray
     Write-Host "  The token will now be used automatically for API requests." -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  ℹ Security Note:" -ForegroundColor Yellow
+    Write-Host "  • Token stored in plain text (no permissions required for this module)" -ForegroundColor DarkGray
+    Write-Host "  • Only increases API rate limits - cannot modify repositories or access private data" -ForegroundColor DarkGray
+    Write-Host "  • If stolen, someone could make API requests as you (read public repos only)" -ForegroundColor DarkGray
+    Write-Host "  • Revoke anytime at: https://github.com/settings/tokens" -ForegroundColor DarkGray
 }
 
 function Get-PackageDetailsCache {
