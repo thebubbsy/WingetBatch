@@ -51,10 +51,10 @@
             Tags = @('winget', 'package-manager', 'windows', 'batch-install', 'utility', 'github-api', 'interactive', 'cache', 'updates', 'PwshSpectreConsole')
 
             # A URL to the license for this module.
-            LicenseUri = 'https://github.com/drbubbles-tech/WingetBatch/blob/main/LICENSE'
+            LicenseUri = 'https://github.com/thebubbsy/WingetBatch/blob/main/LICENSE'
 
             # A URL to the main website for this project.
-            ProjectUri = 'https://github.com/drbubbles-tech/WingetBatch'
+            ProjectUri = 'https://github.com/thebubbsy/WingetBatch'
 
             # A URL to an icon representing this module.
             # IconUri = ''
