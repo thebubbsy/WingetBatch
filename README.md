@@ -30,11 +30,11 @@ Batch installation utilities for Windows Package Manager (winget). Search for pa
 ## Installation
 
 ```powershell
-# Clone or download this module to your PowerShell modules directory
-# Default location: ~\Documents\PowerShell\Modules\WingetBatch\
+# Install from PowerShell Gallery
+Install-Module -Name WingetBatch -Scope CurrentUser
 
-# Or copy the files to:
-$env:USERPROFILE\Documents\PowerShell\Modules\WingetBatch\
+# Import the module
+Import-Module WingetBatch
 ```
 
 ## Quick Start
@@ -42,8 +42,11 @@ $env:USERPROFILE\Documents\PowerShell\Modules\WingetBatch\
 ### 1. Set up GitHub Authentication (Optional but Recommended)
 
 ```powershell
-# Create a token at: https://github.com/settings/tokens (no special permissions needed)
-Set-WingetBatchGitHubToken -Token "ghp_your_token_here"
+# Generate a new GitHub token interactively (opens browser for authentication)
+New-WingetBatchGitHubToken
+
+# This increases API rate limits from 60 to 5,000 requests per hour
+# No special permissions needed - just authenticates your identity
 ```
 
 ### 2. Enable Update Notifications
