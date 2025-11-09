@@ -31,45 +31,76 @@ if (-not (Test-AdminRights)) {
 # Install Winget if not already installed
 if (-not $SkipWinget) {
     Write-Host "`n[1/4] Checking Winget installation..." -ForegroundColor Cyan
-    
+
     $wingetPath = Get-Command winget -ErrorAction SilentlyContinue
-    
+
     if ($wingetPath -and -not $Force) {
         Write-Host "✓ Winget is already installed at: $($wingetPath.Source)" -ForegroundColor Green
     }
     else {
         Write-Host "Installing Winget from Microsoft Store..." -ForegroundColor Yellow
-        
-        # Get the latest Winget release from GitHub
+
+        # Try Method 1: Direct GitHub download
         try {
+            Write-Host "Attempting to install Winget from GitHub..." -ForegroundColor Gray
+
             $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/microsoft/winget-cli/releases/latest" -ErrorAction Stop
             $downloadUrl = $releases.assets | Where-Object { $_.name -match "msixbundle" } | Select-Object -First 1 -ExpandProperty browser_download_url
-            
+
             if ($downloadUrl) {
                 $tempFile = Join-Path $env:TEMP "winget.msixbundle"
-                Write-Host "Downloading: $downloadUrl" -ForegroundColor Gray
+                Write-Host "Downloading from: $downloadUrl" -ForegroundColor Gray
                 Invoke-WebRequest -Uri $downloadUrl -OutFile $tempFile -ErrorAction Stop
-                
-                Write-Host "Installing Winget..." -ForegroundColor Gray
-                Add-AppxPackage -Path $tempFile -ErrorAction SilentlyContinue
+
+                Write-Host "Installing package..." -ForegroundColor Gray
+
+                # Try to install with dependency checking
+                $result = Add-AppxPackage -Path $tempFile -ErrorAction SilentlyContinue -AllUsers -ForceApplicationShutdown -ErrorVariable appxError
+
+                if ($?) {
+                    Write-Host "✓ Winget installed successfully" -ForegroundColor Green
+                }
+                else {
+                    # If direct install fails, it might need VCLibs
+                    Write-Host "Installation needs dependencies. Installing VCLibs first..." -ForegroundColor Yellow
+
+                    # Download and install VCLibs
+                    $vcLibsUrl = "https://aka.ms/Microsoft.VCLibs.x64.Desktop.appx"
+                    $vcLibsFile = Join-Path $env:TEMP "Microsoft.VCLibs.x64.Desktop.appx"
+                    Invoke-WebRequest -Uri $vcLibsUrl -OutFile $vcLibsFile -ErrorAction SilentlyContinue
+                    Add-AppxPackage -Path $vcLibsFile -ErrorAction SilentlyContinue
+
+                    # Try Winget installation again
+                    Add-AppxPackage -Path $tempFile -ErrorAction SilentlyContinue -AllUsers -ForceApplicationShutdown
+                    Remove-Item $vcLibsFile -Force -ErrorAction SilentlyContinue
+                }
+
                 Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
-                
                 Start-Sleep -Seconds 2
-                
+
                 if (Get-Command winget -ErrorAction SilentlyContinue) {
                     Write-Host "✓ Winget installed successfully" -ForegroundColor Green
                 }
                 else {
-                    Write-Host "✗ Winget installation may have failed. You may need to manually install from Microsoft Store." -ForegroundColor Yellow
+                    Write-Host "⚠ Winget installation completed but may not be in PATH yet." -ForegroundColor Yellow
+                    Write-Host "  Please close and reopen PowerShell, or manually install from Microsoft Store:" -ForegroundColor Yellow
+                    Write-Host "  https://apps.microsoft.com/detail/9NBLGGH4NNS1" -ForegroundColor Cyan
                 }
             }
             else {
-                Write-Host "✗ Could not find Winget installer. Please install manually from Microsoft Store." -ForegroundColor Red
+                throw "Could not find Winget installer in GitHub releases"
             }
         }
         catch {
-            Write-Host "✗ Error downloading Winget: $($_.Exception.Message)" -ForegroundColor Red
-            Write-Host "Please install Winget manually from Microsoft Store or https://github.com/microsoft/winget-cli" -ForegroundColor Yellow
+            Write-Host "✗ Error installing Winget from GitHub: $($_.Exception.Message)" -ForegroundColor Red
+            Write-Host "`n⚠ MANUAL INSTALLATION REQUIRED" -ForegroundColor Yellow
+            Write-Host "Please install Windows Package Manager manually:" -ForegroundColor Yellow
+            Write-Host "  Option 1: Microsoft Store (recommended)" -ForegroundColor Cyan
+            Write-Host "    https://apps.microsoft.com/detail/9NBLGGH4NNS1" -ForegroundColor Cyan
+            Write-Host "  Option 2: GitHub Releases" -ForegroundColor Cyan
+            Write-Host "    https://github.com/microsoft/winget-cli/releases" -ForegroundColor Cyan
+            Write-Host "  Option 3: Windows 11 already has it (check 'winget' in Start Menu)" -ForegroundColor Cyan
+            Write-Host "`nAfter installing, run this script again with -SkipWinget switch." -ForegroundColor Yellow
         }
     }
 }
@@ -77,18 +108,18 @@ if (-not $SkipWinget) {
 # Install required PowerShell modules
 if (-not $SkipModules) {
     Write-Host "`n[2/4] Installing required PowerShell modules..." -ForegroundColor Cyan
-    
+
     $modules = @(
         'PwshSpectreConsole',
         'PSWindowsUpdate',
         'ExchangeOnlineManagement'
     )
-    
+
     foreach ($module in $modules) {
         Write-Host "`n  Installing: $module" -ForegroundColor Gray
-        
+
         $installed = Get-Module -ListAvailable -Name $module -ErrorAction SilentlyContinue
-        
+
         if ($installed -and -not $Force) {
             Write-Host "  ✓ $module already installed (v$($installed.Version | Select-Object -First 1))" -ForegroundColor Green
         }
@@ -115,26 +146,26 @@ if ((Test-Path $modulePath) -and -not $Force) {
 }
 else {
     Write-Host "Downloading WingetBatch from GitHub..." -ForegroundColor Gray
-    
+
     try {
-        $repoUrl = "https://raw.githubusercontent.com/username/WingetBatch/main"
+        $repoUrl = "https://raw.githubusercontent.com/thebubbsy/WingetBatch/main"
         $files = @(
             "WingetBatch.psm1",
             "WingetBatch.psd1",
             "README.md"
         )
-        
+
         if (-not (Test-Path $moduleDir)) {
             New-Item -ItemType Directory -Path $moduleDir -Force | Out-Null
         }
-        
+
         foreach ($file in $files) {
             $fileUrl = "$repoUrl/$file"
             $filePath = Join-Path $moduleDir $file
             Write-Host "  Downloading: $file" -ForegroundColor Gray
             Invoke-WebRequest -Uri $fileUrl -OutFile $filePath -ErrorAction SilentlyContinue
         }
-        
+
         if (Test-Path $modulePath) {
             Write-Host "✓ WingetBatch module downloaded successfully" -ForegroundColor Green
         }
