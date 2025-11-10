@@ -947,7 +947,7 @@ function Get-WingetNewPackages {
 
         if ($GitHubToken) {
             $headers['Authorization'] = "Bearer $GitHubToken"
-            Write-Host "Using stored GitHub token (5,000 req/hour) - " -ForegroundColor DarkGray -NoNewline
+            Write-Host "Using stored GitHub token (5000 req/hour) - " -ForegroundColor DarkGray -NoNewline
             Write-Host "$currentUsage" -ForegroundColor Cyan -NoNewline
             Write-Host " requests used this hour" -ForegroundColor DarkGray
         }

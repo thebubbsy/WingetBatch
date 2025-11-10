@@ -54,25 +54,28 @@ if (-not $SkipWinget) {
 
                 Write-Host "Installing package..." -ForegroundColor Gray
 
-                # Try to install with dependency checking
-                $result = Add-AppxPackage -Path $tempFile -ErrorAction SilentlyContinue -AllUsers -ForceApplicationShutdown -ErrorVariable appxError
-
-                if ($?) {
-                    Write-Host "✓ Winget installed successfully" -ForegroundColor Green
-                }
-                else {
-                    # If direct install fails, it might need VCLibs
-                    Write-Host "Installation needs dependencies. Installing VCLibs first..." -ForegroundColor Yellow
-
-                    # Download and install VCLibs
-                    $vcLibsUrl = "https://aka.ms/Microsoft.VCLibs.x64.Desktop.appx"
-                    $vcLibsFile = Join-Path $env:TEMP "Microsoft.VCLibs.x64.Desktop.appx"
-                    Invoke-WebRequest -Uri $vcLibsUrl -OutFile $vcLibsFile -ErrorAction SilentlyContinue
+                # First, install VCLibs dependency (required for Winget)
+                Write-Host "Installing VCLibs dependency..." -ForegroundColor Gray
+                $vcLibsUrl = "https://aka.ms/Microsoft.VCLibs.x64.14.00.Desktop.appx"
+                $vcLibsFile = Join-Path $env:TEMP "Microsoft.VCLibs.x64.Desktop.appx"
+                try {
+                    Invoke-WebRequest -Uri $vcLibsUrl -OutFile $vcLibsFile -ErrorAction Stop
                     Add-AppxPackage -Path $vcLibsFile -ErrorAction SilentlyContinue
-
-                    # Try Winget installation again
-                    Add-AppxPackage -Path $tempFile -ErrorAction SilentlyContinue -AllUsers -ForceApplicationShutdown
                     Remove-Item $vcLibsFile -Force -ErrorAction SilentlyContinue
+                    Write-Host "✓ VCLibs installed" -ForegroundColor Green
+                }
+                catch {
+                    Write-Host "⚠ VCLibs installation skipped (may already be installed)" -ForegroundColor Yellow
+                }
+
+                # Now install Winget
+                Write-Host "Installing Winget..." -ForegroundColor Gray
+                try {
+                    Add-AppxPackage -Path $tempFile -ErrorAction Stop
+                    Write-Host "✓ Winget package installed" -ForegroundColor Green
+                }
+                catch {
+                    Write-Host "⚠ Winget installation error: $($_.Exception.Message)" -ForegroundColor Yellow
                 }
 
                 Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
@@ -138,7 +141,15 @@ if (-not $SkipModules) {
 # Download and install WingetBatch module
 Write-Host "`n[3/4] Setting up WingetBatch module..." -ForegroundColor Cyan
 
-$moduleDir = Join-Path $PROFILE\..\..\..\Documents\PowerShell\Modules\WingetBatch
+# Determine correct module path
+if ($PSVersionTable.PSVersion.Major -ge 6) {
+    $moduleBase = [System.IO.Path]::Combine([Environment]::GetFolderPath('MyDocuments'), 'PowerShell', 'Modules')
+}
+else {
+    $moduleBase = [System.IO.Path]::Combine([Environment]::GetFolderPath('MyDocuments'), 'WindowsPowerShell', 'Modules')
+}
+
+$moduleDir = Join-Path $moduleBase "WingetBatch"
 $modulePath = Join-Path $moduleDir "WingetBatch.psm1"
 
 if ((Test-Path $modulePath) -and -not $Force) {
