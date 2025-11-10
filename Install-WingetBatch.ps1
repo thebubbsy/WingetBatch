@@ -11,6 +11,34 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
+try {
+    # Ensure TLS 1.2 for Invoke-WebRequest/Invoke-RestMethod
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12
+}
+catch {
+    Write-Verbose "Unable to update TLS settings: $($_.Exception.Message)"
+}
+
+function Invoke-DownloadFile {
+    param(
+        [Parameter(Mandatory)] [string]$Uri,
+        [Parameter(Mandatory)] [string]$OutFile
+    )
+
+    $invokeParams = @{
+        Uri         = $Uri
+        OutFile     = $OutFile
+        ErrorAction = 'Stop'
+    }
+
+    if ($PSVersionTable.PSEdition -eq 'Desktop') {
+        # UseBasicParsing avoids IE dependency on Windows PowerShell 5.1
+        $invokeParams.UseBasicParsing = $true
+    }
+
+    Invoke-WebRequest @invokeParams
+}
+
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "WingetBatch Installation Script" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
@@ -44,44 +72,80 @@ if (-not $SkipWinget) {
         try {
             Write-Host "Attempting to install Winget from GitHub..." -ForegroundColor Gray
 
-            $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/microsoft/winget-cli/releases/latest" -ErrorAction Stop
-            $downloadUrl = $releases.assets | Where-Object { $_.name -match "msixbundle" } | Select-Object -First 1 -ExpandProperty browser_download_url
+            $releaseParams = @{
+                Uri         = "https://api.github.com/repos/microsoft/winget-cli/releases/latest"
+                ErrorAction = 'Stop'
+                Headers     = @{ 'User-Agent' = 'WingetBatchInstaller' }
+            }
 
-            if ($downloadUrl) {
-                $tempFile = Join-Path $env:TEMP "winget.msixbundle"
-                Write-Host "Downloading from: $downloadUrl" -ForegroundColor Gray
-                Invoke-WebRequest -Uri $downloadUrl -OutFile $tempFile -ErrorAction Stop
+            if ($PSVersionTable.PSEdition -eq 'Desktop') {
+                $releaseParams.UseBasicParsing = $true
+            }
 
-                Write-Host "Installing package..." -ForegroundColor Gray
+            $releases = Invoke-RestMethod @releaseParams
+            $assets = $releases.assets
 
-                # First, install VCLibs dependency (required for Winget)
-                Write-Host "Installing VCLibs dependency..." -ForegroundColor Gray
-                $vcLibsUrl = "https://aka.ms/Microsoft.VCLibs.x64.14.00.Desktop.appx"
-                $vcLibsFile = Join-Path $env:TEMP "Microsoft.VCLibs.x64.Desktop.appx"
-                try {
-                    Invoke-WebRequest -Uri $vcLibsUrl -OutFile $vcLibsFile -ErrorAction Stop
-                    Add-AppxPackage -Path $vcLibsFile -ErrorAction SilentlyContinue
-                    Remove-Item $vcLibsFile -Force -ErrorAction SilentlyContinue
-                    Write-Host "✓ VCLibs installed" -ForegroundColor Green
+            $appInstallerAsset = $assets | Where-Object { $_.name -like 'Microsoft.DesktopAppInstaller_*_x64.msixbundle' } | Select-Object -First 1
+
+            if (-not $appInstallerAsset) {
+                # Fallback to generic name if exact pattern not found
+                $appInstallerAsset = $assets | Where-Object { $_.name -match 'Microsoft\.DesktopAppInstaller_.*\.msixbundle$' } | Select-Object -First 1
+            }
+
+            if ($appInstallerAsset) {
+                $tempDir = Join-Path $env:TEMP "winget-install"
+                if (-not (Test-Path $tempDir)) {
+                    New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
                 }
-                catch {
-                    Write-Host "⚠ VCLibs installation skipped (may already be installed)" -ForegroundColor Yellow
+
+                $appInstallerPath = Join-Path $tempDir $appInstallerAsset.name
+                Write-Host "Downloading App Installer: $($appInstallerAsset.name)" -ForegroundColor Gray
+                Invoke-DownloadFile -Uri $appInstallerAsset.browser_download_url -OutFile $appInstallerPath
+
+                # Identify dependency packages (VCLibs, UI.Xaml)
+                $dependencyAssets = $assets | Where-Object {
+                    $_.name -match 'Microsoft\.UI\.Xaml.*x64.*\.msixbundle$' -or
+                    $_.name -match 'Microsoft\.VCLibs.*x64.*\.appx'
                 }
 
-                # Now install Winget
-                Write-Host "Installing Winget..." -ForegroundColor Gray
+                $dependencyFiles = @()
+                foreach ($dependency in $dependencyAssets) {
+                    $dependencyPath = Join-Path $tempDir $dependency.name
+                    Write-Host "Downloading dependency: $($dependency.name)" -ForegroundColor Gray
+                    Invoke-DownloadFile -Uri $dependency.browser_download_url -OutFile $dependencyPath
+                    $dependencyFiles += $dependencyPath
+                }
+
+                Write-Host "Installing dependencies and App Installer..." -ForegroundColor Gray
                 try {
-                    Add-AppxPackage -Path $tempFile -ErrorAction Stop
+                    if ($dependencyFiles.Count -gt 0) {
+                        Add-AppxPackage -Path $appInstallerPath -DependencyPath $dependencyFiles -ForceApplicationShutdown -ErrorAction Stop
+                    }
+                    else {
+                        Add-AppxPackage -Path $appInstallerPath -ForceApplicationShutdown -ErrorAction Stop
+                    }
+
                     Write-Host "✓ Winget package installed" -ForegroundColor Green
                 }
                 catch {
                     Write-Host "⚠ Winget installation error: $($_.Exception.Message)" -ForegroundColor Yellow
                 }
 
-                Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
+                # Clean up downloaded files
+                Get-ChildItem -Path $tempDir -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+                Remove-Item $tempDir -Force -ErrorAction SilentlyContinue
+
                 Start-Sleep -Seconds 2
 
-                if (Get-Command winget -ErrorAction SilentlyContinue) {
+                $wingetCommand = Get-Command winget -ErrorAction SilentlyContinue
+                if (-not $wingetCommand) {
+                    $fallbackWingetPath = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Microsoft\WindowsApps\winget.exe'
+                    if (Test-Path $fallbackWingetPath) {
+                        $wingetCommand = Get-Command $fallbackWingetPath -ErrorAction SilentlyContinue
+                    }
+                }
+
+                if ($wingetCommand) {
                     Write-Host "✓ Winget installed successfully" -ForegroundColor Green
                 }
                 else {
@@ -91,7 +155,7 @@ if (-not $SkipWinget) {
                 }
             }
             else {
-                throw "Could not find Winget installer in GitHub releases"
+                throw "Could not find App Installer package in GitHub releases"
             }
         }
         catch {
@@ -174,7 +238,12 @@ else {
             $fileUrl = "$repoUrl/$file"
             $filePath = Join-Path $moduleDir $file
             Write-Host "  Downloading: $file" -ForegroundColor Gray
-            Invoke-WebRequest -Uri $fileUrl -OutFile $filePath -ErrorAction SilentlyContinue
+            try {
+                Invoke-DownloadFile -Uri $fileUrl -OutFile $filePath
+            }
+            catch {
+                Write-Host "  ✗ Failed to download $file : $($_.Exception.Message)" -ForegroundColor Yellow
+            }
         }
 
         if (Test-Path $modulePath) {
