@@ -48,7 +48,8 @@ function Install-WingetAll {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory=$true, Position=0, ValueFromPipeline=$true)]
-        [string]$SearchTerm,
+        [Alias('SearchTerm')]
+        [string[]]$SearchTerms,
 
         [Parameter()]
         [switch]$Silent,
@@ -75,12 +76,12 @@ function Install-WingetAll {
         }
 
         Write-Host "Searching for packages matching: " -ForegroundColor Cyan -NoNewline
-        Write-Host $SearchTerm -ForegroundColor Yellow
+        Write-Host ($SearchTerms -join ", ") -ForegroundColor Yellow
     }
 
     process {
-        # Parse multiple search terms separated by comma
-        $searchQueries = $SearchTerm -split ',' | Where-Object { $_ -ne '' }
+        # Parse multiple search terms: handle both arrays (PowerShell comma list) and comma-separated strings
+        $searchQueries = $SearchTerms | ForEach-Object { $_ -split ',' } | Where-Object { $_ -ne '' }
         $allPackages = @()
 
         foreach ($query in $searchQueries) {
@@ -188,7 +189,7 @@ function Install-WingetAll {
         $uniquePackages = $allPackages | Sort-Object -Property Id -Unique
 
         if ($uniquePackages.Count -eq 0) {
-            Write-Warning "No packages found matching '$SearchTerm'"
+            Write-Warning "No packages found matching '$($SearchTerms -join ", ")'"
             return
         }
 
