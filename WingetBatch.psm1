@@ -48,7 +48,8 @@ function Install-WingetAll {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory=$true, Position=0, ValueFromPipeline=$true)]
-        [string]$SearchTerm,
+        [Alias('SearchTerm')]
+        [string[]]$SearchTerms,
 
         [Parameter()]
         [switch]$Silent,
@@ -75,108 +76,149 @@ function Install-WingetAll {
         }
 
         Write-Host "Searching for packages matching: " -ForegroundColor Cyan -NoNewline
-        Write-Host $SearchTerm -ForegroundColor Yellow
+        Write-Host ($SearchTerms -join ", ") -ForegroundColor Yellow
     }
 
     process {
-        # Parse individual search words for wildcard searching
-        $searchWords = $SearchTerm -split '\s+' | Where-Object { $_ -ne '' }
+        # Parse multiple search terms: handle both arrays (PowerShell comma list) and comma-separated strings
+        $searchQueries = $SearchTerms | ForEach-Object { $_ -split ',' } | Where-Object { $_ -ne '' }
+        $allPackages = @()
 
-        # Combine all search results from each word
-        $allSearchResults = @()
+        foreach ($query in $searchQueries) {
+            $query = $query.Trim()
+            if ([string]::IsNullOrWhiteSpace($query)) { continue }
 
-        foreach ($word in $searchWords) {
-            try {
-                $wordResults = winget search $word --accept-source-agreements 2>&1
+            Write-Host "Searching for: " -ForegroundColor Cyan -NoNewline
+            Write-Host $query -ForegroundColor Yellow
 
-                if ($LASTEXITCODE -eq 0) {
-                    $allSearchResults += $wordResults
+            # Parse individual search words for wildcard searching (AND logic)
+            $searchWords = $query -split '\s+' | Where-Object { $_ -ne '' }
+
+            # Combine all search results from each word
+            $querySearchResults = @()
+
+            foreach ($word in $searchWords) {
+                try {
+                    $wordResults = winget search $word --accept-source-agreements 2>&1
+
+                    if ($LASTEXITCODE -eq 0) {
+                        $querySearchResults += $wordResults
+                    }
+                }
+                catch {
+                    Write-Warning "Failed to search for word: $word"
                 }
             }
-            catch {
-                Write-Warning "Failed to search for word: $word"
-            }
-        }
 
-        if ($allSearchResults.Count -eq 0) {
-            Write-Error "Error searching for packages."
-            return
-        }
-
-        $searchResults = $allSearchResults -join "`n"
-
-        # Parse the search results to extract package IDs
-        $lines = $searchResults -split "`n"
-        $packageIds = @()
-        $headerFound = $false
-        $nameColEnd = -1
-        $idColStart = -1
-        $idColEnd = -1
-
-        foreach ($line in $lines) {
-            # Find the header line to determine column positions
-            if ($line -match '^Name\s+Id\s+') {
-                $nameColEnd = $line.IndexOf('Id') - 1
-                $idColStart = $line.IndexOf('Id')
-                # Find where Version starts (end of Id column)
-                if ($line -match 'Version') {
-                    $idColEnd = $line.IndexOf('Version') - 1
-                } else {
-                    $idColEnd = $line.Length
-                }
+            if ($querySearchResults.Count -eq 0) {
                 continue
             }
 
-            # Skip until we find the header separator line (dashes)
-            if ($line -match '^-+') {
-                $headerFound = $true
-                continue
-            }
+            $searchResults = $querySearchResults -join "`n"
 
-            if ($headerFound -and $line.Trim() -ne '' -and $idColStart -gt 0 -and $line.Length -gt $idColStart) {
-                # Extract the entire line for filtering and the ID
-                $endPos = if ($idColEnd -lt $line.Length) { $idColEnd } else { $line.Length }
-                $packageId = $line.Substring($idColStart, $endPos - $idColStart).Trim()
+            # Parse the search results to extract package IDs and Names
+            $lines = $searchResults -split "`n"
 
-                # Only add if it looks like a valid package ID
-                if ($packageId -and $packageId -match '^[A-Za-z0-9\.\-_]+$' -and $packageId -notmatch '^\d+\.\d+') {
-                    # If multiple search words, filter to only packages matching ALL words (case-insensitive)
-                    if ($searchWords.Count -gt 1) {
-                        $matchesAll = $true
-                        foreach ($word in $searchWords) {
-                            if ($line -notmatch "(?i)$([regex]::Escape($word))") {
-                                $matchesAll = $false
-                                break
+            $headerFound = $false
+            $nameColEnd = -1
+            $idColStart = -1
+            $idColEnd = -1
+
+            foreach ($line in $lines) {
+                # Find the header line to determine column positions
+                if ($line -match '^Name\s+Id\s+') {
+                    $nameColEnd = $line.IndexOf('Id') - 1
+                    $idColStart = $line.IndexOf('Id')
+                    # Find where Version starts (end of Id column)
+                    if ($line -match 'Version') {
+                        $idColEnd = $line.IndexOf('Version') - 1
+                    } else {
+                        $idColEnd = $line.Length
+                    }
+                    continue
+                }
+
+                # Skip until we find the header separator line (dashes)
+                if ($line -match '^-+') {
+                    $headerFound = $true
+                    continue
+                }
+
+                if ($headerFound -and $line.Trim() -ne '' -and $idColStart -gt 0 -and $line.Length -gt $idColStart) {
+                    # Extract the entire line for filtering and the ID
+                    $endPos = if ($idColEnd -lt $line.Length) { $idColEnd } else { $line.Length }
+                    $packageId = $line.Substring($idColStart, $endPos - $idColStart).Trim()
+
+                    # Extract Name
+                    $packageName = if ($nameColEnd -gt 0 -and $line.Length -gt $nameColEnd) {
+                        $line.Substring(0, $nameColEnd).Trim()
+                    } else {
+                        $packageId # Fallback
+                    }
+
+                    # Only add if it looks like a valid package ID
+                    if ($packageId -and $packageId -match '^[A-Za-z0-9\.\-_]+$' -and $packageId -notmatch '^\d+\.\d+') {
+                        # If multiple search words, filter to only packages matching ALL words (case-insensitive)
+                        if ($searchWords.Count -gt 1) {
+                            $matchesAll = $true
+                            foreach ($word in $searchWords) {
+                                if ($line -notmatch "(?i)$([regex]::Escape($word))") {
+                                    $matchesAll = $false
+                                    break
+                                }
+                            }
+                            if ($matchesAll) {
+                                $allPackages += [PSCustomObject]@{
+                                    Id = $packageId
+                                    Name = $packageName
+                                }
                             }
                         }
-                        if ($matchesAll) {
-                            $packageIds += $packageId
+                        else {
+                            $allPackages += [PSCustomObject]@{
+                                Id = $packageId
+                                Name = $packageName
+                            }
                         }
-                    }
-                    else {
-                        $packageIds += $packageId
                     }
                 }
             }
         }
 
-        if ($packageIds.Count -eq 0) {
-            Write-Warning "No packages found matching '$SearchTerm'"
+        # Deduplicate packages based on Id
+        $uniquePackages = $allPackages | Sort-Object -Property Id -Unique
+
+        if ($uniquePackages.Count -eq 0) {
+            Write-Warning "No packages found matching '$($SearchTerms -join ", ")'"
             return
         }
 
         Write-Host "`nFound " -ForegroundColor Green -NoNewline
-        Write-Host "$($packageIds.Count)" -ForegroundColor White -NoNewline
+        Write-Host "$($uniquePackages.Count)" -ForegroundColor White -NoNewline
         Write-Host " package(s)" -ForegroundColor Green
 
         if ($WhatIf) {
             Write-Host "`n[WhatIf] Would display interactive selection for:" -ForegroundColor Yellow
-            $packageIds | ForEach-Object {
+            $uniquePackages | ForEach-Object {
                 Write-Host "  • " -ForegroundColor Cyan -NoNewline
-                Write-Host $_ -ForegroundColor White
+                Write-Host "$($_.Name) ($($_.Id))" -ForegroundColor White
             }
             return
         }
+
+        # Prepare choices for selection
+        $packageChoices = $uniquePackages | ForEach-Object {
+            "$($_.Name) ($($_.Id))"
+        }
+
+        # Create a lookup map
+        $packageMap = @{}
+        foreach ($pkg in $uniquePackages) {
+            $key = "$($pkg.Name) ($($pkg.Id))"
+            $packageMap[$key] = $pkg.Id
+        }
+
+        $packagesToInstall = @()
 
         # Interactive selection using Spectre Console
         if (-not $Silent -and (Get-Module -Name PwshSpectreConsole)) {
@@ -184,29 +226,29 @@ function Install-WingetAll {
 
             try {
                 # Create multi-selection prompt
-                $selectedPackages = Read-SpectreMultiSelection -Title "[cyan]Select packages to install[/]" `
-                    -Choices $packageIds `
+                $selectedChoices = Read-SpectreMultiSelection -Title "[cyan]Select packages to install[/]" `
+                    -Choices $packageChoices `
                     -PageSize 20 `
                     -Color "Green"
 
-                if ($selectedPackages.Count -eq 0) {
+                if ($selectedChoices.Count -eq 0) {
                     Write-Host "`nNo packages selected. Exiting." -ForegroundColor Yellow
                     return
                 }
 
-                # Update packageIds to only selected ones
-                $packageIds = $selectedPackages
+                # Map back to IDs
+                $packagesToInstall = $selectedChoices | ForEach-Object { $packageMap[$_] }
 
                 Write-Host "`nSelected " -ForegroundColor Green -NoNewline
-                Write-Host "$($packageIds.Count)" -ForegroundColor White -NoNewline
+                Write-Host "$($packagesToInstall.Count)" -ForegroundColor White -NoNewline
                 Write-Host " package(s) for installation" -ForegroundColor Green
             }
             catch {
                 Write-Warning "Failed to show interactive selection. Falling back to confirmation prompt."
                 Write-Host "`nPackages to install:" -ForegroundColor Cyan
-                $packageIds | ForEach-Object {
+                $uniquePackages | ForEach-Object {
                     Write-Host "  • " -ForegroundColor Cyan -NoNewline
-                    Write-Host $_ -ForegroundColor White
+                    Write-Host "$($_.Name) ($($_.Id))" -ForegroundColor White
                 }
                 Write-Host "`nPress any key to continue with installation or Ctrl+C to cancel..." -ForegroundColor Yellow
                 try {
@@ -215,14 +257,15 @@ function Install-WingetAll {
                 catch {
                     Write-Warning "Unable to read key input. Proceeding with installation..."
                 }
+                $packagesToInstall = $uniquePackages.Id
             }
         }
         elseif (-not $Silent) {
             # Fallback for when Spectre Console is not available
             Write-Host "`nPackages to install:" -ForegroundColor Cyan
-            $packageIds | ForEach-Object {
+            $uniquePackages | ForEach-Object {
                 Write-Host "  • " -ForegroundColor Cyan -NoNewline
-                Write-Host $_ -ForegroundColor White
+                Write-Host "$($_.Name) ($($_.Id))" -ForegroundColor White
             }
             Write-Host "`nPress any key to continue with installation or Ctrl+C to cancel..." -ForegroundColor Yellow
             try {
@@ -231,6 +274,11 @@ function Install-WingetAll {
             catch {
                 Write-Warning "Unable to read key input. Proceeding with installation..."
             }
+            $packagesToInstall = $uniquePackages.Id
+        }
+        else {
+             # Silent mode
+             $packagesToInstall = $uniquePackages.Id
         }
 
         Write-Host "`n" + ("=" * 60) -ForegroundColor Cyan
@@ -240,9 +288,13 @@ function Install-WingetAll {
         $successCount = 0
         $failCount = 0
 
-        foreach ($packageId in $packageIds) {
+        foreach ($packageId in $packagesToInstall) {
+            # Find name for better display
+            $pkgName = ($uniquePackages | Where-Object { $_.Id -eq $packageId }).Name
+            if (-not $pkgName) { $pkgName = $packageId }
+
             Write-Host "`n>>> Installing: " -ForegroundColor Magenta -NoNewline
-            Write-Host $packageId -ForegroundColor White
+            Write-Host "$pkgName ($packageId)" -ForegroundColor White
 
             winget install --id $packageId --accept-package-agreements --accept-source-agreements --silent | Out-Null
 
