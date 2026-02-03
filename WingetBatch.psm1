@@ -118,6 +118,7 @@ function Install-WingetAll {
 
             # Parse the search results to extract package IDs and Names
             $lines = $searchResults -split "`n"
+            $queryPackages = @()
 
             $headerFound = $false
             $nameColEnd = -1
@@ -168,53 +169,62 @@ function Install-WingetAll {
                                 }
                             }
                             if ($matchesAll) {
-                                $allPackages += [PSCustomObject]@{
+                                $queryPackages += [PSCustomObject]@{
                                     Id = $packageId
                                     Name = $packageName
+                                    SearchTerm = $query
                                 }
                             }
                         }
                         else {
-                            $allPackages += [PSCustomObject]@{
+                            $queryPackages += [PSCustomObject]@{
                                 Id = $packageId
                                 Name = $packageName
+                                SearchTerm = $query
                             }
                         }
                     }
                 }
             }
+
+            # Deduplicate packages within this query based on Id (preserving order)
+            $uniqueQueryPackages = $queryPackages | Group-Object Id | ForEach-Object { $_.Group[0] }
+            $allPackages += $uniqueQueryPackages
         }
 
-        # Deduplicate packages based on Id
-        $uniquePackages = $allPackages | Sort-Object -Property Id -Unique
+        # Keep all packages (including potential duplicates across queries) for display
+        $foundPackages = $allPackages
 
-        if ($uniquePackages.Count -eq 0) {
+        if ($foundPackages.Count -eq 0) {
             Write-Warning "No packages found matching '$($SearchTerms -join ", ")'"
             return
         }
 
         Write-Host "`nFound " -ForegroundColor Green -NoNewline
-        Write-Host "$($uniquePackages.Count)" -ForegroundColor White -NoNewline
+        Write-Host "$($foundPackages.Count)" -ForegroundColor White -NoNewline
         Write-Host " package(s)" -ForegroundColor Green
 
         if ($WhatIf) {
             Write-Host "`n[WhatIf] Would display interactive selection for:" -ForegroundColor Yellow
-            $uniquePackages | ForEach-Object {
-                Write-Host "  • " -ForegroundColor Cyan -NoNewline
-                Write-Host "$($_.Name) ($($_.Id))" -ForegroundColor White
+            $foundPackages | Group-Object SearchTerm | ForEach-Object {
+                Write-Host "$($_.Name):" -ForegroundColor Yellow
+                $_.Group | ForEach-Object {
+                    Write-Host "  • " -ForegroundColor Cyan -NoNewline
+                    Write-Host "$($_.Name) ($($_.Id))" -ForegroundColor White
+                }
             }
             return
         }
 
-        # Prepare choices for selection
-        $packageChoices = $uniquePackages | ForEach-Object {
-            "$($_.Name) ($($_.Id))"
+        # Prepare choices for selection with SearchTerm grouping prefix
+        $packageChoices = $foundPackages | ForEach-Object {
+            "[yellow][$($_.SearchTerm)][/] $($_.Name) ($($_.Id))"
         }
 
         # Create a lookup map
         $packageMap = @{}
-        foreach ($pkg in $uniquePackages) {
-            $key = "$($pkg.Name) ($($pkg.Id))"
+        foreach ($pkg in $foundPackages) {
+            $key = "[yellow][$($_.SearchTerm)][/] $($_.Name) ($($_.Id))"
             $packageMap[$key] = $pkg.Id
         }
 
@@ -246,9 +256,12 @@ function Install-WingetAll {
             catch {
                 Write-Warning "Failed to show interactive selection. Falling back to confirmation prompt."
                 Write-Host "`nPackages to install:" -ForegroundColor Cyan
-                $uniquePackages | ForEach-Object {
-                    Write-Host "  • " -ForegroundColor Cyan -NoNewline
-                    Write-Host "$($_.Name) ($($_.Id))" -ForegroundColor White
+                $foundPackages | Group-Object SearchTerm | ForEach-Object {
+                    Write-Host "$($_.Name):" -ForegroundColor Yellow
+                    $_.Group | ForEach-Object {
+                        Write-Host "  • " -ForegroundColor Cyan -NoNewline
+                        Write-Host "$($_.Name) ($($_.Id))" -ForegroundColor White
+                    }
                 }
                 Write-Host "`nPress any key to continue with installation or Ctrl+C to cancel..." -ForegroundColor Yellow
                 try {
@@ -257,15 +270,18 @@ function Install-WingetAll {
                 catch {
                     Write-Warning "Unable to read key input. Proceeding with installation..."
                 }
-                $packagesToInstall = $uniquePackages.Id
+                $packagesToInstall = $foundPackages.Id
             }
         }
         elseif (-not $Silent) {
             # Fallback for when Spectre Console is not available
             Write-Host "`nPackages to install:" -ForegroundColor Cyan
-            $uniquePackages | ForEach-Object {
-                Write-Host "  • " -ForegroundColor Cyan -NoNewline
-                Write-Host "$($_.Name) ($($_.Id))" -ForegroundColor White
+            $foundPackages | Group-Object SearchTerm | ForEach-Object {
+                Write-Host "$($_.Name):" -ForegroundColor Yellow
+                $_.Group | ForEach-Object {
+                    Write-Host "  • " -ForegroundColor Cyan -NoNewline
+                    Write-Host "$($_.Name) ($($_.Id))" -ForegroundColor White
+                }
             }
             Write-Host "`nPress any key to continue with installation or Ctrl+C to cancel..." -ForegroundColor Yellow
             try {
@@ -274,11 +290,11 @@ function Install-WingetAll {
             catch {
                 Write-Warning "Unable to read key input. Proceeding with installation..."
             }
-            $packagesToInstall = $uniquePackages.Id
+            $packagesToInstall = $foundPackages.Id
         }
         else {
              # Silent mode
-             $packagesToInstall = $uniquePackages.Id
+             $packagesToInstall = $foundPackages.Id
         }
 
         Write-Host "`n" + ("=" * 60) -ForegroundColor Cyan
@@ -288,9 +304,12 @@ function Install-WingetAll {
         $successCount = 0
         $failCount = 0
 
-        foreach ($packageId in $packagesToInstall) {
-            # Find name for better display
-            $pkgName = ($uniquePackages | Where-Object { $_.Id -eq $packageId }).Name
+        # Deduplicate IDs to ensure we don't install the same package twice
+        $uniquePackagesToInstall = $packagesToInstall | Select-Object -Unique
+
+        foreach ($packageId in $uniquePackagesToInstall) {
+            # Find name for better display (use first match from foundPackages)
+            $pkgName = ($foundPackages | Where-Object { $_.Id -eq $packageId } | Select-Object -First 1).Name
             if (-not $pkgName) { $pkgName = $packageId }
 
             Write-Host "`n>>> Installing: " -ForegroundColor Magenta -NoNewline
