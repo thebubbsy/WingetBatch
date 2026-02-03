@@ -32,7 +32,9 @@
         'Disable-WingetUpdateNotifications',
         'Set-WingetBatchGitHubToken',
         'New-WingetBatchGitHubToken',
-        'Remove-WingetRecent'
+        'Remove-WingetRecent',
+        'New-WingetAppList',
+        'Install-WingetAppList'
     )
 
     # Cmdlets to export from this module

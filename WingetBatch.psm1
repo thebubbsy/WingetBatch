@@ -55,7 +55,10 @@ function Install-WingetAll {
         [switch]$Silent,
 
         [Parameter()]
-        [switch]$WhatIf
+        [switch]$WhatIf,
+
+        [Parameter()]
+        [switch]$Exact
     )
 
     begin {
@@ -99,7 +102,12 @@ function Install-WingetAll {
 
             foreach ($word in $searchWords) {
                 try {
-                    $wordResults = winget search $word --accept-source-agreements 2>&1
+                    if ($Exact) {
+                        $wordResults = winget search $word --accept-source-agreements --exact 2>&1
+                    }
+                    else {
+                        $wordResults = winget search $word --accept-source-agreements 2>&1
+                    }
 
                     if ($LASTEXITCODE -eq 0) {
                         $querySearchResults += $wordResults
@@ -1380,7 +1388,7 @@ function New-WingetBatchGitHubToken {
     $null = Read-Host
 
     # Open GitHub token creation page
-    $tokenUrl = "https://github.com/settings/tokens/new?description=WingetBatch&scopes="
+    $tokenUrl = "https://github.com/settings/tokens/new?description=WingetBatch&scopes=gist"
     Start-Process $tokenUrl
 
     Write-Host ""
@@ -1395,7 +1403,7 @@ function New-WingetBatchGitHubToken {
     Write-Host "Set expiration (or choose 'No expiration' for convenience)" -ForegroundColor White
     Write-Host ""
     Write-Host "3. " -NoNewline -ForegroundColor Yellow
-    Write-Host "DON'T check any permission boxes - none needed!" -ForegroundColor White
+    Write-Host "The 'gist' scope is selected (needed for saving app lists)" -ForegroundColor White
     Write-Host ""
     Write-Host "4. " -NoNewline -ForegroundColor Yellow
     Write-Host "Click " -NoNewline -ForegroundColor White
@@ -2534,9 +2542,376 @@ function Remove-WingetRecent {
     }
 }
 
+function New-WingetAppList {
+    <#
+    .SYNOPSIS
+        Create and save a list of Winget applications to GitHub Gist.
+
+    .DESCRIPTION
+        Interactively search for and select applications to build a list.
+        The list is then saved as a public GitHub Gist using your configured GitHub token.
+        This allows you to restore your applications on another machine using Install-WingetAppList.
+
+    .EXAMPLE
+        New-WingetAppList
+        Starts the interactive list creation wizard.
+    #>
+
+    [CmdletBinding()]
+    param()
+
+    # Check for GitHub token first
+    $token = Get-WingetBatchGitHubToken
+    if (-not $token) {
+        Write-Error "GitHub token is required to save lists. Please run New-WingetBatchGitHubToken first."
+        return
+    }
+
+    # Ensure PwshSpectreConsole is available
+    if (-not (Get-Module -Name PwshSpectreConsole)) {
+        if (Get-Module -ListAvailable -Name PwshSpectreConsole) {
+            Import-Module PwshSpectreConsole -ErrorAction SilentlyContinue
+        }
+        else {
+            Write-Warning "PwshSpectreConsole is required for interactive selection."
+            return
+        }
+    }
+
+    $sessionList = @()
+    $continue = $true
+
+    Write-Host ""
+    Write-Host "📝 Create New Winget App List" -ForegroundColor Cyan
+    Write-Host "-----------------------------" -ForegroundColor Cyan
+    Write-Host ""
+
+    while ($continue) {
+        $searchTerm = Read-Host "Enter search term (or leave empty to finish)"
+        if ([string]::IsNullOrWhiteSpace($searchTerm)) {
+            $continue = $false
+            continue
+        }
+
+        Write-Host "Searching for '$searchTerm'..." -ForegroundColor DarkGray
+
+        # Reuse search logic from Install-WingetAll but return objects instead of installing
+        try {
+            $searchWords = $searchTerm -split '\s+' | Where-Object { $_ -ne '' }
+            $searchResults = @()
+
+            foreach ($word in $searchWords) {
+                $wordResults = winget search $word --accept-source-agreements 2>&1
+                if ($LASTEXITCODE -eq 0) {
+                    $searchResults += $wordResults
+                }
+            }
+
+            if ($searchResults.Count -eq 0) {
+                Write-Warning "No results found."
+                continue
+            }
+
+            $lines = ($searchResults -join "`n") -split "`n"
+            $candidates = @()
+
+            $headerFound = $false
+            $nameColEnd = -1
+            $idColStart = -1
+            $idColEnd = -1
+
+            foreach ($line in $lines) {
+                if ($line -match '^Name\s+Id\s+') {
+                    $nameColEnd = $line.IndexOf('Id') - 1
+                    $idColStart = $line.IndexOf('Id')
+                    if ($line -match 'Version') {
+                        $idColEnd = $line.IndexOf('Version') - 1
+                    } else {
+                        $idColEnd = $line.Length
+                    }
+                    continue
+                }
+
+                if ($line -match '^-+') {
+                    $headerFound = $true
+                    continue
+                }
+
+                if ($headerFound -and $line.Trim() -ne '' -and $idColStart -gt 0 -and $line.Length -gt $idColStart) {
+                    $endPos = if ($idColEnd -lt $line.Length) { $idColEnd } else { $line.Length }
+                    $packageId = $line.Substring($idColStart, $endPos - $idColStart).Trim()
+
+                    $packageName = if ($nameColEnd -gt 0 -and $line.Length -gt $nameColEnd) {
+                        $line.Substring(0, $nameColEnd).Trim()
+                    } else {
+                        $packageId
+                    }
+
+                    if ($packageId -and $packageId -match '^[A-Za-z0-9\.\-_]+$' -and $packageId -notmatch '^\d+\.\d+') {
+                        # Filter AND logic
+                        $matchesAll = $true
+                        foreach ($word in $searchWords) {
+                            if ($line -notmatch "(?i)$([regex]::Escape($word))") {
+                                $matchesAll = $false
+                                break
+                            }
+                        }
+                        if ($matchesAll) {
+                            $candidates += [PSCustomObject]@{
+                                Id = $packageId
+                                Name = $packageName
+                                Display = "$packageName ($packageId)"
+                            }
+                        }
+                    }
+                }
+            }
+
+            # Deduplicate
+            $candidates = $candidates | Sort-Object -Property Id -Unique
+
+            if ($candidates.Count -eq 0) {
+                Write-Warning "No matching packages found."
+                continue
+            }
+
+            # Show selection
+            $choices = $candidates.Display
+            $selectionMap = @{}
+            foreach ($c in $candidates) { $selectionMap[$c.Display] = $c }
+
+            $selectedDisplays = Read-SpectreMultiSelection -Title "[cyan]Select packages to add to list[/]" -Choices $choices -PageSize 15 -Color "Green"
+
+            foreach ($display in $selectedDisplays) {
+                $pkg = $selectionMap[$display]
+                # Check if already in list
+                if (-not ($sessionList | Where-Object { $_.Id -eq $pkg.Id })) {
+                    $sessionList += $pkg
+                    Write-Host "Added: " -NoNewline
+                    Write-Host $pkg.Name -ForegroundColor Green
+                } else {
+                    Write-Warning "Already in list: $($pkg.Name)"
+                }
+            }
+
+        }
+        catch {
+            Write-Error "Search failed: $_"
+        }
+
+        Write-Host ""
+        Write-Host "Current List: $($sessionList.Count) items" -ForegroundColor Yellow
+        Write-Host ""
+    }
+
+    if ($sessionList.Count -eq 0) {
+        Write-Warning "List is empty. Aborting."
+        return
+    }
+
+    Write-Host ""
+    Write-Host "📋 Final List:" -ForegroundColor Cyan
+    $sessionList | Select-Object Name, Id | Format-Table -AutoSize | Out-Host
+
+    $save = Read-Host "Save this list to GitHub? (y/n)"
+    if ($save -ne 'y') { return }
+
+    $listName = Read-Host "Enter a name for this list (e.g. MyDevPC)"
+    if ([string]::IsNullOrWhiteSpace($listName)) {
+        $listName = "WingetBatch-List-$(Get-Date -Format 'yyyyMMdd-HHmm')"
+    }
+
+    # Sanitize filename
+    $safeName = $listName -replace '[^a-zA-Z0-9\-_]', ''
+    if ([string]::IsNullOrWhiteSpace($safeName)) { $safeName = "List" }
+
+    try {
+        Write-Host "Saving to GitHub Gist..." -ForegroundColor Cyan
+
+        $jsonContent = $sessionList | Select-Object Name, Id | ConvertTo-Json
+
+        $payload = @{
+            description = "WingetBatch List: $listName"
+            public = $true
+            files = @{
+                "$safeName.json" = @{
+                    content = $jsonContent
+                }
+            }
+        } | ConvertTo-Json -Depth 5
+
+        $response = Invoke-RestMethod -Uri "https://api.github.com/gists" `
+            -Method Post `
+            -Headers @{
+                Authorization = "token $token"
+                Accept = "application/vnd.github.v3+json"
+            } `
+            -Body $payload `
+            -ContentType "application/json"
+
+        Write-Host ""
+        Write-Host "✅ List saved successfully!" -ForegroundColor Green
+        Write-Host "Gist ID: " -NoNewline
+        Write-Host $response.id -ForegroundColor Yellow
+        Write-Host "URL: " -NoNewline
+        Write-Host $response.html_url -ForegroundColor Blue
+        Write-Host ""
+        Write-Host "To install this list on another machine, run:" -ForegroundColor DarkGray
+        Write-Host "Install-WingetAppList -ListName `"$listName`"" -ForegroundColor Yellow
+    }
+    catch {
+        Write-Error "Failed to save Gist: $_"
+        if ($_ -match '403' -or $_ -match '401') {
+            Write-Warning "Check that your token has 'gist' scope permissions."
+        }
+    }
+}
+
+function Install-WingetAppList {
+    <#
+    .SYNOPSIS
+        Install applications from a saved WingetBatch list on GitHub Gist.
+
+    .DESCRIPTION
+        Downloads a list of packages from a GitHub Gist (created by New-WingetAppList)
+        and installs them. You can search by list name, specify a user, or provide
+        a direct Gist ID.
+
+    .PARAMETER ListName
+        The name of the list to search for (e.g. "MyDevPC").
+        Searches your own Gists by default, or the specified -User's Gists.
+
+    .PARAMETER User
+        The GitHub username to search for lists.
+        If not specified, uses the currently authenticated user.
+
+    .PARAMETER GistId
+        The direct ID of the Gist to install from.
+
+    .EXAMPLE
+        Install-WingetAppList -ListName "MyDevPC"
+        Finds and installs the list named "MyDevPC" from your Gists.
+
+    .EXAMPLE
+        Install-WingetAppList -User "matthewbubb" -ListName "MyDevPC"
+        Finds "MyDevPC" in matthewbubb's public Gists.
+
+    .EXAMPLE
+        Install-WingetAppList -GistId "a1b2c3d4e5f6..."
+        Installs directly from the specified Gist ID.
+    #>
+
+    [CmdletBinding(DefaultParameterSetName='ByName')]
+    param(
+        [Parameter(ParameterSetName='ByName', Mandatory=$true)]
+        [string]$ListName,
+
+        [Parameter(ParameterSetName='ByName')]
+        [string]$User,
+
+        [Parameter(ParameterSetName='ById', Mandatory=$true)]
+        [string]$GistId
+    )
+
+    $token = Get-WingetBatchGitHubToken
+    $headers = @{ Accept = 'application/vnd.github.v3+json' }
+    if ($token) { $headers['Authorization'] = "token $token" }
+
+    $gistContent = $null
+
+    try {
+        if ($PSCmdlet.ParameterSetName -eq 'ById') {
+            Write-Host "Fetching Gist ID: $GistId..." -ForegroundColor Cyan
+            $gist = Invoke-RestMethod -Uri "https://api.github.com/gists/$GistId" -Headers $headers
+            $gistContent = $gist
+        }
+        else {
+            # Search logic
+            $targetUser = if ($User) { $User } else {
+                if ($token) {
+                    $userUrl = "https://api.github.com/user"
+                    $userInfo = Invoke-RestMethod -Uri $userUrl -Headers $headers
+                    $userInfo.login
+                } else {
+                    Write-Error "Authentication token required to search own gists. Provide -User to search public gists."
+                    return
+                }
+            }
+
+            Write-Host "Searching gists for user '$targetUser' matching '$ListName'..." -ForegroundColor Cyan
+
+            $page = 1
+            $found = $false
+
+            while (-not $found) {
+                $url = "https://api.github.com/users/$targetUser/gists?per_page=100&page=$page"
+                $gists = Invoke-RestMethod -Uri $url -Headers $headers
+
+                if ($gists.Count -eq 0) { break }
+
+                foreach ($g in $gists) {
+                    if ($g.description -match "WingetBatch List: $([regex]::Escape($ListName))") {
+                        Write-Host "Found list: $($g.description)" -ForegroundColor Green
+                        $gistContent = $g
+                        $found = $true
+                        break
+                    }
+                }
+                $page++
+            }
+        }
+
+        if (-not $gistContent) {
+            Write-Error "List not found."
+            return
+        }
+
+        # Parse content
+        $fileKey = $gistContent.files.PSObject.Properties.Name | Select-Object -First 1
+        $rawUrl = $gistContent.files.$fileKey.raw_url
+
+        Write-Host "Downloading list content..." -ForegroundColor DarkGray
+        $jsonContent = Invoke-RestMethod -Uri $rawUrl
+
+        # Determine format (array of objects or just list of IDs?)
+        # New-WingetAppList saves: [ { "Name": "...", "Id": "...", "Display": "..." }, ... ]
+
+        $packages = if ($jsonContent -is [System.Array]) {
+            $jsonContent
+        } else {
+            @($jsonContent) # Force array
+        }
+
+        if ($packages.Count -eq 0) {
+            Write-Warning "List is empty."
+            return
+        }
+
+        Write-Host ""
+        Write-Host "Found $($packages.Count) packages to install:" -ForegroundColor Cyan
+        $packages | Format-Table Name, Id -AutoSize | Out-Host
+
+        if ($packages[0].PSObject.Properties['Id']) {
+            $packageIds = $packages.Id
+        } else {
+            # Fallback if just strings? (Not typical from our creation func)
+            $packageIds = $packages
+        }
+
+        Write-Host "Press any key to start installation (Ctrl+C to cancel)..." -ForegroundColor Yellow
+        $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+
+        Write-Host ""
+        Install-WingetAll -SearchTerms $packageIds -Silent -Exact
+    }
+    catch {
+        Write-Error "Failed to retrieve list: $_"
+    }
+}
+
 # Export module members (public functions only)
 # Internal functions: Get-WingetBatchGitHubToken, Start-WingetUpdateCheck, Update-GitHubApiRequestCount
 Export-ModuleMember -Function Install-WingetAll, Get-WingetNewPackages, `
     Set-WingetBatchGitHubToken, New-WingetBatchGitHubToken, `
     Enable-WingetUpdateNotifications, Disable-WingetUpdateNotifications, `
-    Get-WingetUpdates, Remove-WingetRecent
+    Get-WingetUpdates, Remove-WingetRecent, New-WingetAppList, Install-WingetAppList
