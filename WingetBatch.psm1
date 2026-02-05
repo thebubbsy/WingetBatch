@@ -120,6 +120,11 @@ function Install-WingetAll {
             $lines = $searchResults -split "`n"
             $queryPackages = [System.Collections.Generic.List[PSCustomObject]]::new()
 
+            # Pre-calculate regex patterns for filtering to improve performance
+            $searchPatterns = if ($searchWords.Count -gt 1) {
+                $searchWords | ForEach-Object { "(?i)$([regex]::Escape($_))" }
+            } else { $null }
+
             $headerFound = $false
             $nameColEnd = -1
             $idColStart = -1
@@ -205,8 +210,8 @@ function Install-WingetAll {
                         # If multiple search words, filter to only packages matching ALL words (case-insensitive)
                         if ($searchWords.Count -gt 1) {
                             $matchesAll = $true
-                            foreach ($word in $searchWords) {
-                                if ($line -notmatch "(?i)$([regex]::Escape($word))") {
+                            foreach ($pattern in $searchPatterns) {
+                                if ($line -notmatch $pattern) {
                                     $matchesAll = $false
                                     break
                                 }
