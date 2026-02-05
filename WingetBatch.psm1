@@ -239,7 +239,7 @@ function Install-WingetAll {
 
             # Deduplicate packages within this query based on Id (preserving order)
             $uniqueQueryPackages = $queryPackages | Group-Object Id | ForEach-Object { $_.Group[0] }
-            $allPackages.AddRange(@($uniqueQueryPackages))
+            $allPackages.AddRange([array]$uniqueQueryPackages)
         }
 
         # Keep all packages (including potential duplicates across queries) for display
