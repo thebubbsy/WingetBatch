@@ -82,7 +82,7 @@ function Install-WingetAll {
     process {
         # Parse multiple search terms: handle both arrays (PowerShell comma list) and comma-separated strings
         $searchQueries = $SearchTerms | ForEach-Object { $_ -split ',' } | Where-Object { $_ -ne '' }
-        $allPackages = @()
+        $allPackages = [System.Collections.Generic.List[Object]]::new()
 
         foreach ($query in $searchQueries) {
             $query = $query.Trim()
@@ -95,14 +95,14 @@ function Install-WingetAll {
             $searchWords = $query -split '\s+' | Where-Object { $_ -ne '' }
 
             # Combine all search results from each word
-            $querySearchResults = @()
+            $querySearchResults = [System.Collections.Generic.List[string]]::new()
 
             foreach ($word in $searchWords) {
                 try {
                     $wordResults = winget search $word --accept-source-agreements 2>&1
 
                     if ($LASTEXITCODE -eq 0) {
-                        $querySearchResults += $wordResults
+                        $querySearchResults.AddRange(@($wordResults))
                     }
                 }
                 catch {
@@ -118,7 +118,7 @@ function Install-WingetAll {
 
             # Parse the search results to extract package IDs and Names
             $lines = $searchResults -split "`n"
-            $queryPackages = @()
+            $queryPackages = [System.Collections.Generic.List[PSCustomObject]]::new()
 
             $headerFound = $false
             $nameColEnd = -1
@@ -169,19 +169,19 @@ function Install-WingetAll {
                                 }
                             }
                             if ($matchesAll) {
-                                $queryPackages += [PSCustomObject]@{
+                                $queryPackages.Add([PSCustomObject]@{
                                     Id = $packageId
                                     Name = $packageName
                                     SearchTerm = $query
-                                }
+                                })
                             }
                         }
                         else {
-                            $queryPackages += [PSCustomObject]@{
+                            $queryPackages.Add([PSCustomObject]@{
                                 Id = $packageId
                                 Name = $packageName
                                 SearchTerm = $query
-                            }
+                            })
                         }
                     }
                 }
@@ -189,7 +189,7 @@ function Install-WingetAll {
 
             # Deduplicate packages within this query based on Id (preserving order)
             $uniqueQueryPackages = $queryPackages | Group-Object Id | ForEach-Object { $_.Group[0] }
-            $allPackages += $uniqueQueryPackages
+            $allPackages.AddRange(@($uniqueQueryPackages))
         }
 
         # Keep all packages (including potential duplicates across queries) for display
