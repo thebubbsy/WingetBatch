@@ -277,7 +277,13 @@ function Install-WingetAll {
         $packageChoices = $foundPackages | ForEach-Object {
             $sourceColor = if ($_.Source -match 'msstore') { "magenta" } else { "cyan" }
             $versionStr = if ($_.Version -ne "Unknown") { " [green]v$($_.Version)[/]" } else { "" }
-            "[yellow][$($_.SearchTerm)][/] $($_.Name) ($($_.Id))$versionStr [$sourceColor]$($_.Source)[/]"
+
+            $term = ConvertTo-SpectreEscaped $_.SearchTerm
+            $name = ConvertTo-SpectreEscaped $_.Name
+            $id = ConvertTo-SpectreEscaped $_.Id
+            $source = ConvertTo-SpectreEscaped $_.Source
+
+            "[yellow][[$term]][/] $name ($id)$versionStr [$sourceColor]$source[/]"
         }
 
         # Create a lookup map
@@ -285,7 +291,13 @@ function Install-WingetAll {
         foreach ($pkg in $foundPackages) {
             $sourceColor = if ($pkg.Source -match 'msstore') { "magenta" } else { "cyan" }
             $versionStr = if ($pkg.Version -ne "Unknown") { " [green]v$($pkg.Version)[/]" } else { "" }
-            $key = "[yellow][$($pkg.SearchTerm)][/] $($pkg.Name) ($($pkg.Id))$versionStr [$sourceColor]$($pkg.Source)[/]"
+
+            $term = ConvertTo-SpectreEscaped $pkg.SearchTerm
+            $name = ConvertTo-SpectreEscaped $pkg.Name
+            $id = ConvertTo-SpectreEscaped $pkg.Id
+            $source = ConvertTo-SpectreEscaped $pkg.Source
+
+            $key = "[yellow][[$term]][/] $name ($id)$versionStr [$sourceColor]$source[/]"
             $packageMap[$key] = $pkg.Id
         }
 
@@ -315,30 +327,8 @@ function Install-WingetAll {
                 Write-Host " package(s) for installation" -ForegroundColor Green
             }
             catch {
-                Write-Warning "Failed to show interactive selection. Falling back to confirmation prompt."
-                Write-Host "`nPackages to install:" -ForegroundColor Cyan
-                $foundPackages | Group-Object SearchTerm | ForEach-Object {
-                    Write-Host "$($_.Name):" -ForegroundColor Yellow
-                    $_.Group | ForEach-Object {
-                        Write-Host "  • " -ForegroundColor Cyan -NoNewline
-                        Write-Host "$($_.Name) ($($_.Id))" -ForegroundColor White -NoNewline
-                        if ($_.Version -ne "Unknown") {
-                            Write-Host " v$($_.Version)" -ForegroundColor Green -NoNewline
-                        }
-                        if ($_.Source) {
-                            $sColor = if ($_.Source -match 'msstore') { "Magenta" } else { "Cyan" }
-                            Write-Host " [$($_.Source)]" -ForegroundColor $sColor
-                        } else { Write-Host "" }
-                    }
-                }
-                Write-Host "`nPress any key to continue with installation or Ctrl+C to cancel..." -ForegroundColor Yellow
-                try {
-                    $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
-                }
-                catch {
-                    Write-Warning "Unable to read key input. Proceeding with installation..."
-                }
-                $packagesToInstall = $foundPackages.Id
+                Write-Error "Failed to show interactive selection. $_"
+                return
             }
         }
         elseif (-not $Silent) {
@@ -2637,6 +2627,24 @@ function Remove-WingetRecent {
     catch {
         Write-Error "Failed to get installed packages: $_"
     }
+}
+
+function ConvertTo-SpectreEscaped {
+    <#
+    .SYNOPSIS
+        Escape special characters for Spectre Console markup.
+
+    .DESCRIPTION
+        Internal function to escape brackets so they are rendered literally in Spectre Console.
+        [ becomes [[
+        ] becomes ]]
+    #>
+    param(
+        [string]$Text
+    )
+
+    if ([string]::IsNullOrEmpty($Text)) { return $Text }
+    return $Text -replace '\[', '[[' -replace '\]', ']]'
 }
 
 # Export module members (public functions only)
