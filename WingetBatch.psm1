@@ -430,9 +430,9 @@ function Get-WingetNewPackages {
         # Calculate the date threshold
         $since = (Get-Date).Subtract($timeSpan).ToString("yyyy-MM-ddTHH:mm:ssZ")
 
-        $newPackages = @()
+        $newPackages = [System.Collections.Generic.List[Object]]::new()
         $processedPackages = @{}
-        $allCommits = @()
+        $allCommits = [System.Collections.Generic.List[Object]]::new()
         $page = 1
         $perPage = 100
 
@@ -482,7 +482,7 @@ function Get-WingetNewPackages {
                     $fetchMore = $false
                 }
                 else {
-                    $allCommits += $pageCommits
+                    $allCommits.AddRange(@($pageCommits))
                     Write-Host "  Fetched page $page - " -ForegroundColor DarkGray -NoNewline
                     Write-Host "$($allCommits.Count)" -ForegroundColor White -NoNewline
                     Write-Host " commits so far..." -ForegroundColor DarkGray
@@ -576,7 +576,7 @@ function Get-WingetNewPackages {
                 if (-not $shouldExclude) {
                     try {
                         # Add to list first with placeholder URL
-                        $newPackages += [PSCustomObject]@{
+                        $newPackages.Add([PSCustomObject]@{
                             Name = $packageName
                             Version = $version
                             Date = if ($commit.commit.author -and $commit.commit.author.date) { $commit.commit.author.date } else { (Get-Date).ToString('o') }
@@ -584,7 +584,7 @@ function Get-WingetNewPackages {
                             Message = $message.Split("`n")[0]
                             Author = if ($commit.commit.author -and $commit.commit.author.name) { $commit.commit.author.name } else { "Unknown" }
                             SHA = if ($commit.sha) { $commit.sha.Substring(0, [Math]::Min(7, $commit.sha.Length)) } else { "Unknown" }
-                        }
+                        })
                         $processedPackages[$packageName] = $true
                     }
                     catch {
