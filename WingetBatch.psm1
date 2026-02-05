@@ -2144,7 +2144,7 @@ function Get-WingetUpdates {
         # Get list of packages with updates available
         $upgradeOutput = winget upgrade --disable-interactivity 2>&1 | Out-String
         $upgradeLines = $upgradeOutput -split "`n"
-        $updatesAvailable = @()
+        $updatesAvailable = [System.Collections.Generic.List[Object]]::new()
         $seenIds = @{}
 
         $headerFound = $false
@@ -2162,10 +2162,10 @@ function Get-WingetUpdates {
                     # Only add if it hasn't been seen
                     if (-not $seenIds.ContainsKey($packageId)) {
                         # Store the entire line for display
-                        $updatesAvailable += @{
+                        $updatesAvailable.Add(@{
                             Id = $packageId
                             DisplayLine = $line.Trim()
-                        }
+                        })
                         $seenIds[$packageId] = $true
                     }
                 }
