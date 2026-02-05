@@ -82,7 +82,7 @@ function Install-WingetAll {
     process {
         # Parse multiple search terms: handle both arrays (PowerShell comma list) and comma-separated strings
         $searchQueries = $SearchTerms | ForEach-Object { $_ -split ',' } | Where-Object { $_ -ne '' }
-        $allPackages = @()
+        $allPackages = [System.Collections.Generic.List[Object]]::new()
 
         foreach ($query in $searchQueries) {
             $query = $query.Trim()
@@ -236,7 +236,7 @@ function Install-WingetAll {
 
             # Deduplicate packages within this query based on Id (preserving order)
             $uniqueQueryPackages = $queryPackages | Group-Object Id | ForEach-Object { $_.Group[0] }
-            $allPackages += $uniqueQueryPackages
+            $allPackages.AddRange(@($uniqueQueryPackages))
         }
 
         # Keep all packages (including potential duplicates across queries) for display
