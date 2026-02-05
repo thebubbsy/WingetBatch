@@ -97,17 +97,15 @@ function Install-WingetAll {
             # Combine all search results from each word
             $querySearchResults = @()
 
-            foreach ($word in $searchWords) {
-                try {
-                    $wordResults = winget search $word --accept-source-agreements 2>&1
+            try {
+                $wordResults = winget search $query --accept-source-agreements 2>&1
 
-                    if ($LASTEXITCODE -eq 0) {
-                        $querySearchResults += $wordResults
-                    }
+                if ($LASTEXITCODE -eq 0) {
+                    $querySearchResults += $wordResults
                 }
-                catch {
-                    Write-Warning "Failed to search for word: $word"
-                }
+            }
+            catch {
+                Write-Warning "Failed to search for query: $query"
             }
 
             if ($querySearchResults.Count -eq 0) {
