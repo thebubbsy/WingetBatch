@@ -118,6 +118,11 @@ function Install-WingetAll {
             $lines = $searchResults -split "`n"
             $queryPackages = [System.Collections.Generic.List[PSCustomObject]]::new()
 
+            # Pre-calculate regex patterns for filtering to improve performance
+            $searchPatterns = if ($searchWords.Count -gt 1) {
+                $searchWords | ForEach-Object { "(?i)$([regex]::Escape($_))" }
+            } else { $null }
+
             $headerFound = $false
             $nameColEnd = -1
             $idColStart = -1
@@ -200,13 +205,34 @@ function Install-WingetAll {
 
                     # Only add if it looks like a valid package ID
                     if ($packageId -and $packageId -match '^[A-Za-z0-9\.\-_]+$' -and $packageId -notmatch '^\d+\.\d+') {
-                        $queryPackages.Add([PSCustomObject]@{
-                            Id = $packageId
-                            Name = $packageName
-                            Version = $packageVersion
-                            Source = $packageSource
-                            SearchTerm = $query
-                        })
+                        # If multiple search words, filter to only packages matching ALL words (case-insensitive)
+                        if ($searchWords.Count -gt 1) {
+                            $matchesAll = $true
+                            foreach ($pattern in $searchPatterns) {
+                                if ($line -notmatch $pattern) {
+                                    $matchesAll = $false
+                                    break
+                                }
+                            }
+                            if ($matchesAll) {
+                                $queryPackages.Add([PSCustomObject]@{
+                                    Id = $packageId
+                                    Name = $packageName
+                                    Version = $packageVersion
+                                    Source = $packageSource
+                                    SearchTerm = $query
+                                })
+                            }
+                        }
+                        else {
+                            $queryPackages.Add([PSCustomObject]@{
+                                Id = $packageId
+                                Name = $packageName
+                                Version = $packageVersion
+                                Source = $packageSource
+                                SearchTerm = $query
+                            })
+                        }
                     }
                 }
             }
