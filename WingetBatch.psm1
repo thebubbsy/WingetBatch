@@ -124,17 +124,37 @@ function Install-WingetAll {
             $nameColEnd = -1
             $idColStart = -1
             $idColEnd = -1
+            $versionColStart = -1
+            $sourceColStart = -1
+            $matchColStart = -1
 
             foreach ($line in $lines) {
                 # Find the header line to determine column positions
                 if ($line -match '^Name\s+Id\s+') {
                     $nameColEnd = $line.IndexOf('Id') - 1
                     $idColStart = $line.IndexOf('Id')
-                    # Find where Version starts (end of Id column)
+
+                    # Reset
+                    $versionColStart = -1
+                    $sourceColStart = -1
+                    $matchColStart = -1
+
+                    # Find Version
                     if ($line -match 'Version') {
                         $idColEnd = $line.IndexOf('Version') - 1
+                        $versionColStart = $line.IndexOf('Version')
                     } else {
                         $idColEnd = $line.Length
+                    }
+
+                    # Find Match
+                    if ($line -match 'Match') {
+                        $matchColStart = $line.IndexOf('Match')
+                    }
+
+                    # Find Source
+                    if ($line -match 'Source') {
+                        $sourceColStart = $line.IndexOf('Source')
                     }
                     continue
                 }
@@ -157,6 +177,29 @@ function Install-WingetAll {
                         $packageId # Fallback
                     }
 
+                    # Extract Version
+                    $packageVersion = "Unknown"
+                    if ($versionColStart -gt -1 -and $line.Length -gt $versionColStart) {
+                        $vEnd = $line.Length
+                        # If Match is present
+                        if ($matchColStart -gt $versionColStart) {
+                            $vEnd = $matchColStart
+                        }
+                        # If Source is present (and no Match or Match is after Source)
+                        elseif ($sourceColStart -gt $versionColStart) {
+                            $vEnd = $sourceColStart
+                        }
+
+                        if ($vEnd -gt $line.Length) { $vEnd = $line.Length }
+                        $packageVersion = $line.Substring($versionColStart, $vEnd - $versionColStart).Trim()
+                    }
+
+                    # Extract Source
+                    $packageSource = "Unknown"
+                    if ($sourceColStart -gt -1 -and $line.Length -gt $sourceColStart) {
+                        $packageSource = $line.Substring($sourceColStart).Trim()
+                    }
+
                     # Only add if it looks like a valid package ID
                     if ($packageId -and $packageId -match '^[A-Za-z0-9\.\-_]+$' -and $packageId -notmatch '^\d+\.\d+') {
                         # If multiple search words, filter to only packages matching ALL words (case-insensitive)
@@ -172,6 +215,8 @@ function Install-WingetAll {
                                 $queryPackages += [PSCustomObject]@{
                                     Id = $packageId
                                     Name = $packageName
+                                    Version = $packageVersion
+                                    Source = $packageSource
                                     SearchTerm = $query
                                 }
                             }
@@ -180,6 +225,8 @@ function Install-WingetAll {
                             $queryPackages += [PSCustomObject]@{
                                 Id = $packageId
                                 Name = $packageName
+                                Version = $packageVersion
+                                Source = $packageSource
                                 SearchTerm = $query
                             }
                         }
@@ -210,7 +257,14 @@ function Install-WingetAll {
                 Write-Host "$($_.Name):" -ForegroundColor Yellow
                 $_.Group | ForEach-Object {
                     Write-Host "  • " -ForegroundColor Cyan -NoNewline
-                    Write-Host "$($_.Name) ($($_.Id))" -ForegroundColor White
+                    Write-Host "$($_.Name) ($($_.Id))" -ForegroundColor White -NoNewline
+                    if ($_.Version -ne "Unknown") {
+                        Write-Host " v$($_.Version)" -ForegroundColor Green -NoNewline
+                    }
+                    if ($_.Source) {
+                        $sColor = if ($_.Source -match 'msstore') { "Magenta" } else { "Cyan" }
+                        Write-Host " [$($_.Source)]" -ForegroundColor $sColor
+                    } else { Write-Host "" }
                 }
             }
             return
@@ -218,13 +272,17 @@ function Install-WingetAll {
 
         # Prepare choices for selection with SearchTerm grouping prefix
         $packageChoices = $foundPackages | ForEach-Object {
-            "[yellow][$($_.SearchTerm)][/] $($_.Name) ($($_.Id))"
+            $sourceColor = if ($_.Source -match 'msstore') { "magenta" } else { "cyan" }
+            $versionStr = if ($_.Version -ne "Unknown") { " [green]v$($_.Version)[/]" } else { "" }
+            "[yellow][$($_.SearchTerm)][/] $($_.Name) ($($_.Id))$versionStr [$sourceColor]$($_.Source)[/]"
         }
 
         # Create a lookup map
         $packageMap = @{}
         foreach ($pkg in $foundPackages) {
-            $key = "[yellow][$($_.SearchTerm)][/] $($_.Name) ($($_.Id))"
+            $sourceColor = if ($pkg.Source -match 'msstore') { "magenta" } else { "cyan" }
+            $versionStr = if ($pkg.Version -ne "Unknown") { " [green]v$($pkg.Version)[/]" } else { "" }
+            $key = "[yellow][$($pkg.SearchTerm)][/] $($pkg.Name) ($($pkg.Id))$versionStr [$sourceColor]$($pkg.Source)[/]"
             $packageMap[$key] = $pkg.Id
         }
 
@@ -260,7 +318,14 @@ function Install-WingetAll {
                     Write-Host "$($_.Name):" -ForegroundColor Yellow
                     $_.Group | ForEach-Object {
                         Write-Host "  • " -ForegroundColor Cyan -NoNewline
-                        Write-Host "$($_.Name) ($($_.Id))" -ForegroundColor White
+                        Write-Host "$($_.Name) ($($_.Id))" -ForegroundColor White -NoNewline
+                        if ($_.Version -ne "Unknown") {
+                            Write-Host " v$($_.Version)" -ForegroundColor Green -NoNewline
+                        }
+                        if ($_.Source) {
+                            $sColor = if ($_.Source -match 'msstore') { "Magenta" } else { "Cyan" }
+                            Write-Host " [$($_.Source)]" -ForegroundColor $sColor
+                        } else { Write-Host "" }
                     }
                 }
                 Write-Host "`nPress any key to continue with installation or Ctrl+C to cancel..." -ForegroundColor Yellow
@@ -280,7 +345,14 @@ function Install-WingetAll {
                 Write-Host "$($_.Name):" -ForegroundColor Yellow
                 $_.Group | ForEach-Object {
                     Write-Host "  • " -ForegroundColor Cyan -NoNewline
-                    Write-Host "$($_.Name) ($($_.Id))" -ForegroundColor White
+                    Write-Host "$($_.Name) ($($_.Id))" -ForegroundColor White -NoNewline
+                    if ($_.Version -ne "Unknown") {
+                        Write-Host " v$($_.Version)" -ForegroundColor Green -NoNewline
+                    }
+                    if ($_.Source) {
+                        $sColor = if ($_.Source -match 'msstore') { "Magenta" } else { "Cyan" }
+                        Write-Host " [$($_.Source)]" -ForegroundColor $sColor
+                    } else { Write-Host "" }
                 }
             }
             Write-Host "`nPress any key to continue with installation or Ctrl+C to cancel..." -ForegroundColor Yellow
@@ -308,12 +380,23 @@ function Install-WingetAll {
         $uniquePackagesToInstall = $packagesToInstall | Select-Object -Unique
 
         foreach ($packageId in $uniquePackagesToInstall) {
-            # Find name for better display (use first match from foundPackages)
-            $pkgName = ($foundPackages | Where-Object { $_.Id -eq $packageId } | Select-Object -First 1).Name
-            if (-not $pkgName) { $pkgName = $packageId }
+            # Find info for better display (use first match from foundPackages)
+            $pkgInfo = $foundPackages | Where-Object { $_.Id -eq $packageId } | Select-Object -First 1
+
+            $pkgName = if ($pkgInfo) { $pkgInfo.Name } else { $packageId }
+            $pkgVersion = if ($pkgInfo -and $pkgInfo.Version -ne "Unknown") { "v$($pkgInfo.Version)" } else { "" }
+            $pkgSource = if ($pkgInfo -and $pkgInfo.Source -ne "Unknown") { $pkgInfo.Source } else { "" }
 
             Write-Host "`n>>> Installing: " -ForegroundColor Magenta -NoNewline
-            Write-Host "$pkgName ($packageId)" -ForegroundColor White
+            Write-Host "$pkgName ($packageId)" -ForegroundColor White -NoNewline
+
+            if ($pkgVersion) {
+                Write-Host " $pkgVersion" -ForegroundColor Green -NoNewline
+            }
+            if ($pkgSource) {
+                $sColor = if ($pkgSource -match 'msstore') { "Magenta" } else { "Cyan" }
+                Write-Host " from $pkgSource" -ForegroundColor $sColor
+            } else { Write-Host "" }
 
             winget install --id $packageId --accept-package-agreements --accept-source-agreements --silent | Out-Null
 
