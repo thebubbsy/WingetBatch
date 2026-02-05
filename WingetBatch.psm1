@@ -82,7 +82,7 @@ function Install-WingetAll {
     process {
         # Parse multiple search terms: handle both arrays (PowerShell comma list) and comma-separated strings
         $searchQueries = $SearchTerms | ForEach-Object { $_ -split ',' } | Where-Object { $_ -ne '' }
-        $allPackages = @()
+        $allPackages = [System.Collections.Generic.List[Object]]::new()
 
         foreach ($query in $searchQueries) {
             $query = $query.Trim()
@@ -91,23 +91,21 @@ function Install-WingetAll {
             Write-Host "Searching for: " -ForegroundColor Cyan -NoNewline
             Write-Host $query -ForegroundColor Yellow
 
-            # Parse individual search words for wildcard searching (AND logic)
-            $searchWords = $query -split '\s+' | Where-Object { $_ -ne '' }
+            # Normalize query (collapse multiple spaces)
+            $normalizedQuery = ($query -split '\s+') -join ' '
 
             # Combine all search results from each word
-            $querySearchResults = @()
+            $querySearchResults = [System.Collections.Generic.List[string]]::new()
 
-            foreach ($word in $searchWords) {
-                try {
-                    $wordResults = winget search $word --accept-source-agreements 2>&1
+            try {
+                $wordResults = winget search $normalizedQuery --accept-source-agreements 2>&1
 
-                    if ($LASTEXITCODE -eq 0) {
-                        $querySearchResults += $wordResults
-                    }
+                if ($LASTEXITCODE -eq 0) {
+                    $querySearchResults.AddRange(@($wordResults))
                 }
-                catch {
-                    Write-Warning "Failed to search for word: $word"
-                }
+            }
+            catch {
+                Write-Warning "Failed to search for: $normalizedQuery"
             }
 
             if ($querySearchResults.Count -eq 0) {
@@ -118,23 +116,48 @@ function Install-WingetAll {
 
             # Parse the search results to extract package IDs and Names
             $lines = $searchResults -split "`n"
-            $queryPackages = @()
+            $queryPackages = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+            # Pre-calculate regex patterns for filtering to improve performance
+            $searchPatterns = if ($searchWords.Count -gt 1) {
+                $searchWords | ForEach-Object { "(?i)$([regex]::Escape($_))" }
+            } else { $null }
 
             $headerFound = $false
             $nameColEnd = -1
             $idColStart = -1
             $idColEnd = -1
+            $versionColStart = -1
+            $sourceColStart = -1
+            $matchColStart = -1
 
             foreach ($line in $lines) {
                 # Find the header line to determine column positions
                 if ($line -match '^Name\s+Id\s+') {
                     $nameColEnd = $line.IndexOf('Id') - 1
                     $idColStart = $line.IndexOf('Id')
-                    # Find where Version starts (end of Id column)
+
+                    # Reset
+                    $versionColStart = -1
+                    $sourceColStart = -1
+                    $matchColStart = -1
+
+                    # Find Version
                     if ($line -match 'Version') {
                         $idColEnd = $line.IndexOf('Version') - 1
+                        $versionColStart = $line.IndexOf('Version')
                     } else {
                         $idColEnd = $line.Length
+                    }
+
+                    # Find Match
+                    if ($line -match 'Match') {
+                        $matchColStart = $line.IndexOf('Match')
+                    }
+
+                    # Find Source
+                    if ($line -match 'Source') {
+                        $sourceColStart = $line.IndexOf('Source')
                     }
                     continue
                 }
@@ -157,31 +180,58 @@ function Install-WingetAll {
                         $packageId # Fallback
                     }
 
+                    # Extract Version
+                    $packageVersion = "Unknown"
+                    if ($versionColStart -gt -1 -and $line.Length -gt $versionColStart) {
+                        $vEnd = $line.Length
+                        # If Match is present
+                        if ($matchColStart -gt $versionColStart) {
+                            $vEnd = $matchColStart
+                        }
+                        # If Source is present (and no Match or Match is after Source)
+                        elseif ($sourceColStart -gt $versionColStart) {
+                            $vEnd = $sourceColStart
+                        }
+
+                        if ($vEnd -gt $line.Length) { $vEnd = $line.Length }
+                        $packageVersion = $line.Substring($versionColStart, $vEnd - $versionColStart).Trim()
+                    }
+
+                    # Extract Source
+                    $packageSource = "Unknown"
+                    if ($sourceColStart -gt -1 -and $line.Length -gt $sourceColStart) {
+                        $packageSource = $line.Substring($sourceColStart).Trim()
+                    }
+
                     # Only add if it looks like a valid package ID
                     if ($packageId -and $packageId -match '^[A-Za-z0-9\.\-_]+$' -and $packageId -notmatch '^\d+\.\d+') {
                         # If multiple search words, filter to only packages matching ALL words (case-insensitive)
                         if ($searchWords.Count -gt 1) {
                             $matchesAll = $true
-                            foreach ($word in $searchWords) {
-                                if ($line -notmatch "(?i)$([regex]::Escape($word))") {
+                            foreach ($pattern in $searchPatterns) {
+                                if ($line -notmatch $pattern) {
                                     $matchesAll = $false
                                     break
                                 }
                             }
                             if ($matchesAll) {
-                                $queryPackages += [PSCustomObject]@{
+                                $queryPackages.Add([PSCustomObject]@{
                                     Id = $packageId
                                     Name = $packageName
+                                    Version = $packageVersion
+                                    Source = $packageSource
                                     SearchTerm = $query
-                                }
+                                })
                             }
                         }
                         else {
-                            $queryPackages += [PSCustomObject]@{
+                            $queryPackages.Add([PSCustomObject]@{
                                 Id = $packageId
                                 Name = $packageName
+                                Version = $packageVersion
+                                Source = $packageSource
                                 SearchTerm = $query
-                            }
+                            })
                         }
                     }
                 }
@@ -189,7 +239,7 @@ function Install-WingetAll {
 
             # Deduplicate packages within this query based on Id (preserving order)
             $uniqueQueryPackages = $queryPackages | Group-Object Id | ForEach-Object { $_.Group[0] }
-            $allPackages += $uniqueQueryPackages
+            $allPackages.AddRange(@($uniqueQueryPackages))
         }
 
         # Keep all packages (including potential duplicates across queries) for display
@@ -210,7 +260,14 @@ function Install-WingetAll {
                 Write-Host "$($_.Name):" -ForegroundColor Yellow
                 $_.Group | ForEach-Object {
                     Write-Host "  • " -ForegroundColor Cyan -NoNewline
-                    Write-Host "$($_.Name) ($($_.Id))" -ForegroundColor White
+                    Write-Host "$($_.Name) ($($_.Id))" -ForegroundColor White -NoNewline
+                    if ($_.Version -ne "Unknown") {
+                        Write-Host " v$($_.Version)" -ForegroundColor Green -NoNewline
+                    }
+                    if ($_.Source) {
+                        $sColor = if ($_.Source -match 'msstore') { "Magenta" } else { "Cyan" }
+                        Write-Host " [$($_.Source)]" -ForegroundColor $sColor
+                    } else { Write-Host "" }
                 }
             }
             return
@@ -218,13 +275,17 @@ function Install-WingetAll {
 
         # Prepare choices for selection with SearchTerm grouping prefix
         $packageChoices = $foundPackages | ForEach-Object {
-            "[yellow][$($_.SearchTerm)][/] $($_.Name) ($($_.Id))"
+            $sourceColor = if ($_.Source -match 'msstore') { "magenta" } else { "cyan" }
+            $versionStr = if ($_.Version -ne "Unknown") { " [green]v$($_.Version)[/]" } else { "" }
+            "[yellow][$($_.SearchTerm)][/] $($_.Name) ($($_.Id))$versionStr [$sourceColor]$($_.Source)[/]"
         }
 
         # Create a lookup map
         $packageMap = @{}
         foreach ($pkg in $foundPackages) {
-            $key = "[yellow][$($_.SearchTerm)][/] $($_.Name) ($($_.Id))"
+            $sourceColor = if ($pkg.Source -match 'msstore') { "magenta" } else { "cyan" }
+            $versionStr = if ($pkg.Version -ne "Unknown") { " [green]v$($pkg.Version)[/]" } else { "" }
+            $key = "[yellow][$($pkg.SearchTerm)][/] $($pkg.Name) ($($pkg.Id))$versionStr [$sourceColor]$($pkg.Source)[/]"
             $packageMap[$key] = $pkg.Id
         }
 
@@ -260,7 +321,14 @@ function Install-WingetAll {
                     Write-Host "$($_.Name):" -ForegroundColor Yellow
                     $_.Group | ForEach-Object {
                         Write-Host "  • " -ForegroundColor Cyan -NoNewline
-                        Write-Host "$($_.Name) ($($_.Id))" -ForegroundColor White
+                        Write-Host "$($_.Name) ($($_.Id))" -ForegroundColor White -NoNewline
+                        if ($_.Version -ne "Unknown") {
+                            Write-Host " v$($_.Version)" -ForegroundColor Green -NoNewline
+                        }
+                        if ($_.Source) {
+                            $sColor = if ($_.Source -match 'msstore') { "Magenta" } else { "Cyan" }
+                            Write-Host " [$($_.Source)]" -ForegroundColor $sColor
+                        } else { Write-Host "" }
                     }
                 }
                 Write-Host "`nPress any key to continue with installation or Ctrl+C to cancel..." -ForegroundColor Yellow
@@ -280,7 +348,14 @@ function Install-WingetAll {
                 Write-Host "$($_.Name):" -ForegroundColor Yellow
                 $_.Group | ForEach-Object {
                     Write-Host "  • " -ForegroundColor Cyan -NoNewline
-                    Write-Host "$($_.Name) ($($_.Id))" -ForegroundColor White
+                    Write-Host "$($_.Name) ($($_.Id))" -ForegroundColor White -NoNewline
+                    if ($_.Version -ne "Unknown") {
+                        Write-Host " v$($_.Version)" -ForegroundColor Green -NoNewline
+                    }
+                    if ($_.Source) {
+                        $sColor = if ($_.Source -match 'msstore') { "Magenta" } else { "Cyan" }
+                        Write-Host " [$($_.Source)]" -ForegroundColor $sColor
+                    } else { Write-Host "" }
                 }
             }
             Write-Host "`nPress any key to continue with installation or Ctrl+C to cancel..." -ForegroundColor Yellow
@@ -308,12 +383,23 @@ function Install-WingetAll {
         $uniquePackagesToInstall = $packagesToInstall | Select-Object -Unique
 
         foreach ($packageId in $uniquePackagesToInstall) {
-            # Find name for better display (use first match from foundPackages)
-            $pkgName = ($foundPackages | Where-Object { $_.Id -eq $packageId } | Select-Object -First 1).Name
-            if (-not $pkgName) { $pkgName = $packageId }
+            # Find info for better display (use first match from foundPackages)
+            $pkgInfo = $foundPackages | Where-Object { $_.Id -eq $packageId } | Select-Object -First 1
+
+            $pkgName = if ($pkgInfo) { $pkgInfo.Name } else { $packageId }
+            $pkgVersion = if ($pkgInfo -and $pkgInfo.Version -ne "Unknown") { "v$($pkgInfo.Version)" } else { "" }
+            $pkgSource = if ($pkgInfo -and $pkgInfo.Source -ne "Unknown") { $pkgInfo.Source } else { "" }
 
             Write-Host "`n>>> Installing: " -ForegroundColor Magenta -NoNewline
-            Write-Host "$pkgName ($packageId)" -ForegroundColor White
+            Write-Host "$pkgName ($packageId)" -ForegroundColor White -NoNewline
+
+            if ($pkgVersion) {
+                Write-Host " $pkgVersion" -ForegroundColor Green -NoNewline
+            }
+            if ($pkgSource) {
+                $sColor = if ($pkgSource -match 'msstore') { "Magenta" } else { "Cyan" }
+                Write-Host " from $pkgSource" -ForegroundColor $sColor
+            } else { Write-Host "" }
 
             winget install --id $packageId --accept-package-agreements --accept-source-agreements --silent | Out-Null
 
@@ -432,7 +518,7 @@ function Get-WingetNewPackages {
 
         $newPackages = [System.Collections.Generic.List[PSCustomObject]]::new()
         $processedPackages = @{}
-        $allCommits = @()
+        $allCommits = [System.Collections.Generic.List[Object]]::new()
         $page = 1
         $perPage = 100
 
@@ -482,7 +568,7 @@ function Get-WingetNewPackages {
                     $fetchMore = $false
                 }
                 else {
-                    $allCommits += $pageCommits
+                    $allCommits.AddRange(@($pageCommits))
                     Write-Host "  Fetched page $page - " -ForegroundColor DarkGray -NoNewline
                     Write-Host "$($allCommits.Count)" -ForegroundColor White -NoNewline
                     Write-Host " commits so far..." -ForegroundColor DarkGray
@@ -644,7 +730,7 @@ function Get-WingetNewPackages {
         $packagesPerJob = [Math]::Ceiling($totalPackages / $maxConcurrentJobs)
         $actualJobCount = [Math]::Min($maxConcurrentJobs, $totalPackages)
 
-        $jobs = @()
+        $jobs = [System.Collections.Generic.List[Object]]::new()
         $jobPackageMap = @{}
 
         for ($i = 0; $i -lt $actualJobCount; $i++) {
@@ -802,7 +888,7 @@ function Get-WingetNewPackages {
                 return $results
             } -ArgumentList (,$packageBatch), $configDir
 
-            $jobs += $job
+            $jobs.Add($job)
             $jobPackageMap[$job.Id] = $packageBatch
         }
 
@@ -840,8 +926,8 @@ function Get-WingetNewPackages {
 
                     # Determine which jobs contain the selected packages
                     Write-Host ""
-                    $relevantJobs = @()
-                    $irrelevantJobs = @()
+                    $relevantJobs = [System.Collections.Generic.List[Object]]::new()
+                    $irrelevantJobs = [System.Collections.Generic.List[Object]]::new()
 
                     foreach ($job in $jobs) {
                         $jobPackages = $jobPackageMap[$job.Id]
@@ -855,10 +941,10 @@ function Get-WingetNewPackages {
                         }
 
                         if ($hasSelectedPackage) {
-                            $relevantJobs += $job
+                            $relevantJobs.Add($job)
                         }
                         else {
-                            $irrelevantJobs += $job
+                            $irrelevantJobs.Add($job)
                         }
                     }
 
@@ -1996,7 +2082,7 @@ function Start-WingetUpdateCheck {
             # Get list of installed packages
             $installedOutput = winget list --disable-interactivity 2>&1 | Out-String
             $installedLines = $installedOutput -split "`n"
-            $installedPackages = @()
+            $installedPackages = [System.Collections.Generic.List[Object]]::new()
 
             $headerFound = $false
             foreach ($line in $installedLines) {
@@ -2008,10 +2094,10 @@ function Start-WingetUpdateCheck {
                 if ($headerFound -and $line.Trim() -ne '' -and $line -match '\S') {
                     # Try to extract package ID
                     if ($line -match '([A-Za-z0-9\.\-_]+\.[A-Za-z0-9\.\-_]+)\s+.*<\s*(.+?)\s*>') {
-                        $installedPackages += @{
+                        $installedPackages.Add(@{
                             Id = $matches[1].Trim()
                             InstalledVersion = $matches[2].Trim()
-                        }
+                        })
                     }
                 }
             }
@@ -2019,7 +2105,7 @@ function Start-WingetUpdateCheck {
             # Get list of packages with updates available
             $upgradeOutput = winget upgrade --disable-interactivity 2>&1 | Out-String
             $upgradeLines = $upgradeOutput -split "`n"
-            $updatesAvailable = @()
+            $updatesAvailable = [System.Collections.Generic.List[Object]]::new()
 
             $headerFound = $false
             foreach ($line in $upgradeLines) {
@@ -2041,10 +2127,10 @@ function Start-WingetUpdateCheck {
                             $installedVer = "Unknown"
                         }
 
-                        $updatesAvailable += @{
+                        $updatesAvailable.Add(@{
                             Id = $packageId
                             CurrentVersion = $installedVer
-                        }
+                        })
                     }
                 }
             }
@@ -2144,7 +2230,7 @@ function Get-WingetUpdates {
         # Get list of packages with updates available
         $upgradeOutput = winget upgrade --disable-interactivity 2>&1 | Out-String
         $upgradeLines = $upgradeOutput -split "`n"
-        $updatesAvailable = @()
+        $updatesAvailable = [System.Collections.Generic.List[Object]]::new()
         $seenIds = @{}
 
         $headerFound = $false
@@ -2162,10 +2248,10 @@ function Get-WingetUpdates {
                     # Only add if it hasn't been seen
                     if (-not $seenIds.ContainsKey($packageId)) {
                         # Store the entire line for display
-                        $updatesAvailable += @{
+                        $updatesAvailable.Add(@{
                             Id = $packageId
                             DisplayLine = $line.Trim()
-                        }
+                        })
                         $seenIds[$packageId] = $true
                     }
                 }
@@ -2357,7 +2443,7 @@ function Remove-WingetRecent {
         $listOutput = winget list --disable-interactivity 2>&1 | Out-String
         $listLines = $listOutput -split "`n"
 
-        $installedPackages = @()
+        $installedPackages = [System.Collections.Generic.List[Object]]::new()
         $seenIds = @{}
         $headerFound = $false
         $idColStart = -1
@@ -2416,12 +2502,12 @@ function Remove-WingetRecent {
 
                     # Only add if within time window (or no date found and we show all)
                     if ($installDate -and $installDate -ge $cutoffDate) {
-                        $installedPackages += @{
+                        $installedPackages.Add(@{
                             Id = $packageId
                             Name = $packageName
                             InstallDate = $installDate
                             DisplayLine = $line.Trim()
-                        }
+                        })
                         $seenIds[$packageId] = $true
                     }
                 }
