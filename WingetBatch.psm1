@@ -98,14 +98,14 @@ function Install-WingetAll {
             $querySearchResults = [System.Collections.Generic.List[string]]::new()
 
             try {
-                $wordResults = winget search $normalizedQuery --accept-source-agreements 2>&1
+                $wordResults = winget search $query --accept-source-agreements 2>&1
 
                 if ($LASTEXITCODE -eq 0) {
-                    $querySearchResults.AddRange(@($wordResults))
+                    $querySearchResults += $wordResults
                 }
             }
             catch {
-                Write-Warning "Failed to search for: $normalizedQuery"
+                Write-Warning "Failed to search for query: $query"
             }
 
             if ($querySearchResults.Count -eq 0) {

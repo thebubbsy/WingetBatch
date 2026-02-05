@@ -1,24 +1,28 @@
 
-$iterations = 50
-$pageSize = 100
-$dummyData = 1..$pageSize
+# Mock winget globally so the module sees it
+function global:winget {
+    param([Parameter(ValueFromRemainingArguments=$true)]$Args)
+    Start-Sleep -Milliseconds 100
 
-Write-Host "Benchmarking inefficient array addition..."
-$sw = [System.Diagnostics.Stopwatch]::StartNew()
-$allCommits = @()
-for ($i = 0; $i -lt $iterations; $i++) {
-    $allCommits += $dummyData
+    # Mock output for search
+    if ($Args -contains "search") {
+        @"
+Name                  Id           Version
+------------------------------------------
+Visual Studio Code    Microsoft.VSCode 1.90.0
+"@
+    }
 }
-$sw.Stop()
-Write-Host "Inefficient method took: $($sw.ElapsedMilliseconds) ms"
-Write-Host "Count: $($allCommits.Count)"
 
-Write-Host "`nBenchmarking Generic List..."
-$sw = [System.Diagnostics.Stopwatch]::StartNew()
-$allCommitsList = [System.Collections.Generic.List[Object]]::new()
-for ($i = 0; $i -lt $iterations; $i++) {
-    $allCommitsList.AddRange($dummyData)
+# Import the module
+Import-Module ./WingetBatch.psm1 -Force
+
+Write-Host "Starting benchmark..."
+
+# Run benchmark
+# "visual studio code" -> 3 words -> 3 calls expected in baseline
+$time = Measure-Command {
+    Install-WingetAll -SearchTerms "visual studio code" -Silent
 }
-$sw.Stop()
-Write-Host "Generic List method took: $($sw.ElapsedMilliseconds) ms"
-Write-Host "Count: $($allCommitsList.Count)"
+
+Write-Host "Duration: $($time.TotalMilliseconds) ms"
