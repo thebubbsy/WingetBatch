@@ -1996,7 +1996,7 @@ function Start-WingetUpdateCheck {
             # Get list of installed packages
             $installedOutput = winget list --disable-interactivity 2>&1 | Out-String
             $installedLines = $installedOutput -split "`n"
-            $installedPackages = @()
+            $installedPackages = [System.Collections.Generic.List[Object]]::new()
 
             $headerFound = $false
             foreach ($line in $installedLines) {
@@ -2008,10 +2008,10 @@ function Start-WingetUpdateCheck {
                 if ($headerFound -and $line.Trim() -ne '' -and $line -match '\S') {
                     # Try to extract package ID
                     if ($line -match '([A-Za-z0-9\.\-_]+\.[A-Za-z0-9\.\-_]+)\s+.*<\s*(.+?)\s*>') {
-                        $installedPackages += @{
+                        $installedPackages.Add(@{
                             Id = $matches[1].Trim()
                             InstalledVersion = $matches[2].Trim()
-                        }
+                        })
                     }
                 }
             }
@@ -2019,7 +2019,7 @@ function Start-WingetUpdateCheck {
             # Get list of packages with updates available
             $upgradeOutput = winget upgrade --disable-interactivity 2>&1 | Out-String
             $upgradeLines = $upgradeOutput -split "`n"
-            $updatesAvailable = @()
+            $updatesAvailable = [System.Collections.Generic.List[Object]]::new()
 
             $headerFound = $false
             foreach ($line in $upgradeLines) {
@@ -2041,10 +2041,10 @@ function Start-WingetUpdateCheck {
                             $installedVer = "Unknown"
                         }
 
-                        $updatesAvailable += @{
+                        $updatesAvailable.Add(@{
                             Id = $packageId
                             CurrentVersion = $installedVer
-                        }
+                        })
                     }
                 }
             }
