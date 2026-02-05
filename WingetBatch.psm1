@@ -91,23 +91,21 @@ function Install-WingetAll {
             Write-Host "Searching for: " -ForegroundColor Cyan -NoNewline
             Write-Host $query -ForegroundColor Yellow
 
-            # Parse individual search words for wildcard searching (AND logic)
-            $searchWords = $query -split '\s+' | Where-Object { $_ -ne '' }
+            # Normalize query (collapse multiple spaces)
+            $normalizedQuery = ($query -split '\s+') -join ' '
 
             # Combine all search results from each word
             $querySearchResults = [System.Collections.Generic.List[string]]::new()
 
-            foreach ($word in $searchWords) {
-                try {
-                    $wordResults = winget search $word --accept-source-agreements 2>&1
+            try {
+                $wordResults = winget search $normalizedQuery --accept-source-agreements 2>&1
 
-                    if ($LASTEXITCODE -eq 0) {
-                        $querySearchResults.AddRange(@($wordResults))
-                    }
+                if ($LASTEXITCODE -eq 0) {
+                    $querySearchResults.AddRange(@($wordResults))
                 }
-                catch {
-                    Write-Warning "Failed to search for word: $word"
-                }
+            }
+            catch {
+                Write-Warning "Failed to search for: $normalizedQuery"
             }
 
             if ($querySearchResults.Count -eq 0) {
