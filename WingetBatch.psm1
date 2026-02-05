@@ -95,14 +95,14 @@ function Install-WingetAll {
             $searchWords = $query -split '\s+' | Where-Object { $_ -ne '' }
 
             # Combine all search results from each word
-            $querySearchResults = @()
+            $querySearchResults = [System.Collections.Generic.List[string]]::new()
 
             foreach ($word in $searchWords) {
                 try {
                     $wordResults = winget search $word --accept-source-agreements 2>&1
 
                     if ($LASTEXITCODE -eq 0) {
-                        $querySearchResults += $wordResults
+                        $querySearchResults.AddRange(@($wordResults))
                     }
                 }
                 catch {
