@@ -118,7 +118,7 @@ function Install-WingetAll {
 
             # Parse the search results to extract package IDs and Names
             $lines = $searchResults -split "`n"
-            $queryPackages = @()
+            $queryPackages = [System.Collections.Generic.List[PSCustomObject]]::new()
 
             $headerFound = $false
             $nameColEnd = -1
@@ -169,19 +169,19 @@ function Install-WingetAll {
                                 }
                             }
                             if ($matchesAll) {
-                                $queryPackages += [PSCustomObject]@{
+                                $queryPackages.Add([PSCustomObject]@{
                                     Id = $packageId
                                     Name = $packageName
                                     SearchTerm = $query
-                                }
+                                })
                             }
                         }
                         else {
-                            $queryPackages += [PSCustomObject]@{
+                            $queryPackages.Add([PSCustomObject]@{
                                 Id = $packageId
                                 Name = $packageName
                                 SearchTerm = $query
-                            }
+                            })
                         }
                     }
                 }
