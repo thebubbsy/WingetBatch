@@ -2357,7 +2357,7 @@ function Remove-WingetRecent {
         $listOutput = winget list --disable-interactivity 2>&1 | Out-String
         $listLines = $listOutput -split "`n"
 
-        $installedPackages = @()
+        $installedPackages = [System.Collections.Generic.List[Object]]::new()
         $seenIds = @{}
         $headerFound = $false
         $idColStart = -1
@@ -2416,12 +2416,12 @@ function Remove-WingetRecent {
 
                     # Only add if within time window (or no date found and we show all)
                     if ($installDate -and $installDate -ge $cutoffDate) {
-                        $installedPackages += @{
+                        $installedPackages.Add(@{
                             Id = $packageId
                             Name = $packageName
                             InstallDate = $installDate
                             DisplayLine = $line.Trim()
-                        }
+                        })
                         $seenIds[$packageId] = $true
                     }
                 }
