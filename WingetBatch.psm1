@@ -91,23 +91,21 @@ function Install-WingetAll {
             Write-Host "Searching for: " -ForegroundColor Cyan -NoNewline
             Write-Host $query -ForegroundColor Yellow
 
-            # Parse individual search words for wildcard searching (AND logic)
-            $searchWords = $query -split '\s+' | Where-Object { $_ -ne '' }
+            # Normalize query (collapse multiple spaces)
+            $normalizedQuery = ($query -split '\s+') -join ' '
 
             # Combine all search results from each word
             $querySearchResults = [System.Collections.Generic.List[string]]::new()
 
-            foreach ($word in $searchWords) {
-                try {
-                    $wordResults = winget search $word --accept-source-agreements 2>&1
+            try {
+                $wordResults = winget search $normalizedQuery --accept-source-agreements 2>&1
 
-                    if ($LASTEXITCODE -eq 0) {
-                        $querySearchResults.AddRange(@($wordResults))
-                    }
+                if ($LASTEXITCODE -eq 0) {
+                    $querySearchResults.AddRange(@($wordResults))
                 }
-                catch {
-                    Write-Warning "Failed to search for word: $word"
-                }
+            }
+            catch {
+                Write-Warning "Failed to search for: $normalizedQuery"
             }
 
             if ($querySearchResults.Count -eq 0) {
@@ -202,34 +200,13 @@ function Install-WingetAll {
 
                     # Only add if it looks like a valid package ID
                     if ($packageId -and $packageId -match '^[A-Za-z0-9\.\-_]+$' -and $packageId -notmatch '^\d+\.\d+') {
-                        # If multiple search words, filter to only packages matching ALL words (case-insensitive)
-                        if ($searchWords.Count -gt 1) {
-                            $matchesAll = $true
-                            foreach ($word in $searchWords) {
-                                if ($line -notmatch "(?i)$([regex]::Escape($word))") {
-                                    $matchesAll = $false
-                                    break
-                                }
-                            }
-                            if ($matchesAll) {
-                                $queryPackages.Add([PSCustomObject]@{
-                                    Id = $packageId
-                                    Name = $packageName
-                                    Version = $packageVersion
-                                    Source = $packageSource
-                                    SearchTerm = $query
-                                })
-                            }
-                        }
-                        else {
-                            $queryPackages.Add([PSCustomObject]@{
-                                Id = $packageId
-                                Name = $packageName
-                                Version = $packageVersion
-                                Source = $packageSource
-                                SearchTerm = $query
-                            })
-                        }
+                        $queryPackages.Add([PSCustomObject]@{
+                            Id = $packageId
+                            Name = $packageName
+                            Version = $packageVersion
+                            Source = $packageSource
+                            SearchTerm = $query
+                        })
                     }
                 }
             }
