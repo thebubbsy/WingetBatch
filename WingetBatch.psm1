@@ -714,92 +714,71 @@ function Get-WingetNewPackages {
 
         $configDir = Join-Path $env:USERPROFILE ".wingetbatch"
         $maxConcurrentJobs = 10
-        $packageIds = @($newPackages | ForEach-Object { $_.Name })
-        $totalPackages = $packageIds.Count
+        $allPackageIds = @($newPackages | ForEach-Object { $_.Name })
 
-        $packagesPerJob = [Math]::Ceiling($totalPackages / $maxConcurrentJobs)
-        $actualJobCount = [Math]::Min($maxConcurrentJobs, $totalPackages)
+        # Load cache to reduce API calls and IO
+        $cacheFile = Join-Path $configDir "package_cache.json"
+        $localCache = @{}
+        if (Test-Path $cacheFile) {
+            try {
+                $json = Get-Content $cacheFile -Raw | ConvertFrom-Json
+                if ($json -is [PSCustomObject]) {
+                    $json.PSObject.Properties | ForEach-Object { $localCache[$_.Name] = $_.Value }
+                }
+            } catch {
+                Write-Verbose "Failed to load cache: $_"
+            }
+        }
+
+        # Filter packages to identify what needs fetching
+        $packagesToFetchList = [System.Collections.Generic.List[string]]::new()
+        $cachedResults = @{}
+
+        foreach ($pkgId in $allPackageIds) {
+            $isCached = $false
+            if ($localCache.ContainsKey($pkgId)) {
+                $entry = $localCache[$pkgId]
+                if ($entry.CachedDate) {
+                    try {
+                        $cachedDate = [DateTime]$entry.CachedDate
+                        # Check if fresh (< 30 days)
+                        if ((Get-Date) -lt $cachedDate.AddDays(30)) {
+                            $cachedResults[$pkgId] = $entry.Details
+                            $isCached = $true
+                        }
+                    } catch {}
+                }
+            }
+
+            if (-not $isCached) {
+                $packagesToFetchList.Add($pkgId)
+            }
+        }
+
+        $packagesToFetch = $packagesToFetchList.ToArray()
+        $totalPackagesToFetch = $packagesToFetch.Count
+
+        $packagesPerJob = if ($totalPackagesToFetch -gt 0) { [Math]::Ceiling($totalPackagesToFetch / $maxConcurrentJobs) } else { 0 }
+        $actualJobCount = [Math]::Min($maxConcurrentJobs, $totalPackagesToFetch)
 
         $jobs = [System.Collections.Generic.List[Object]]::new()
         $jobPackageMap = @{}
 
+        if ($cachedResults.Count -gt 0) {
+            Write-Host "✓ Found $($cachedResults.Count) packages in cache" -ForegroundColor Green
+        }
+
         for ($i = 0; $i -lt $actualJobCount; $i++) {
             $startIndex = $i * $packagesPerJob
-            $endIndex = [Math]::Min($startIndex + $packagesPerJob - 1, $totalPackages - 1)
-            $packageBatch = $packageIds[$startIndex..$endIndex]
+            $endIndex = [Math]::Min($startIndex + $packagesPerJob - 1, $totalPackagesToFetch - 1)
+            $packageBatch = $packagesToFetch[$startIndex..$endIndex]
 
             $job = Start-Job -ScriptBlock {
                 param($packageList, $cacheDir)
                 $results = @{}
 
-                # Helper function to get cached details
-                function Get-CachedDetails {
-                    param($PackageId, $CacheFile)
-
-                    if (-not (Test-Path $CacheFile)) { return $null }
-
-                    try {
-                        $cache = Get-Content $CacheFile -Raw | ConvertFrom-Json
-                        $packageCache = $cache.PSObject.Properties[$PackageId]
-
-                        if ($packageCache) {
-                            $cachedDate = [DateTime]$packageCache.CachedDate
-                            $daysSinceCached = ((Get-Date) - $cachedDate).TotalDays
-
-                            if ($daysSinceCached -lt 30) {
-                                return $packageCache.Details
-                            }
-                        }
-                    }
-                    catch { }
-
-                    return $null
-                }
-
-                # Helper function to save cached details
-                function Save-CachedDetails {
-                    param($PackageId, $Details, $CacheFile, $CacheDir)
-
-                    if (-not (Test-Path $CacheDir)) {
-                        New-Item -ItemType Directory -Path $CacheDir -Force | Out-Null
-                    }
-
-                    $cache = @{}
-                    if (Test-Path $CacheFile) {
-                        try {
-                            $cacheJson = Get-Content $CacheFile -Raw | ConvertFrom-Json
-                            $cacheJson.PSObject.Properties | ForEach-Object {
-                                $cache[$_.Name] = $_.Value
-                            }
-                        }
-                        catch { }
-                    }
-
-                    $cache[$PackageId] = @{
-                        CachedDate = (Get-Date).ToString('o')
-                        Details = $Details
-                    }
-
-                    try {
-                        $jsonContent = $cache | ConvertTo-Json -Depth 10 -Compress:$false
-                        [System.IO.File]::WriteAllText($CacheFile, $jsonContent, [System.Text.Encoding]::UTF8)
-                    }
-                    catch { }
-                }
-
-                $cacheFile = Join-Path $cacheDir "package_cache.json"
-
                 foreach ($packageId in $packageList) {
-                    # Try to get from cache first
-                    $cachedInfo = Get-CachedDetails -PackageId $packageId -CacheFile $cacheFile
-
-                    if ($cachedInfo) {
-                        # Use cached data
-                        $results[$packageId] = $cachedInfo
-                        continue
-                    }
-
-                    # Not in cache, fetch from winget
+                    # Fetch from winget
                     $output = winget show --id $packageId 2>&1 | Out-String
 
                     # Parse winget show output - capture ALL available fields
@@ -869,9 +848,6 @@ function Get-WingetNewPackages {
                         elseif ($line -match '^\s*Moniker:\s*(.+)$') { $info.Moniker = $matches[1].Trim() }
                     }
 
-                    # Save to cache
-                    Save-CachedDetails -PackageId $packageId -Details $info -CacheFile $cacheFile -CacheDir $cacheDir
-
                     $results[$packageId] = $info
                 }
 
@@ -882,7 +858,7 @@ function Get-WingetNewPackages {
             $jobPackageMap[$job.Id] = $packageBatch
         }
 
-        Write-Host "   Started $actualJobCount background jobs processing $totalPackages packages..." -ForegroundColor DarkGray
+        Write-Host "   Started $actualJobCount background jobs processing $totalPackagesToFetch packages..." -ForegroundColor DarkGray
         Write-Host "   (~$packagesPerJob packages per job)" -ForegroundColor DarkGray
 
         # Interactive selection using Spectre Console
@@ -958,15 +934,41 @@ function Get-WingetNewPackages {
 
                     # Collect results from relevant jobs only (each job returns a hashtable of multiple packages)
                     $allPackageDetails = @{}
+
+                    # Add cached results first
+                    foreach ($key in $cachedResults.Keys) {
+                        $allPackageDetails[$key] = $cachedResults[$key]
+                    }
+
+                    $newResults = @{}
+
                     foreach ($job in $relevantJobs) {
                         if ($job.State -eq 'Completed') {
                             $jobResults = Receive-Job -Job $job
                             # Merge job results into master hashtable
                             foreach ($key in $jobResults.Keys) {
                                 $allPackageDetails[$key] = $jobResults[$key]
+                                $newResults[$key] = $jobResults[$key]
                             }
                         }
                         Remove-Job -Job $job -Force
+                    }
+
+                    # Update cache with new results
+                    if ($newResults.Count -gt 0) {
+                        foreach ($key in $newResults.Keys) {
+                            $localCache[[string]$key] = @{
+                                CachedDate = (Get-Date).ToString('o')
+                                Details = $newResults[$key]
+                            }
+                        }
+
+                        try {
+                            $jsonContent = $localCache | ConvertTo-Json -Depth 10 -Compress:$false
+                            [System.IO.File]::WriteAllText($cacheFile, $jsonContent, [System.Text.Encoding]::UTF8)
+                        } catch {
+                            Write-Verbose "Failed to save cache: $_"
+                        }
                     }
 
                     # Clean up irrelevant jobs
