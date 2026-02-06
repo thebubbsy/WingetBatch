@@ -362,6 +362,41 @@ function Install-WingetAll {
              $packagesToInstall = $foundPackages.Id
         }
 
+        # Display summary of packages to be installed
+        if ($packagesToInstall.Count -gt 0) {
+            Write-Host "`n" + ("=" * 60) -ForegroundColor Cyan
+            Write-Host "Summary of Packages to Install" -ForegroundColor Cyan
+            Write-Host ("=" * 60) -ForegroundColor Cyan
+
+            $summaryList = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+            # Deduplicate just in case
+            $uniqueSummaryIds = $packagesToInstall | Select-Object -Unique
+
+            foreach ($pId in $uniqueSummaryIds) {
+                # Find the package info from the search results
+                $info = $foundPackages | Where-Object { $_.Id -eq $pId } | Select-Object -First 1
+
+                if ($info) {
+                    $summaryList.Add([PSCustomObject]@{
+                        Name = $info.Name
+                        Id = $info.Id
+                        Version = if ($info.Version -eq "Unknown") { "" } else { $info.Version }
+                        Source = $info.Source
+                    })
+                } else {
+                     $summaryList.Add([PSCustomObject]@{
+                        Name = $pId
+                        Id = $pId
+                        Version = ""
+                        Source = ""
+                    })
+                }
+            }
+
+            $summaryList | Format-Table -AutoSize | Out-Host
+        }
+
         Write-Host "`n" + ("=" * 60) -ForegroundColor Cyan
         Write-Host "Starting Installation Process" -ForegroundColor Cyan
         Write-Host ("=" * 60) -ForegroundColor Cyan
