@@ -372,6 +372,33 @@ function Install-WingetAll {
         # Deduplicate IDs to ensure we don't install the same package twice
         $uniquePackagesToInstall = $packagesToInstall | Select-Object -Unique
 
+        if ($uniquePackagesToInstall.Count -gt 0) {
+            Write-Host "`nPackage Installation Summary:" -ForegroundColor Cyan
+
+            $summaryList = [System.Collections.Generic.List[PSCustomObject]]::new()
+            foreach ($packageId in $uniquePackagesToInstall) {
+                $pkgInfo = $foundPackages | Where-Object { $_.Id -eq $packageId } | Select-Object -First 1
+
+                if ($pkgInfo) {
+                    $summaryList.Add([PSCustomObject]@{
+                        Name = $pkgInfo.Name
+                        Id = $pkgInfo.Id
+                        Version = $pkgInfo.Version
+                        Source = $pkgInfo.Source
+                    })
+                } else {
+                    $summaryList.Add([PSCustomObject]@{
+                        Name = $packageId
+                        Id = $packageId
+                        Version = "Unknown"
+                        Source = "Unknown"
+                    })
+                }
+            }
+
+            $summaryList | Format-Table -Property Name, Id, Version, Source -AutoSize | Out-Host
+        }
+
         foreach ($packageId in $uniquePackagesToInstall) {
             # Find info for better display (use first match from foundPackages)
             $pkgInfo = $foundPackages | Where-Object { $_.Id -eq $packageId } | Select-Object -First 1
