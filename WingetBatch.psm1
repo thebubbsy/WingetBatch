@@ -373,9 +373,9 @@ function Install-WingetAll {
         $uniquePackagesToInstall = $packagesToInstall | Select-Object -Unique
 
         if ($uniquePackagesToInstall.Count -gt 0) {
-            Write-Host "`nPackage Installation Summary:" -ForegroundColor Cyan
-
+            # Build summary list first (raw data)
             $summaryList = [System.Collections.Generic.List[PSCustomObject]]::new()
+
             foreach ($packageId in $uniquePackagesToInstall) {
                 $pkgInfo = $foundPackages | Where-Object { $_.Id -eq $packageId } | Select-Object -First 1
 
@@ -396,7 +396,31 @@ function Install-WingetAll {
                 }
             }
 
-            $summaryList | Format-Table -Property Name, Id, Version, Source -AutoSize | Out-Host
+            # Use Spectre Console table if available for better formatting
+            if (Get-Module -Name PwshSpectreConsole) {
+                Write-Host ""
+                Write-Host "Package Installation Summary" -ForegroundColor Cyan
+
+                $spectreList = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+                foreach ($item in $summaryList) {
+                    $verColor = if ($item.Version -ne "Unknown") { "green" } else { "grey" }
+                    $srcColor = if ($item.Source -match 'msstore') { "magenta" } else { "cyan" }
+
+                    $spectreList.Add([PSCustomObject]@{
+                        Name = ConvertTo-SpectreEscaped $item.Name
+                        Id = ConvertTo-SpectreEscaped $item.Id
+                        Version = "[$verColor]$($item.Version)[/]"
+                        Source = "[$srcColor]$($item.Source)[/]"
+                    })
+                }
+
+                $spectreList | Format-SpectreTable -Color Cyan | Out-Host
+            }
+            else {
+                Write-Host "`nPackage Installation Summary:" -ForegroundColor Cyan
+                $summaryList | Format-Table -Property Name, Id, Version, Source -AutoSize | Out-Host
+            }
         }
 
         foreach ($packageId in $uniquePackagesToInstall) {
