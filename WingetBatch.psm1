@@ -94,28 +94,21 @@ function Install-WingetAll {
             # Normalize query (collapse multiple spaces)
             $normalizedQuery = ($query -split '\s+') -join ' '
 
-            # Combine all search results from each word
-            $querySearchResults = [System.Collections.Generic.List[string]]::new()
-
+            # Run winget search
+            $lines = @()
             try {
-                $wordResults = winget search $query --accept-source-agreements 2>&1
-
-                if ($LASTEXITCODE -eq 0) {
-                    $querySearchResults += $wordResults
-                }
+                $lines = @(winget search $query --accept-source-agreements 2>&1)
             }
             catch {
                 Write-Warning "Failed to search for query: $query"
-            }
-
-            if ($querySearchResults.Count -eq 0) {
                 continue
             }
 
-            $searchResults = $querySearchResults -join "`n"
+            if ($LASTEXITCODE -ne 0 -or $lines.Count -eq 0) {
+                continue
+            }
 
             # Parse the search results to extract package IDs and Names
-            $lines = $searchResults -split "`n"
             $queryPackages = [System.Collections.Generic.List[PSCustomObject]]::new()
 
             # Pre-calculate regex patterns for filtering to improve performance
