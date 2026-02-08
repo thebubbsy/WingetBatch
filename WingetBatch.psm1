@@ -2096,29 +2096,6 @@ function Start-WingetUpdateCheck {
         param($configDir, $cacheFile)
 
         try {
-            # Get list of installed packages
-            $installedOutput = winget list --disable-interactivity 2>&1 | Out-String
-            $installedLines = $installedOutput -split "`n"
-            $installedPackages = [System.Collections.Generic.List[Object]]::new()
-
-            $headerFound = $false
-            foreach ($line in $installedLines) {
-                if ($line -match '^-+') {
-                    $headerFound = $true
-                    continue
-                }
-
-                if ($headerFound -and $line.Trim() -ne '' -and $line -match '\S') {
-                    # Try to extract package ID
-                    if ($line -match '([A-Za-z0-9\.\-_]+\.[A-Za-z0-9\.\-_]+)\s+.*<\s*(.+?)\s*>') {
-                        $installedPackages.Add(@{
-                            Id = $matches[1].Trim()
-                            InstalledVersion = $matches[2].Trim()
-                        })
-                    }
-                }
-            }
-
             # Get list of packages with updates available
             $upgradeOutput = winget upgrade --disable-interactivity 2>&1 | Out-String
             $upgradeLines = $upgradeOutput -split "`n"
