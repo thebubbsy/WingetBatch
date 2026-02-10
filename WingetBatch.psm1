@@ -385,6 +385,7 @@ function Install-WingetAll {
                         Id = $pkgInfo.Id
                         Version = $pkgInfo.Version
                         Source = $pkgInfo.Source
+                        SearchTerm = $pkgInfo.SearchTerm
                     })
                 } else {
                     $summaryList.Add([PSCustomObject]@{
@@ -392,6 +393,7 @@ function Install-WingetAll {
                         Id = $packageId
                         Version = "Unknown"
                         Source = "Unknown"
+                        SearchTerm = "Manual"
                     })
                 }
             }
@@ -399,27 +401,45 @@ function Install-WingetAll {
             # Use Spectre Console table if available for better formatting
             if (Get-Module -Name PwshSpectreConsole) {
                 Write-Host ""
-                Write-Host "Package Installation Summary" -ForegroundColor Cyan
+                Write-Host "Package Installation Summary ($($summaryList.Count) packages)" -ForegroundColor Cyan
 
                 $spectreList = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+                # Check if we have multiple unique search terms in the summary
+                $uniqueSearchTerms = $summaryList | Select-Object -ExpandProperty SearchTerm -Unique
+                $showSearchTerm = ($uniqueSearchTerms | Measure-Object).Count -gt 1
 
                 foreach ($item in $summaryList) {
                     $verColor = if ($item.Version -ne "Unknown") { "green" } else { "grey" }
                     $srcColor = if ($item.Source -match 'msstore') { "magenta" } else { "cyan" }
 
-                    $spectreList.Add([PSCustomObject]@{
-                        Name = ConvertTo-SpectreEscaped $item.Name
+                    $obj = [ordered]@{
+                        Name = "📦 " + (ConvertTo-SpectreEscaped $item.Name)
                         Id = ConvertTo-SpectreEscaped $item.Id
                         Version = "[$verColor]$($item.Version)[/]"
                         Source = "[$srcColor]$($item.Source)[/]"
-                    })
+                    }
+
+                    if ($showSearchTerm) {
+                        $obj['Search Term'] = "[grey]$(ConvertTo-SpectreEscaped $item.SearchTerm)[/]"
+                    }
+
+                    $spectreList.Add([PSCustomObject]$obj)
                 }
 
                 $spectreList | Format-SpectreTable -Color Cyan | Out-Host
             }
             else {
-                Write-Host "`nPackage Installation Summary:" -ForegroundColor Cyan
-                $summaryList | Format-Table -Property Name, Id, Version, Source -AutoSize | Out-Host
+                Write-Host "`nPackage Installation Summary ($($summaryList.Count) packages):" -ForegroundColor Cyan
+
+                # Simple modification for fallback table too
+                $fallbackList = $summaryList | Select-Object @{N='Name';E={"📦 " + $_.Name}}, Id, Version, Source, SearchTerm
+
+                if (($summaryList | Select-Object -ExpandProperty SearchTerm -Unique | Measure-Object).Count -gt 1) {
+                    $fallbackList | Format-Table -Property Name, Id, Version, Source, SearchTerm -AutoSize | Out-Host
+                } else {
+                    $fallbackList | Format-Table -Property Name, Id, Version, Source -AutoSize | Out-Host
+                }
             }
         }
 
