@@ -100,8 +100,8 @@ function Install-WingetAll {
             try {
                 $wordResults = winget search $query --accept-source-agreements 2>&1
 
-                if ($LASTEXITCODE -eq 0) {
-                    $querySearchResults += $wordResults
+                if ($LASTEXITCODE -eq 0 -and $null -ne $wordResults) {
+                    $querySearchResults.AddRange([string[]]$wordResults)
                 }
             }
             catch {
@@ -112,10 +112,8 @@ function Install-WingetAll {
                 continue
             }
 
-            $searchResults = $querySearchResults -join "`n"
-
             # Parse the search results to extract package IDs and Names
-            $lines = $searchResults -split "`n"
+            $lines = $querySearchResults
             $queryPackages = [System.Collections.Generic.List[PSCustomObject]]::new()
 
             # Pre-calculate regex patterns for filtering to improve performance
