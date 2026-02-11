@@ -448,7 +448,7 @@ function Install-WingetAll {
                     $spectreList.Add([PSCustomObject]$obj)
                 }
 
-                $spectreList | Format-SpectreTable -Color Cyan | Out-Host
+                $spectreList | Format-SpectreTable | Out-Host
             }
             else {
                 Write-Host "`nPackage Installation Summary ($($summaryList.Count) packages):" -ForegroundColor Cyan
