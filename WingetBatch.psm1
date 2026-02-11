@@ -100,8 +100,8 @@ function Install-WingetAll {
             try {
                 $wordResults = winget search $query --accept-source-agreements 2>&1
 
-                if ($LASTEXITCODE -eq 0) {
-                    $querySearchResults += $wordResults
+                if ($LASTEXITCODE -eq 0 -and $null -ne $wordResults) {
+                    $querySearchResults.AddRange([string[]]$wordResults)
                 }
             }
             catch {
@@ -112,10 +112,8 @@ function Install-WingetAll {
                 continue
             }
 
-            $searchResults = $querySearchResults -join "`n"
-
             # Parse the search results to extract package IDs and Names
-            $lines = $searchResults -split "`n"
+            $lines = $querySearchResults
             $queryPackages = [System.Collections.Generic.List[PSCustomObject]]::new()
 
             # Pre-calculate regex patterns for filtering to improve performance
@@ -327,39 +325,62 @@ function Install-WingetAll {
                 Write-Host " package(s) for installation" -ForegroundColor Green
             }
             catch {
-                Write-Error "Failed to show interactive selection. $_"
-                return
+                Write-Warning "Failed to show interactive selection. Falling back to confirmation prompt."
+                $packagesToInstall = $foundPackages.Id
             }
         }
         elseif (-not $Silent) {
             # Fallback for when Spectre Console is not available
-            Write-Host "`nPackages to install:" -ForegroundColor Cyan
-            $foundPackages | Group-Object SearchTerm | ForEach-Object {
-                Write-Host "$($_.Name):" -ForegroundColor Yellow
-                $_.Group | ForEach-Object {
-                    Write-Host "  • " -ForegroundColor Cyan -NoNewline
-                    Write-Host "$($_.Name) ($($_.Id))" -ForegroundColor White -NoNewline
-                    if ($_.Version -ne "Unknown") {
-                        Write-Host " v$($_.Version)" -ForegroundColor Green -NoNewline
-                    }
-                    if ($_.Source) {
-                        $sColor = if ($_.Source -match 'msstore') { "Magenta" } else { "Cyan" }
-                        Write-Host " [$($_.Source)]" -ForegroundColor $sColor
-                    } else { Write-Host "" }
-                }
-            }
-            Write-Host "`nPress any key to continue with installation or Ctrl+C to cancel..." -ForegroundColor Yellow
-            try {
-                $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
-            }
-            catch {
-                Write-Warning "Unable to read key input. Proceeding with installation..."
-            }
             $packagesToInstall = $foundPackages.Id
         }
         else {
              # Silent mode
              $packagesToInstall = $foundPackages.Id
+        }
+
+        if (-not $Silent -and $packagesToInstall.Count -gt 0) {
+            Write-Host "`nFetching package details..." -ForegroundColor DarkGray
+            $configDir = Join-Path $env:USERPROFILE ".wingetbatch"
+
+            $jobsResult = Start-PackageDetailJobs -PackageIds $packagesToInstall -ConfigDir $configDir
+            $jobs = $jobsResult[0]
+
+            if ($jobs.Count -gt 0) {
+                Write-Host "Waiting for background jobs..." -ForegroundColor DarkGray
+                $jobs | Wait-Job | Out-Null
+
+                $allPackageDetails = @{}
+                foreach ($job in $jobs) {
+                    $jobResults = Receive-Job -Job $job
+                    foreach ($key in $jobResults.Keys) {
+                        $allPackageDetails[$key] = $jobResults[$key]
+                        Set-PackageDetailsCache -PackageId $key -Details $jobResults[$key]
+                    }
+                    Remove-Job -Job $job -Force
+                }
+
+                # Fill missing
+                foreach ($pkgId in $packagesToInstall) {
+                    if (-not $allPackageDetails.ContainsKey($pkgId)) {
+                        $allPackageDetails[$pkgId] = @{ Id = $pkgId }
+                    }
+                }
+
+                Show-WingetPackageDetails -PackageIds $packagesToInstall -DetailsMap $allPackageDetails -FallbackInfo $foundPackages
+
+                # Ask for confirmation
+                Write-Host "Press " -NoNewline -ForegroundColor Yellow
+                Write-Host "Enter" -NoNewline -ForegroundColor White
+                Write-Host " to install, or " -NoNewline -ForegroundColor Yellow
+                Write-Host "Ctrl+C" -NoNewline -ForegroundColor Red
+                Write-Host " to cancel..." -ForegroundColor Yellow
+                try {
+                    $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+                }
+                catch {
+                    # Ignore
+                }
+            }
         }
 
         Write-Host "`n" + ("=" * 60) -ForegroundColor Cyan
@@ -371,6 +392,77 @@ function Install-WingetAll {
 
         # Deduplicate IDs to ensure we don't install the same package twice
         $uniquePackagesToInstall = $packagesToInstall | Select-Object -Unique
+
+        if ($uniquePackagesToInstall.Count -gt 0) {
+            # Build summary list first (raw data)
+            $summaryList = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+            foreach ($packageId in $uniquePackagesToInstall) {
+                $pkgInfo = $foundPackages | Where-Object { $_.Id -eq $packageId } | Select-Object -First 1
+
+                if ($pkgInfo) {
+                    $summaryList.Add([PSCustomObject]@{
+                        Name = $pkgInfo.Name
+                        Id = $pkgInfo.Id
+                        Version = $pkgInfo.Version
+                        Source = $pkgInfo.Source
+                        SearchTerm = $pkgInfo.SearchTerm
+                    })
+                } else {
+                    $summaryList.Add([PSCustomObject]@{
+                        Name = $packageId
+                        Id = $packageId
+                        Version = "Unknown"
+                        Source = "Unknown"
+                        SearchTerm = "Manual"
+                    })
+                }
+            }
+
+            # Use Spectre Console table if available for better formatting
+            if (Get-Module -Name PwshSpectreConsole) {
+                Write-Host ""
+                Write-Host "Package Installation Summary ($($summaryList.Count) packages)" -ForegroundColor Cyan
+
+                $spectreList = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+                # Check if we have multiple unique search terms in the summary
+                $uniqueSearchTerms = $summaryList | Select-Object -ExpandProperty SearchTerm -Unique
+                $showSearchTerm = ($uniqueSearchTerms | Measure-Object).Count -gt 1
+
+                foreach ($item in $summaryList) {
+                    $verColor = if ($item.Version -ne "Unknown") { "green" } else { "grey" }
+                    $srcColor = if ($item.Source -match 'msstore') { "magenta" } else { "cyan" }
+
+                    $obj = [ordered]@{
+                        Name = "📦 " + (ConvertTo-SpectreEscaped $item.Name)
+                        Id = ConvertTo-SpectreEscaped $item.Id
+                        Version = "[$verColor]$($item.Version)[/]"
+                        Source = "[$srcColor]$($item.Source)[/]"
+                    }
+
+                    if ($showSearchTerm) {
+                        $obj['Search Term'] = "[grey]$(ConvertTo-SpectreEscaped $item.SearchTerm)[/]"
+                    }
+
+                    $spectreList.Add([PSCustomObject]$obj)
+                }
+
+                $spectreList | Format-SpectreTable -Color Cyan | Out-Host
+            }
+            else {
+                Write-Host "`nPackage Installation Summary ($($summaryList.Count) packages):" -ForegroundColor Cyan
+
+                # Simple modification for fallback table too
+                $fallbackList = $summaryList | Select-Object @{N='Name';E={"📦 " + $_.Name}}, Id, Version, Source, SearchTerm
+
+                if (($summaryList | Select-Object -ExpandProperty SearchTerm -Unique | Measure-Object).Count -gt 1) {
+                    $fallbackList | Format-Table -Property Name, Id, Version, Source, SearchTerm -AutoSize | Out-Host
+                } else {
+                    $fallbackList | Format-Table -Property Name, Id, Version, Source -AutoSize | Out-Host
+                }
+            }
+        }
 
         foreach ($packageId in $uniquePackagesToInstall) {
             # Find info for better display (use first match from foundPackages)
@@ -414,6 +506,235 @@ function Install-WingetAll {
         Write-Host " | Failed: " -ForegroundColor Red -NoNewline
         Write-Host $failCount -ForegroundColor White
     }
+}
+
+function Start-PackageDetailJobs {
+    param(
+        [string[]]$PackageIds,
+        [string]$ConfigDir
+    )
+
+    $maxConcurrentJobs = 100 # Increased from 10 to allow higher concurrency
+    $totalPackages = $PackageIds.Count
+
+    if ($totalPackages -eq 0) { return @(), @{} }
+
+    $packagesPerJob = [Math]::Ceiling($totalPackages / $maxConcurrentJobs)
+    if ($packagesPerJob -lt 1) { $packagesPerJob = 1 }
+
+    $actualJobCount = [Math]::Ceiling($totalPackages / $packagesPerJob)
+
+    $jobs = @()
+    $jobPackageMap = @{}
+
+    $jobScript = {
+        param($packageList, $cacheDir)
+        $results = @{}
+
+        # Helper function to get cached details
+        function Get-CachedDetails {
+            param($PackageId, $CacheFile)
+
+            if (-not (Test-Path $CacheFile)) { return $null }
+
+            try {
+                $cache = Get-Content $CacheFile -Raw | ConvertFrom-Json
+                $packageCache = $cache.PSObject.Properties[$PackageId]
+
+                if ($packageCache) {
+                    $cachedDate = [DateTime]$packageCache.CachedDate
+                    $daysSinceCached = ((Get-Date) - $cachedDate).TotalDays
+
+                    if ($daysSinceCached -lt 30) {
+                        return $packageCache.Details
+                    }
+                }
+            }
+            catch { }
+
+            return $null
+        }
+
+        $cacheFile = Join-Path $cacheDir "package_cache.json"
+
+        foreach ($packageId in $packageList) {
+            # Try to get from cache first
+            $cachedInfo = Get-CachedDetails -PackageId $packageId -CacheFile $cacheFile
+
+            if ($cachedInfo) {
+                # Use cached data
+                $results[$packageId] = $cachedInfo
+                continue
+            }
+
+            # Not in cache, fetch from winget
+            $output = winget show --id $packageId 2>&1 | Out-String
+
+            # Parse winget show output - capture ALL available fields
+            $info = @{
+                Id = $packageId
+                Version = $null
+                Publisher = $null
+                PublisherName = $null
+                PublisherUrl = $null
+                PublisherGitHub = $null
+                Author = $null
+                Homepage = $null
+                Description = $null
+                Category = $null
+                Tags = @()
+                License = $null
+                LicenseUrl = $null
+                Copyright = $null
+                CopyrightUrl = $null
+                PrivacyUrl = $null
+                PackageUrl = $null
+                ReleaseNotes = $null
+                ReleaseNotesUrl = $null
+                Installer = $null
+                Pricing = $null
+                StoreLicense = $null
+                FreeTrial = $null
+                AgeRating = $null
+                Moniker = $null
+            }
+
+            foreach ($line in $output -split "`n") {
+                if ($line -match '^\s*Version:\s*(.+)$') { $info.Version = $matches[1].Trim() }
+                elseif ($line -match '^\s*Publisher:\s*(.+)$') {
+                    $info.PublisherName = $matches[1].Trim()
+                    $info.Publisher = $matches[1].Trim()
+                }
+                elseif ($line -match '^\s*Publisher Url:\s*(.+)$') {
+                    $url = $matches[1].Trim()
+                    $info.PublisherUrl = $url
+                    # Check if it's a GitHub URL
+                    if ($url -match 'github\.com/([^/]+)') {
+                        $info.PublisherGitHub = $url
+                    }
+                }
+                elseif ($line -match '^\s*Author:\s*(.+)$') { $info.Author = $matches[1].Trim() }
+                elseif ($line -match '^\s*Homepage:\s*(.+)$') { $info.Homepage = $matches[1].Trim() }
+                elseif ($line -match '^\s*Description:\s*(.+)$') { $info.Description = $matches[1].Trim() }
+                elseif ($line -match '^\s*Category:\s*(.+)$') { $info.Category = $matches[1].Trim() }
+                elseif ($line -match '^\s*Tags:\s*(.+)$') {
+                    $tagString = $matches[1].Trim()
+                    $info.Tags = $tagString -split ',\s*'
+                }
+                elseif ($line -match '^\s*License:\s*(.+)$') { $info.License = $matches[1].Trim() }
+                elseif ($line -match '^\s*License Url:\s*(.+)$') { $info.LicenseUrl = $matches[1].Trim() }
+                elseif ($line -match '^\s*Copyright:\s*(.+)$') { $info.Copyright = $matches[1].Trim() }
+                elseif ($line -match '^\s*Copyright Url:\s*(.+)$') { $info.CopyrightUrl = $matches[1].Trim() }
+                elseif ($line -match '^\s*Privacy Url:\s*(.+)$') { $info.PrivacyUrl = $matches[1].Trim() }
+                elseif ($line -match '^\s*Package Url:\s*(.+)$') { $info.PackageUrl = $matches[1].Trim() }
+                elseif ($line -match '^\s*Release Notes:\s*(.+)$') { $info.ReleaseNotes = $matches[1].Trim() }
+                elseif ($line -match '^\s*Release Notes Url:\s*(.+)$') { $info.ReleaseNotesUrl = $matches[1].Trim() }
+                elseif ($line -match '^\s*Installer Type:\s*(.+)$') { $info.Installer = $matches[1].Trim() }
+                elseif ($line -match '^\s*Pricing:\s*(.+)$') { $info.Pricing = $matches[1].Trim() }
+                elseif ($line -match '^\s*Store License:\s*(.+)$') { $info.StoreLicense = $matches[1].Trim() }
+                elseif ($line -match '^\s*Free Trial:\s*(.+)$') { $info.FreeTrial = $matches[1].Trim() }
+                elseif ($line -match '^\s*Age Rating:\s*(.+)$') { $info.AgeRating = $matches[1].Trim() }
+                elseif ($line -match '^\s*Moniker:\s*(.+)$') { $info.Moniker = $matches[1].Trim() }
+            }
+
+            $results[$packageId] = $info
+        }
+
+        return $results
+    }
+
+    for ($i = 0; $i -lt $actualJobCount; $i++) {
+        $startIndex = $i * $packagesPerJob
+        $endIndex = [Math]::Min($startIndex + $packagesPerJob - 1, $totalPackages - 1)
+        if ($startIndex -gt $endIndex) { break }
+
+        $packageBatch = $PackageIds[$startIndex..$endIndex]
+
+        $job = Start-Job -ScriptBlock $jobScript -ArgumentList (,$packageBatch), $ConfigDir
+        $jobs += $job
+        $jobPackageMap[$job.Id] = $packageBatch
+    }
+
+    return $jobs, $jobPackageMap
+}
+
+function Show-WingetPackageDetails {
+    param(
+        [string[]]$PackageIds,
+        [hashtable]$DetailsMap,
+        [array]$FallbackInfo = @()
+    )
+
+    Write-Host ("=" * 80) -ForegroundColor Cyan
+    Write-Host "📦 SELECTED PACKAGES - DETAILED INFORMATION" -ForegroundColor Cyan
+    Write-Host ("=" * 80) -ForegroundColor Cyan
+    Write-Host ""
+
+    foreach ($pkgId in $PackageIds) {
+        $details = $DetailsMap[$pkgId]
+        # Try to find fallback info from the original search results if available
+        $pkgInfo = $FallbackInfo | Where-Object { $_.Name -eq $pkgId -or $_.Id -eq $pkgId } | Select-Object -First 1
+
+        Write-Host "▶ " -ForegroundColor Yellow -NoNewline
+        Write-Host $pkgId -ForegroundColor White -BackgroundColor DarkBlue
+        Write-Host ""
+
+        # Version
+        if ($details.Version -or ($pkgInfo -and $pkgInfo.Version)) {
+            Write-Host "  Version:        " -ForegroundColor DarkGray -NoNewline
+            $ver = if ($details.Version) { $details.Version } else { $pkgInfo.Version }
+            Write-Host $ver -ForegroundColor White
+        }
+
+        # Publisher with GitHub link if available
+        if ($details.PublisherGitHub) {
+            Write-Host "  Publisher:      " -ForegroundColor DarkGray -NoNewline
+            Write-Host $details.PublisherName -ForegroundColor White -NoNewline
+            Write-Host " (" -ForegroundColor DarkGray -NoNewline
+            Write-Host $details.PublisherGitHub -ForegroundColor Magenta -NoNewline
+            Write-Host ")" -ForegroundColor DarkGray
+        }
+        elseif ($details.PublisherUrl) {
+            Write-Host "  Publisher:      " -ForegroundColor DarkGray -NoNewline
+            Write-Host $details.PublisherName -ForegroundColor White -NoNewline
+            Write-Host " (" -ForegroundColor DarkGray -NoNewline
+            Write-Host $details.PublisherUrl -ForegroundColor Blue -NoNewline
+            Write-Host ")" -ForegroundColor DarkGray
+        }
+        elseif ($details.Publisher) {
+            Write-Host "  Publisher:      " -ForegroundColor DarkGray -NoNewline
+            Write-Host $details.Publisher -ForegroundColor White
+        }
+
+        # Author
+        if ($details.Author) {
+            Write-Host "  Author:         " -ForegroundColor DarkGray -NoNewline
+            Write-Host $details.Author -ForegroundColor White
+        }
+
+        # Description (The "blurb")
+        if ($details.Description) {
+            Write-Host "  Description:    " -ForegroundColor DarkGray -NoNewline
+            Write-Host $details.Description -ForegroundColor Gray
+        }
+
+        # Homepage
+        if ($details.Homepage) {
+            Write-Host "  Homepage:       " -ForegroundColor DarkGray -NoNewline
+            Write-Host $details.Homepage -ForegroundColor Blue
+        }
+
+        # License
+        if ($details.License) {
+            Write-Host "  License:        " -ForegroundColor DarkGray -NoNewline
+            Write-Host $details.License -ForegroundColor White
+        }
+
+        Write-Host ""
+    }
+
+    Write-Host ("=" * 80) -ForegroundColor Cyan
+    Write-Host ""
 }
 
 function Get-WingetNewPackages {
@@ -708,7 +1029,6 @@ function Get-WingetNewPackages {
         ) | Out-Host
 
         # Fetch detailed package info in parallel BEFORE showing selection UI
-        # Limit to max 10 concurrent jobs to avoid overwhelming the system
         Write-Host ""
         Write-Host "⏳ Fetching detailed package information in background..." -ForegroundColor DarkGray
 
@@ -991,146 +1311,7 @@ function Get-WingetNewPackages {
 
                     Write-Host ""
 
-                    # Display detailed package information
-                    Write-Host ("=" * 80) -ForegroundColor Cyan
-                    Write-Host "📦 SELECTED PACKAGES - DETAILED INFORMATION" -ForegroundColor Cyan
-                    Write-Host ("=" * 80) -ForegroundColor Cyan
-                    Write-Host ""
-
-                    foreach ($pkgId in $packagesToInstall) {
-                        $details = $packageDetails[$pkgId]
-                        $pkgInfo = $newPackages | Where-Object { $_.Name -eq $pkgId } | Select-Object -First 1
-
-                        Write-Host "▶ " -ForegroundColor Yellow -NoNewline
-                        Write-Host $pkgId -ForegroundColor White -BackgroundColor DarkBlue
-                        Write-Host ""
-
-                        # Version
-                        if ($details.Version -or $pkgInfo.Version) {
-                            Write-Host "  Version:        " -ForegroundColor DarkGray -NoNewline
-                            Write-Host ($details.Version ?? $pkgInfo.Version) -ForegroundColor White
-                        }
-
-                        # Publisher with GitHub link if available
-                        if ($details.PublisherGitHub) {
-                            Write-Host "  Publisher:      " -ForegroundColor DarkGray -NoNewline
-                            Write-Host $details.PublisherName -ForegroundColor White -NoNewline
-                            Write-Host " (" -ForegroundColor DarkGray -NoNewline
-                            Write-Host $details.PublisherGitHub -ForegroundColor Magenta -NoNewline
-                            Write-Host ")" -ForegroundColor DarkGray
-                        }
-                        elseif ($details.PublisherUrl) {
-                            Write-Host "  Publisher:      " -ForegroundColor DarkGray -NoNewline
-                            Write-Host $details.PublisherName -ForegroundColor White -NoNewline
-                            Write-Host " (" -ForegroundColor DarkGray -NoNewline
-                            Write-Host $details.PublisherUrl -ForegroundColor Blue -NoNewline
-                            Write-Host ")" -ForegroundColor DarkGray
-                        }
-                        elseif ($details.Publisher) {
-                            Write-Host "  Publisher:      " -ForegroundColor DarkGray -NoNewline
-                            Write-Host $details.Publisher -ForegroundColor White
-                        }
-
-                        # Author
-                        if ($details.Author) {
-                            Write-Host "  Author:         " -ForegroundColor DarkGray -NoNewline
-                            Write-Host $details.Author -ForegroundColor White
-                        }
-
-                        # Category & Tags
-                        if ($details.Category) {
-                            Write-Host "  Category:       " -ForegroundColor DarkGray -NoNewline
-                            Write-Host $details.Category -ForegroundColor Cyan
-                        }
-                        if ($details.Tags -and $details.Tags.Count -gt 0) {
-                            Write-Host "  Tags:           " -ForegroundColor DarkGray -NoNewline
-                            Write-Host ($details.Tags -join ", ") -ForegroundColor DarkCyan
-                        }
-
-                        # Pricing, Store License, Free Trial
-                        if ($details.Pricing) {
-                            Write-Host "  Pricing:        " -ForegroundColor DarkGray -NoNewline
-                            $pricingColor = if ($details.Pricing -match 'Free') { "Green" } else { "Yellow" }
-                            Write-Host $details.Pricing -ForegroundColor $pricingColor
-                        }
-                        if ($details.StoreLicense) {
-                            Write-Host "  Store License:  " -ForegroundColor DarkGray -NoNewline
-                            Write-Host $details.StoreLicense -ForegroundColor White
-                        }
-                        if ($details.FreeTrial) {
-                            Write-Host "  Free Trial:     " -ForegroundColor DarkGray -NoNewline
-                            Write-Host $details.FreeTrial -ForegroundColor Yellow
-                        }
-
-                        # License
-                        if ($details.License) {
-                            Write-Host "  License:        " -ForegroundColor DarkGray -NoNewline
-                            Write-Host $details.License -ForegroundColor White
-                            if ($details.LicenseUrl) {
-                                Write-Host "                  " -NoNewline
-                                Write-Host $details.LicenseUrl -ForegroundColor Blue
-                            }
-                        }
-
-                        # Installer Type
-                        if ($details.Installer) {
-                            Write-Host "  Installer:      " -ForegroundColor DarkGray -NoNewline
-                            Write-Host $details.Installer -ForegroundColor White
-                        }
-
-                        # Age Rating
-                        if ($details.AgeRating) {
-                            Write-Host "  Age Rating:     " -ForegroundColor DarkGray -NoNewline
-                            Write-Host $details.AgeRating -ForegroundColor White
-                        }
-
-                        # Moniker
-                        if ($details.Moniker) {
-                            Write-Host "  Moniker:        " -ForegroundColor DarkGray -NoNewline
-                            Write-Host $details.Moniker -ForegroundColor DarkYellow
-                        }
-
-                        # Description
-                        if ($details.Description) {
-                            Write-Host "  Description:    " -ForegroundColor DarkGray -NoNewline
-                            Write-Host $details.Description -ForegroundColor Gray
-                        }
-
-                        # Release Notes
-                        if ($details.ReleaseNotes) {
-                            Write-Host "  Release Notes:  " -ForegroundColor DarkGray -NoNewline
-                            Write-Host $details.ReleaseNotes -ForegroundColor DarkGray
-                        }
-
-                        # URLs
-                        if ($details.Homepage) {
-                            Write-Host "  Homepage:       " -ForegroundColor DarkGray -NoNewline
-                            Write-Host $details.Homepage -ForegroundColor Blue
-                        }
-                        if ($details.PackageUrl) {
-                            Write-Host "  Package URL:    " -ForegroundColor DarkGray -NoNewline
-                            Write-Host $details.PackageUrl -ForegroundColor Blue
-                        }
-                        if ($details.ReleaseNotesUrl) {
-                            Write-Host "  Release Notes:  " -ForegroundColor DarkGray -NoNewline
-                            Write-Host $details.ReleaseNotesUrl -ForegroundColor Blue
-                        }
-                        if ($details.PrivacyUrl) {
-                            Write-Host "  Privacy Policy: " -ForegroundColor DarkGray -NoNewline
-                            Write-Host $details.PrivacyUrl -ForegroundColor Blue
-                        }
-
-                        # Copyright
-                        if ($details.Copyright) {
-                            Write-Host "  Copyright:      " -ForegroundColor DarkGray -NoNewline
-                            Write-Host $details.Copyright -ForegroundColor DarkGray
-                        }
-
-                        Write-Host ""
-                    }
-
-                    Write-Host ("=" * 80) -ForegroundColor Cyan
-                    Write-Host ""
+                    Show-WingetPackageDetails -PackageIds $packagesToInstall -DetailsMap $packageDetails -FallbackInfo $newPackages
 
                     # Ask user what to do next
                     $userChoice = $null
@@ -1272,6 +1453,7 @@ function Get-WingetNewPackages {
                                             elseif ($line -match '^\s*Description:\s*(.+)$') { $info.Description = $matches[1].Trim() }
                                         }
 
+                                        Set-PackageDetailsCache -PackageId $pkgId -Details $info
                                         $reselectedPackageDetails[$pkgId] = $info
                                     }
                                 }
@@ -1281,41 +1463,7 @@ function Get-WingetNewPackages {
 
                             # Re-display detailed info for new selection
                             Write-Host ""
-                            Write-Host ("=" * 80) -ForegroundColor Cyan
-                            Write-Host "📦 SELECTED PACKAGES - DETAILED INFORMATION" -ForegroundColor Cyan
-                            Write-Host ("=" * 80) -ForegroundColor Cyan
-                            Write-Host ""
-
-                            foreach ($pkgId in $packagesToInstall) {
-                                $details = $reselectedPackageDetails[$pkgId]
-                                $pkgInfo = $newPackages | Where-Object { $_.Name -eq $pkgId } | Select-Object -First 1
-
-                                Write-Host "▶ " -ForegroundColor Yellow -NoNewline
-                                Write-Host $pkgId -ForegroundColor White -BackgroundColor DarkBlue
-                                Write-Host ""
-
-                                if ($details.Version -or $pkgInfo.Version) {
-                                    Write-Host "  Version:        " -ForegroundColor DarkGray -NoNewline
-                                    Write-Host ($details.Version ?? $pkgInfo.Version) -ForegroundColor White
-                                }
-                                if ($details.PublisherName) {
-                                    Write-Host "  Publisher:      " -ForegroundColor DarkGray -NoNewline
-                                    Write-Host $details.PublisherName -ForegroundColor White
-                                }
-                                if ($details.License) {
-                                    Write-Host "  License:        " -ForegroundColor DarkGray -NoNewline
-                                    Write-Host $details.License -ForegroundColor White
-                                }
-                                if ($details.Description) {
-                                    Write-Host "  Description:    " -ForegroundColor DarkGray -NoNewline
-                                    Write-Host $details.Description -ForegroundColor Gray
-                                }
-
-                                Write-Host ""
-                            }
-
-                            Write-Host ("=" * 80) -ForegroundColor Cyan
-                            Write-Host ""
+                            Show-WingetPackageDetails -PackageIds $packagesToInstall -DetailsMap $reselectedPackageDetails -FallbackInfo $newPackages
 
                             # Ask again after re-selection
                             if (Get-Module -Name PwshSpectreConsole) {
@@ -2071,29 +2219,6 @@ function Start-WingetUpdateCheck {
         param($configDir, $cacheFile)
 
         try {
-            # Get list of installed packages
-            $installedOutput = winget list --disable-interactivity 2>&1 | Out-String
-            $installedLines = $installedOutput -split "`n"
-            $installedPackages = [System.Collections.Generic.List[Object]]::new()
-
-            $headerFound = $false
-            foreach ($line in $installedLines) {
-                if ($line -match '^-+') {
-                    $headerFound = $true
-                    continue
-                }
-
-                if ($headerFound -and $line.Trim() -ne '' -and $line -match '\S') {
-                    # Try to extract package ID
-                    if ($line -match '([A-Za-z0-9\.\-_]+\.[A-Za-z0-9\.\-_]+)\s+.*<\s*(.+?)\s*>') {
-                        $installedPackages.Add(@{
-                            Id = $matches[1].Trim()
-                            InstalledVersion = $matches[2].Trim()
-                        })
-                    }
-                }
-            }
-
             # Get list of packages with updates available
             $upgradeOutput = winget upgrade --disable-interactivity 2>&1 | Out-String
             $upgradeLines = $upgradeOutput -split "`n"
@@ -2485,7 +2610,13 @@ function Remove-WingetRecent {
                     else {
                         # Try fuzzy match - check if registry name contains package name or vice versa
                         foreach ($regName in $registryApps.Keys) {
-                            if ($regName -match [regex]::Escape($packageName) -or $packageName -match [regex]::Escape($regName)) {
+                            # Check if regName contains packageName
+                            if ($regName.Length -ge $packageName.Length -and $regName.IndexOf($packageName, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+                                $installDate = $registryApps[$regName]
+                                break
+                            }
+                            # Check if packageName contains regName
+                            if ($packageName.Length -ge $regName.Length -and $packageName.IndexOf($regName, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
                                 $installDate = $registryApps[$regName]
                                 break
                             }
