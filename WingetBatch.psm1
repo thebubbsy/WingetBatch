@@ -695,57 +695,75 @@ function Show-WingetPackageDetails {
         $pkgInfo = $FallbackInfo | Where-Object { $_.Name -eq $pkgId -or $_.Id -eq $pkgId } | Select-Object -First 1
 
         Write-Host "▶ " -ForegroundColor Yellow -NoNewline
-        Write-Host $pkgId -ForegroundColor White -BackgroundColor DarkBlue
+        Write-Host " $pkgId " -ForegroundColor White -BackgroundColor DarkBlue
         Write-Host ""
 
         # Version
         if ($details.Version -or ($pkgInfo -and $pkgInfo.Version)) {
-            Write-Host "  Version:        " -ForegroundColor DarkGray -NoNewline
+            Write-Host "  🔖 Version:     " -ForegroundColor DarkGray -NoNewline
             $ver = if ($details.Version) { $details.Version } else { $pkgInfo.Version }
             Write-Host $ver -ForegroundColor White
         }
 
         # Publisher with GitHub link if available
         if ($details.PublisherGitHub) {
-            Write-Host "  Publisher:      " -ForegroundColor DarkGray -NoNewline
+            Write-Host "  🏢 Publisher:   " -ForegroundColor DarkGray -NoNewline
             Write-Host $details.PublisherName -ForegroundColor White -NoNewline
             Write-Host " (" -ForegroundColor DarkGray -NoNewline
             Write-Host $details.PublisherGitHub -ForegroundColor Magenta -NoNewline
             Write-Host ")" -ForegroundColor DarkGray
         }
         elseif ($details.PublisherUrl) {
-            Write-Host "  Publisher:      " -ForegroundColor DarkGray -NoNewline
+            Write-Host "  🏢 Publisher:   " -ForegroundColor DarkGray -NoNewline
             Write-Host $details.PublisherName -ForegroundColor White -NoNewline
             Write-Host " (" -ForegroundColor DarkGray -NoNewline
             Write-Host $details.PublisherUrl -ForegroundColor Blue -NoNewline
             Write-Host ")" -ForegroundColor DarkGray
         }
         elseif ($details.Publisher) {
-            Write-Host "  Publisher:      " -ForegroundColor DarkGray -NoNewline
+            Write-Host "  🏢 Publisher:   " -ForegroundColor DarkGray -NoNewline
             Write-Host $details.Publisher -ForegroundColor White
         }
 
         # Author
         if ($details.Author) {
-            Write-Host "  Author:         " -ForegroundColor DarkGray -NoNewline
+            Write-Host "  👤 Author:      " -ForegroundColor DarkGray -NoNewline
             Write-Host $details.Author -ForegroundColor White
+        }
+
+        # Installer Type
+        if ($details.Installer) {
+            Write-Host "  💿 Installer:   " -ForegroundColor DarkGray -NoNewline
+            Write-Host $details.Installer -ForegroundColor Cyan
+        }
+
+        # Tags
+        if ($details.Tags -and $details.Tags.Count -gt 0) {
+            Write-Host "  🏷️  Tags:        " -ForegroundColor DarkGray -NoNewline
+            Write-Host ($details.Tags -join ", ") -ForegroundColor Yellow
         }
 
         # Description (The "blurb")
         if ($details.Description) {
-            Write-Host "  Description:    " -ForegroundColor DarkGray -NoNewline
+            Write-Host "  ℹ️  Description: " -ForegroundColor DarkGray -NoNewline
             Write-Host $details.Description -ForegroundColor Gray
         }
 
         # Homepage
         if ($details.Homepage) {
-            Write-Host "  Homepage:       " -ForegroundColor DarkGray -NoNewline
+            Write-Host "  🏠 Homepage:    " -ForegroundColor DarkGray -NoNewline
             Write-Host $details.Homepage -ForegroundColor Blue
+        }
+
+        # Release Notes
+        if ($details.ReleaseNotesUrl) {
+            Write-Host "  📝 Release Notes: " -ForegroundColor DarkGray -NoNewline
+            Write-Host $details.ReleaseNotesUrl -ForegroundColor Blue
         }
 
         # License
         if ($details.License) {
-            Write-Host "  License:        " -ForegroundColor DarkGray -NoNewline
+            Write-Host "  ⚖️  License:     " -ForegroundColor DarkGray -NoNewline
             Write-Host $details.License -ForegroundColor White
         }
 
