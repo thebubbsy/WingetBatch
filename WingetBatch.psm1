@@ -508,6 +508,25 @@ function Install-WingetAll {
     }
 }
 
+function Start-WingetBatchJob {
+    <#
+    .SYNOPSIS
+        Internal helper to start a job using Start-ThreadJob if available, otherwise Start-Job.
+    #>
+    [CmdletBinding()]
+    param(
+        [ScriptBlock]$ScriptBlock,
+        [Object[]]$ArgumentList
+    )
+
+    if (Get-Command Start-ThreadJob -ErrorAction SilentlyContinue) {
+        return Start-ThreadJob -ScriptBlock $ScriptBlock -ArgumentList $ArgumentList
+    }
+    else {
+        return Start-Job -ScriptBlock $ScriptBlock -ArgumentList $ArgumentList
+    }
+}
+
 function Start-PackageDetailJobs {
     param(
         [string[]]$PackageIds,
@@ -524,7 +543,7 @@ function Start-PackageDetailJobs {
 
     $actualJobCount = [Math]::Ceiling($totalPackages / $packagesPerJob)
 
-    $jobs = @()
+    $jobs = [System.Collections.Generic.List[Object]]::new()
     $jobPackageMap = @{}
 
     $jobScript = {
@@ -650,8 +669,8 @@ function Start-PackageDetailJobs {
 
         $packageBatch = $PackageIds[$startIndex..$endIndex]
 
-        $job = Start-Job -ScriptBlock $jobScript -ArgumentList (,$packageBatch), $ConfigDir
-        $jobs += $job
+        $job = Start-WingetBatchJob -ScriptBlock $jobScript -ArgumentList (,$packageBatch), $ConfigDir
+        $jobs.Add($job)
         $jobPackageMap[$job.Id] = $packageBatch
     }
 
@@ -1093,7 +1112,7 @@ function Get-WingetNewPackages {
             $endIndex = [Math]::Min($startIndex + $packagesPerJob - 1, $totalPackagesToFetch - 1)
             $packageBatch = $packagesToFetch[$startIndex..$endIndex]
 
-            $job = Start-Job -ScriptBlock {
+            $job = Start-WingetBatchJob -ScriptBlock {
                 param($packageList, $cacheDir)
                 $results = @{}
 
@@ -2215,7 +2234,7 @@ function Start-WingetUpdateCheck {
     }
 
     # Run check in background job
-    $job = Start-Job -ScriptBlock {
+    $job = Start-WingetBatchJob -ScriptBlock {
         param($configDir, $cacheFile)
 
         try {
