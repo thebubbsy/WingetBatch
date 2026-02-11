@@ -827,7 +827,7 @@ function Get-WingetNewPackages {
         # Calculate the date threshold
         $since = (Get-Date).Subtract($timeSpan).ToString("yyyy-MM-ddTHH:mm:ssZ")
 
-        $newPackages = [System.Collections.Generic.List[Object]]::new()
+        $newPackages = [System.Collections.Generic.List[PSCustomObject]]::new()
         $processedPackages = @{}
         $allCommits = [System.Collections.Generic.List[Object]]::new()
         $page = 1
