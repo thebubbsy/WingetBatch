@@ -1033,15 +1033,153 @@ function Get-WingetNewPackages {
         Write-Host "⏳ Fetching detailed package information in background..." -ForegroundColor DarkGray
 
         $configDir = Join-Path $env:USERPROFILE ".wingetbatch"
-        $packageIds = @($newPackages | ForEach-Object { $_.Name })
-        $totalPackages = $packageIds.Count
+        $maxConcurrentJobs = 10
+        $allPackageIds = @($newPackages | ForEach-Object { $_.Name })
 
-        $jobsResult = Start-PackageDetailJobs -PackageIds $packageIds -ConfigDir $configDir
-        $jobs = $jobsResult[0]
-        $jobPackageMap = $jobsResult[1]
-        $actualJobCount = $jobs.Count
+        # Load cache to reduce API calls and IO
+        $cacheFile = Join-Path $configDir "package_cache.json"
+        $localCache = @{}
+        if (Test-Path $cacheFile) {
+            try {
+                $json = Get-Content $cacheFile -Raw | ConvertFrom-Json
+                if ($json -is [PSCustomObject]) {
+                    $json.PSObject.Properties | ForEach-Object { $localCache[$_.Name] = $_.Value }
+                }
+            } catch {
+                Write-Verbose "Failed to load cache: $_"
+            }
+        }
 
-        Write-Host "   Started $actualJobCount background jobs processing $totalPackages packages..." -ForegroundColor DarkGray
+        # Filter packages to identify what needs fetching
+        $packagesToFetchList = [System.Collections.Generic.List[string]]::new()
+        $cachedResults = @{}
+
+        foreach ($pkgId in $allPackageIds) {
+            $isCached = $false
+            if ($localCache.ContainsKey($pkgId)) {
+                $entry = $localCache[$pkgId]
+                if ($entry.CachedDate) {
+                    try {
+                        $cachedDate = [DateTime]$entry.CachedDate
+                        # Check if fresh (< 30 days)
+                        if ((Get-Date) -lt $cachedDate.AddDays(30)) {
+                            $cachedResults[$pkgId] = $entry.Details
+                            $isCached = $true
+                        }
+                    } catch {}
+                }
+            }
+
+            if (-not $isCached) {
+                $packagesToFetchList.Add($pkgId)
+            }
+        }
+
+        $packagesToFetch = $packagesToFetchList.ToArray()
+        $totalPackagesToFetch = $packagesToFetch.Count
+
+        $packagesPerJob = if ($totalPackagesToFetch -gt 0) { [Math]::Ceiling($totalPackagesToFetch / $maxConcurrentJobs) } else { 0 }
+        $actualJobCount = [Math]::Min($maxConcurrentJobs, $totalPackagesToFetch)
+
+        $jobs = [System.Collections.Generic.List[Object]]::new()
+        $jobPackageMap = @{}
+
+        if ($cachedResults.Count -gt 0) {
+            Write-Host "✓ Found $($cachedResults.Count) packages in cache" -ForegroundColor Green
+        }
+
+        for ($i = 0; $i -lt $actualJobCount; $i++) {
+            $startIndex = $i * $packagesPerJob
+            $endIndex = [Math]::Min($startIndex + $packagesPerJob - 1, $totalPackagesToFetch - 1)
+            $packageBatch = $packagesToFetch[$startIndex..$endIndex]
+
+            $job = Start-Job -ScriptBlock {
+                param($packageList, $cacheDir)
+                $results = @{}
+
+                foreach ($packageId in $packageList) {
+                    # Fetch from winget
+                    $output = winget show --id $packageId 2>&1 | Out-String
+
+                    # Parse winget show output - capture ALL available fields
+                    $info = @{
+                        Id = $packageId
+                        Version = $null
+                        Publisher = $null
+                        PublisherName = $null
+                        PublisherUrl = $null
+                        PublisherGitHub = $null
+                        Author = $null
+                        Homepage = $null
+                        Description = $null
+                        Category = $null
+                        Tags = @()
+                        License = $null
+                        LicenseUrl = $null
+                        Copyright = $null
+                        CopyrightUrl = $null
+                        PrivacyUrl = $null
+                        PackageUrl = $null
+                        ReleaseNotes = $null
+                        ReleaseNotesUrl = $null
+                        Installer = $null
+                        Pricing = $null
+                        StoreLicense = $null
+                        FreeTrial = $null
+                        AgeRating = $null
+                        Moniker = $null
+                    }
+
+                    foreach ($line in $output -split "`n") {
+                        if ($line -match '^\s*Version:\s*(.+)$') { $info.Version = $matches[1].Trim() }
+                        elseif ($line -match '^\s*Publisher:\s*(.+)$') {
+                            $info.PublisherName = $matches[1].Trim()
+                            $info.Publisher = $matches[1].Trim()
+                        }
+                        elseif ($line -match '^\s*Publisher Url:\s*(.+)$') {
+                            $url = $matches[1].Trim()
+                            $info.PublisherUrl = $url
+                            # Check if it's a GitHub URL
+                            if ($url -match 'github\.com/([^/]+)') {
+                                $info.PublisherGitHub = $url
+                            }
+                        }
+                        elseif ($line -match '^\s*Author:\s*(.+)$') { $info.Author = $matches[1].Trim() }
+                        elseif ($line -match '^\s*Homepage:\s*(.+)$') { $info.Homepage = $matches[1].Trim() }
+                        elseif ($line -match '^\s*Description:\s*(.+)$') { $info.Description = $matches[1].Trim() }
+                        elseif ($line -match '^\s*Category:\s*(.+)$') { $info.Category = $matches[1].Trim() }
+                        elseif ($line -match '^\s*Tags:\s*(.+)$') {
+                            $tagString = $matches[1].Trim()
+                            $info.Tags = $tagString -split ',\s*'
+                        }
+                        elseif ($line -match '^\s*License:\s*(.+)$') { $info.License = $matches[1].Trim() }
+                        elseif ($line -match '^\s*License Url:\s*(.+)$') { $info.LicenseUrl = $matches[1].Trim() }
+                        elseif ($line -match '^\s*Copyright:\s*(.+)$') { $info.Copyright = $matches[1].Trim() }
+                        elseif ($line -match '^\s*Copyright Url:\s*(.+)$') { $info.CopyrightUrl = $matches[1].Trim() }
+                        elseif ($line -match '^\s*Privacy Url:\s*(.+)$') { $info.PrivacyUrl = $matches[1].Trim() }
+                        elseif ($line -match '^\s*Package Url:\s*(.+)$') { $info.PackageUrl = $matches[1].Trim() }
+                        elseif ($line -match '^\s*Release Notes:\s*(.+)$') { $info.ReleaseNotes = $matches[1].Trim() }
+                        elseif ($line -match '^\s*Release Notes Url:\s*(.+)$') { $info.ReleaseNotesUrl = $matches[1].Trim() }
+                        elseif ($line -match '^\s*Installer Type:\s*(.+)$') { $info.Installer = $matches[1].Trim() }
+                        elseif ($line -match '^\s*Pricing:\s*(.+)$') { $info.Pricing = $matches[1].Trim() }
+                        elseif ($line -match '^\s*Store License:\s*(.+)$') { $info.StoreLicense = $matches[1].Trim() }
+                        elseif ($line -match '^\s*Free Trial:\s*(.+)$') { $info.FreeTrial = $matches[1].Trim() }
+                        elseif ($line -match '^\s*Age Rating:\s*(.+)$') { $info.AgeRating = $matches[1].Trim() }
+                        elseif ($line -match '^\s*Moniker:\s*(.+)$') { $info.Moniker = $matches[1].Trim() }
+                    }
+
+                    $results[$packageId] = $info
+                }
+
+                return $results
+            } -ArgumentList (,$packageBatch), $configDir
+
+            $jobs.Add($job)
+            $jobPackageMap[$job.Id] = $packageBatch
+        }
+
+        Write-Host "   Started $actualJobCount background jobs processing $totalPackagesToFetch packages..." -ForegroundColor DarkGray
+        Write-Host "   (~$packagesPerJob packages per job)" -ForegroundColor DarkGray
 
         # Interactive selection using Spectre Console
         if (Get-Module -Name PwshSpectreConsole) {
@@ -1116,16 +1254,41 @@ function Get-WingetNewPackages {
 
                     # Collect results from relevant jobs only (each job returns a hashtable of multiple packages)
                     $allPackageDetails = @{}
+
+                    # Add cached results first
+                    foreach ($key in $cachedResults.Keys) {
+                        $allPackageDetails[$key] = $cachedResults[$key]
+                    }
+
+                    $newResults = @{}
+
                     foreach ($job in $relevantJobs) {
                         if ($job.State -eq 'Completed') {
                             $jobResults = Receive-Job -Job $job
                             # Merge job results into master hashtable
                             foreach ($key in $jobResults.Keys) {
                                 $allPackageDetails[$key] = $jobResults[$key]
-                                Set-PackageDetailsCache -PackageId $key -Details $jobResults[$key]
+                                $newResults[$key] = $jobResults[$key]
                             }
                         }
                         Remove-Job -Job $job -Force
+                    }
+
+                    # Update cache with new results
+                    if ($newResults.Count -gt 0) {
+                        foreach ($key in $newResults.Keys) {
+                            $localCache[[string]$key] = @{
+                                CachedDate = (Get-Date).ToString('o')
+                                Details = $newResults[$key]
+                            }
+                        }
+
+                        try {
+                            $jsonContent = $localCache | ConvertTo-Json -Depth 10 -Compress:$false
+                            [System.IO.File]::WriteAllText($cacheFile, $jsonContent, [System.Text.Encoding]::UTF8)
+                        } catch {
+                            Write-Verbose "Failed to save cache: $_"
+                        }
                     }
 
                     # Clean up irrelevant jobs
