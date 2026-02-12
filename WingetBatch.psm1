@@ -698,6 +698,7 @@ function Show-WingetPackageDetails {
         Write-Host " $pkgId " -ForegroundColor White -BackgroundColor DarkBlue
         Write-Host ""
 
+        # --- Basic Info ---
         # Version
         if ($details.Version -or ($pkgInfo -and $pkgInfo.Version)) {
             Write-Host "  🔖 Version:     " -ForegroundColor DarkGray -NoNewline
@@ -705,24 +706,38 @@ function Show-WingetPackageDetails {
             Write-Host $ver -ForegroundColor White
         }
 
-        # Publisher with GitHub link if available
-        if ($details.PublisherGitHub) {
-            Write-Host "  🏢 Publisher:   " -ForegroundColor DarkGray -NoNewline
-            Write-Host $details.PublisherName -ForegroundColor White -NoNewline
-            Write-Host " (" -ForegroundColor DarkGray -NoNewline
-            Write-Host $details.PublisherGitHub -ForegroundColor Magenta -NoNewline
-            Write-Host ")" -ForegroundColor DarkGray
+        # Category
+        if ($details.Category) {
+            Write-Host "  📂 Category:    " -ForegroundColor DarkGray -NoNewline
+            Write-Host $details.Category -ForegroundColor Yellow
         }
-        elseif ($details.PublisherUrl) {
-            Write-Host "  🏢 Publisher:   " -ForegroundColor DarkGray -NoNewline
-            Write-Host $details.PublisherName -ForegroundColor White -NoNewline
-            Write-Host " (" -ForegroundColor DarkGray -NoNewline
-            Write-Host $details.PublisherUrl -ForegroundColor Blue -NoNewline
-            Write-Host ")" -ForegroundColor DarkGray
+
+        # Pricing & Free Trial
+        if ($details.Pricing) {
+            Write-Host "  💰 Pricing:     " -ForegroundColor DarkGray -NoNewline
+            Write-Host $details.Pricing -ForegroundColor Green -NoNewline
+
+            if ($details.FreeTrial) {
+                Write-Host " (Free Trial Available)" -ForegroundColor Green
+            } else {
+                Write-Host ""
+            }
         }
-        elseif ($details.Publisher) {
+
+        # Age Rating
+        if ($details.AgeRating) {
+            Write-Host "  🔞 Age Rating:  " -ForegroundColor DarkGray -NoNewline
+            Write-Host $details.AgeRating -ForegroundColor White
+        }
+
+        Write-Host ""
+
+        # --- Publisher Info ---
+        # Publisher
+        if ($details.PublisherName -or $details.Publisher) {
             Write-Host "  🏢 Publisher:   " -ForegroundColor DarkGray -NoNewline
-            Write-Host $details.Publisher -ForegroundColor White
+            $pub = if ($details.PublisherName) { $details.PublisherName } else { $details.Publisher }
+            Write-Host $pub -ForegroundColor White
         }
 
         # Author
@@ -731,43 +746,71 @@ function Show-WingetPackageDetails {
             Write-Host $details.Author -ForegroundColor White
         }
 
-        # Installer Type
+        # Copyright
+        if ($details.Copyright) {
+            Write-Host "  ©️  Copyright:   " -ForegroundColor DarkGray -NoNewline
+            Write-Host $details.Copyright -ForegroundColor Gray
+        }
+
+        if ($details.PublisherName -or $details.Publisher -or $details.Author -or $details.Copyright) {
+             Write-Host ""
+        }
+
+        # --- Tech Info ---
+        # Installer Type & Moniker
         if ($details.Installer) {
             Write-Host "  💿 Installer:   " -ForegroundColor DarkGray -NoNewline
-            Write-Host $details.Installer -ForegroundColor Cyan
+            Write-Host $details.Installer -ForegroundColor Cyan -NoNewline
+            if ($details.Moniker) {
+                Write-Host " (command: " -ForegroundColor DarkGray -NoNewline
+                Write-Host $details.Moniker -ForegroundColor Yellow -NoNewline
+                Write-Host ")" -ForegroundColor DarkGray
+            }
+            Write-Host ""
         }
 
         # Tags
         if ($details.Tags -and $details.Tags.Count -gt 0) {
             Write-Host "  🏷️  Tags:        " -ForegroundColor DarkGray -NoNewline
             Write-Host ($details.Tags -join ", ") -ForegroundColor Yellow
+            Write-Host ""
         }
 
         # Description (The "blurb")
         if ($details.Description) {
             Write-Host "  ℹ️  Description: " -ForegroundColor DarkGray -NoNewline
             Write-Host $details.Description -ForegroundColor Gray
+            Write-Host ""
         }
 
-        # Homepage
-        if ($details.Homepage) {
-            Write-Host "  🏠 Homepage:    " -ForegroundColor DarkGray -NoNewline
-            Write-Host $details.Homepage -ForegroundColor Blue
+        # --- Links ---
+        $links = [System.Collections.Generic.List[PSCustomObject]]::new()
+        if ($details.Homepage) { $links.Add([PSCustomObject]@{ Label="Homepage"; Url=$details.Homepage; Color="Blue" }) }
+        if ($details.PublisherGitHub) { $links.Add([PSCustomObject]@{ Label="Source"; Url=$details.PublisherGitHub; Color="Magenta" }) }
+        elseif ($details.PublisherUrl) { $links.Add([PSCustomObject]@{ Label="Publisher"; Url=$details.PublisherUrl; Color="Blue" }) }
+
+        if ($details.ReleaseNotesUrl) { $links.Add([PSCustomObject]@{ Label="Release Notes"; Url=$details.ReleaseNotesUrl; Color="Blue" }) }
+        if ($details.LicenseUrl) { $links.Add([PSCustomObject]@{ Label="License"; Url=$details.LicenseUrl; Color="Blue" }) }
+        if ($details.PrivacyUrl) { $links.Add([PSCustomObject]@{ Label="Privacy"; Url=$details.PrivacyUrl; Color="Blue" }) }
+        if ($details.PackageUrl) { $links.Add([PSCustomObject]@{ Label="Package"; Url=$details.PackageUrl; Color="Blue" }) }
+
+        if ($links.Count -gt 0) {
+            Write-Host "  🔗 Links:" -ForegroundColor Cyan
+            foreach ($link in $links) {
+                # Align manually (max label length + 2)
+                $padding = " " * (15 - $link.Label.Length)
+                Write-Host "     • $($link.Label):$padding" -ForegroundColor DarkGray -NoNewline
+                Write-Host $link.Url -ForegroundColor $link.Color
+            }
+            Write-Host ""
         }
 
-        # Release Notes
-        if ($details.ReleaseNotesUrl) {
-            Write-Host "  📝 Release Notes: " -ForegroundColor DarkGray -NoNewline
-            Write-Host $details.ReleaseNotesUrl -ForegroundColor Blue
-        }
-
-        # License
+        # License (Text)
         if ($details.License) {
             Write-Host "  ⚖️  License:     " -ForegroundColor DarkGray -NoNewline
             Write-Host $details.License -ForegroundColor White
+            Write-Host ""
         }
-
-        Write-Host ""
     }
 
     Write-Host ("=" * 80) -ForegroundColor Cyan
