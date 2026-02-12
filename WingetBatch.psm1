@@ -272,20 +272,10 @@ function Install-WingetAll {
         }
 
         # Prepare choices for selection with SearchTerm grouping prefix
-        $packageChoices = $foundPackages | ForEach-Object {
-            $sourceColor = if ($_.Source -match 'msstore') { "magenta" } else { "cyan" }
-            $versionStr = if ($_.Version -ne "Unknown") { " [green]v$($_.Version)[/]" } else { "" }
-
-            $term = ConvertTo-SpectreEscaped $_.SearchTerm
-            $name = ConvertTo-SpectreEscaped $_.Name
-            $id = ConvertTo-SpectreEscaped $_.Id
-            $source = ConvertTo-SpectreEscaped $_.Source
-
-            "[yellow][[$term]][/] $name ($id)$versionStr [$sourceColor]$source[/]"
-        }
-
-        # Create a lookup map
+        # Consolidating loops to improve performance (avoid double iteration and regex operations)
+        $packageChoices = [System.Collections.Generic.List[string]]::new()
         $packageMap = @{}
+
         foreach ($pkg in $foundPackages) {
             $sourceColor = if ($pkg.Source -match 'msstore') { "magenta" } else { "cyan" }
             $versionStr = if ($pkg.Version -ne "Unknown") { " [green]v$($pkg.Version)[/]" } else { "" }
@@ -295,8 +285,10 @@ function Install-WingetAll {
             $id = ConvertTo-SpectreEscaped $pkg.Id
             $source = ConvertTo-SpectreEscaped $pkg.Source
 
-            $key = "[yellow][[$term]][/] $name ($id)$versionStr [$sourceColor]$source[/]"
-            $packageMap[$key] = $pkg.Id
+            $displayString = "[yellow][[$term]][/] $name ($id)$versionStr [$sourceColor]$source[/]"
+
+            $packageChoices.Add($displayString)
+            $packageMap[$displayString] = $pkg.Id
         }
 
         $packagesToInstall = @()

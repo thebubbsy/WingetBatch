@@ -9,3 +9,7 @@
 ## 2026-02-14 - [Process vs Thread Job Overhead]
 **Learning:** `Start-Job` creates a new PowerShell process for each job, incurring significant startup overhead (~140ms per job on typical hardware). When spawning many jobs (e.g., 50-100), this results in seconds of delay just for job creation. `Start-ThreadJob` runs in a thread within the current process, with startup overhead of ~6ms (22x faster).
 **Action:** Use `Start-ThreadJob` for background tasks, especially when launching multiple concurrent tasks or small tasks where process startup time dominates. Ensure a fallback to `Start-Job` is available if `ThreadJob` module is missing (e.g. on older Windows PowerShell without the module installed).
+
+## 2026-02-14 - [Double Iteration with Regex Overhead]
+**Learning:** `Install-WingetAll` iterated over `$foundPackages` twice: once to build a display list and again to build a lookup map. Both loops performed identical, expensive `ConvertTo-SpectreEscaped` (regex replacement) operations.
+**Action:** Consolidate such loops into a single pass. Build multiple data structures simultaneously to avoid redundant iterations and re-calculations.
