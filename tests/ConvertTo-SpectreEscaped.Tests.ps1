@@ -1,73 +1,73 @@
+$modulePath = Join-Path $PSScriptRoot ".." "WingetBatch.psm1"
+Import-Module $modulePath -Force
+
 Describe "ConvertTo-SpectreEscaped" {
-    BeforeAll {
-        # Dot-source the module to access internal functions
-        . "$PSScriptRoot/../WingetBatch.psm1"
-    }
+    InModuleScope "WingetBatch" {
+        Context "Edge Cases" {
+            It "Returns null when input is null" {
+                $testInput = $null
+                $output = ConvertTo-SpectreEscaped -Text $testInput
+                $output | Should -BeNullOrEmpty
+            }
 
-    Context "Edge Cases" {
-        It "Returns null when input is null" {
-            $testInput = $null
-            $output = ConvertTo-SpectreEscaped -Text $testInput
-            $output | Should -BeNullOrEmpty
+            It "Returns empty string when input is empty" {
+                $testInput = ""
+                $output = ConvertTo-SpectreEscaped -Text $testInput
+                $output | Should -Be ""
+            }
         }
 
-        It "Returns empty string when input is empty" {
-            $testInput = ""
-            $output = ConvertTo-SpectreEscaped -Text $testInput
-            $output | Should -Be ""
-        }
-    }
+        Context "Normal Strings" {
+            It "Returns the same string when no brackets are present" {
+                $testInput = "Hello World"
+                $output = ConvertTo-SpectreEscaped -Text $testInput
+                $output | Should -Be "Hello World"
+            }
 
-    Context "Normal Strings" {
-        It "Returns the same string when no brackets are present" {
-            $testInput = "Hello World"
-            $output = ConvertTo-SpectreEscaped -Text $testInput
-            $output | Should -Be "Hello World"
-        }
-
-        It "Does not affect other special characters" {
-            # Use single quotes to avoid escaping issues. In single quotes, ' is escaped as ''
-            $testInput = 'Hello! @#$%^&*()_+-={}|;'':",./<>?'
-            $output = ConvertTo-SpectreEscaped -Text $testInput
-            $output | Should -Be 'Hello! @#$%^&*()_+-={}|;'':",./<>?'
-        }
-    }
-
-    Context "Bracket Escaping" {
-        It "Escapes opening brackets" {
-            $testInput = "["
-            $output = ConvertTo-SpectreEscaped -Text $testInput
-            $output | Should -Be "[["
+            It "Does not affect other special characters" {
+                # Use single quotes to avoid escaping issues. In single quotes, ' is escaped as ''
+                $testInput = 'Hello! @#$%^&*()_+-={}|;'':",./<>?'
+                $output = ConvertTo-SpectreEscaped -Text $testInput
+                $output | Should -Be 'Hello! @#$%^&*()_+-={}|;'':",./<>?'
+            }
         }
 
-        It "Escapes closing brackets" {
-            $testInput = "]"
-            $output = ConvertTo-SpectreEscaped -Text $testInput
-            $output | Should -Be "]]"
-        }
+        Context "Bracket Escaping" {
+            It "Escapes opening brackets" {
+                $testInput = "["
+                $output = ConvertTo-SpectreEscaped -Text $testInput
+                $output | Should -Be "[["
+            }
 
-        It "Escapes both brackets in a string" {
-            $testInput = "[test]"
-            $output = ConvertTo-SpectreEscaped -Text $testInput
-            $output | Should -Be "[[test]]"
-        }
+            It "Escapes closing brackets" {
+                $testInput = "]"
+                $output = ConvertTo-SpectreEscaped -Text $testInput
+                $output | Should -Be "]]"
+            }
 
-        It "Escapes multiple brackets" {
-            $testInput = "[tag1] [tag2]"
-            $output = ConvertTo-SpectreEscaped -Text $testInput
-            $output | Should -Be "[[tag1]] [[tag2]]"
-        }
+            It "Escapes both brackets in a string" {
+                $testInput = "[test]"
+                $output = ConvertTo-SpectreEscaped -Text $testInput
+                $output | Should -Be "[[test]]"
+            }
 
-        It "Handles strings with mixed characters and brackets" {
-            $testInput = "Price [99] is [too high]"
-            $output = ConvertTo-SpectreEscaped -Text $testInput
-            $output | Should -Be "Price [[99]] is [[too high]]"
-        }
+            It "Escapes multiple brackets" {
+                $testInput = "[tag1] [tag2]"
+                $output = ConvertTo-SpectreEscaped -Text $testInput
+                $output | Should -Be "[[tag1]] [[tag2]]"
+            }
 
-        It "Handles nested-looking brackets" {
-            $testInput = "[[nested]]"
-            $output = ConvertTo-SpectreEscaped -Text $testInput
-            $output | Should -Be "[[[[nested]]]]"
+            It "Handles strings with mixed characters and brackets" {
+                $testInput = "Price [99] is [too high]"
+                $output = ConvertTo-SpectreEscaped -Text $testInput
+                $output | Should -Be "Price [[99]] is [[too high]]"
+            }
+
+            It "Handles nested-looking brackets" {
+                $testInput = "[[nested]]"
+                $output = ConvertTo-SpectreEscaped -Text $testInput
+                $output | Should -Be "[[[[nested]]]]"
+            }
         }
     }
 }
