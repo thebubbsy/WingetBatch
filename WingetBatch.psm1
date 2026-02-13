@@ -547,8 +547,13 @@ function Start-PackageDetailJobs {
     $jobPackageMap = @{}
 
     $jobScript = {
-        param($packageList, $cacheDir)
+        param($packageList, $cacheDir, $ParseSB)
         $results = @{}
+
+        # Define Parse-WingetShowOutput in the job scope from the passed script block
+        if ($ParseSB) {
+            Set-Item -Path function:Parse-WingetShowOutput -Value $ParseSB
+        }
 
         # Helper function to get cached details
         function Get-CachedDetails {
@@ -590,71 +595,7 @@ function Start-PackageDetailJobs {
             $output = winget show --id $packageId 2>&1 | Out-String
 
             # Parse winget show output - capture ALL available fields
-            $info = @{
-                Id = $packageId
-                Version = $null
-                Publisher = $null
-                PublisherName = $null
-                PublisherUrl = $null
-                PublisherGitHub = $null
-                Author = $null
-                Homepage = $null
-                Description = $null
-                Category = $null
-                Tags = @()
-                License = $null
-                LicenseUrl = $null
-                Copyright = $null
-                CopyrightUrl = $null
-                PrivacyUrl = $null
-                PackageUrl = $null
-                ReleaseNotes = $null
-                ReleaseNotesUrl = $null
-                Installer = $null
-                Pricing = $null
-                StoreLicense = $null
-                FreeTrial = $null
-                AgeRating = $null
-                Moniker = $null
-            }
-
-            foreach ($line in $output -split "`n") {
-                if ($line -match '^\s*Version:\s*(.+)$') { $info.Version = $matches[1].Trim() }
-                elseif ($line -match '^\s*Publisher:\s*(.+)$') {
-                    $info.PublisherName = $matches[1].Trim()
-                    $info.Publisher = $matches[1].Trim()
-                }
-                elseif ($line -match '^\s*Publisher Url:\s*(.+)$') {
-                    $url = $matches[1].Trim()
-                    $info.PublisherUrl = $url
-                    # Check if it's a GitHub URL
-                    if ($url -match 'github\.com/([^/]+)') {
-                        $info.PublisherGitHub = $url
-                    }
-                }
-                elseif ($line -match '^\s*Author:\s*(.+)$') { $info.Author = $matches[1].Trim() }
-                elseif ($line -match '^\s*Homepage:\s*(.+)$') { $info.Homepage = $matches[1].Trim() }
-                elseif ($line -match '^\s*Description:\s*(.+)$') { $info.Description = $matches[1].Trim() }
-                elseif ($line -match '^\s*Category:\s*(.+)$') { $info.Category = $matches[1].Trim() }
-                elseif ($line -match '^\s*Tags:\s*(.+)$') {
-                    $tagString = $matches[1].Trim()
-                    $info.Tags = $tagString -split ',\s*'
-                }
-                elseif ($line -match '^\s*License:\s*(.+)$') { $info.License = $matches[1].Trim() }
-                elseif ($line -match '^\s*License Url:\s*(.+)$') { $info.LicenseUrl = $matches[1].Trim() }
-                elseif ($line -match '^\s*Copyright:\s*(.+)$') { $info.Copyright = $matches[1].Trim() }
-                elseif ($line -match '^\s*Copyright Url:\s*(.+)$') { $info.CopyrightUrl = $matches[1].Trim() }
-                elseif ($line -match '^\s*Privacy Url:\s*(.+)$') { $info.PrivacyUrl = $matches[1].Trim() }
-                elseif ($line -match '^\s*Package Url:\s*(.+)$') { $info.PackageUrl = $matches[1].Trim() }
-                elseif ($line -match '^\s*Release Notes:\s*(.+)$') { $info.ReleaseNotes = $matches[1].Trim() }
-                elseif ($line -match '^\s*Release Notes Url:\s*(.+)$') { $info.ReleaseNotesUrl = $matches[1].Trim() }
-                elseif ($line -match '^\s*Installer Type:\s*(.+)$') { $info.Installer = $matches[1].Trim() }
-                elseif ($line -match '^\s*Pricing:\s*(.+)$') { $info.Pricing = $matches[1].Trim() }
-                elseif ($line -match '^\s*Store License:\s*(.+)$') { $info.StoreLicense = $matches[1].Trim() }
-                elseif ($line -match '^\s*Free Trial:\s*(.+)$') { $info.FreeTrial = $matches[1].Trim() }
-                elseif ($line -match '^\s*Age Rating:\s*(.+)$') { $info.AgeRating = $matches[1].Trim() }
-                elseif ($line -match '^\s*Moniker:\s*(.+)$') { $info.Moniker = $matches[1].Trim() }
-            }
+            $info = Parse-WingetShowOutput -Output $output -PackageId $packageId
 
             $results[$packageId] = $info
         }
@@ -669,7 +610,7 @@ function Start-PackageDetailJobs {
 
         $packageBatch = $PackageIds[$startIndex..$endIndex]
 
-        $job = Start-WingetBatchJob -ScriptBlock $jobScript -ArgumentList (,$packageBatch), $ConfigDir
+        $job = Start-WingetBatchJob -ScriptBlock $jobScript -ArgumentList (,$packageBatch), $ConfigDir, $function:Parse-WingetShowOutput
         $jobs.Add($job)
         $jobPackageMap[$job.Id] = $packageBatch
     }
@@ -1131,85 +1072,26 @@ function Get-WingetNewPackages {
             $packageBatch = $packagesToFetch[$startIndex..$endIndex]
 
             $job = Start-WingetBatchJob -ScriptBlock {
-                param($packageList, $cacheDir)
+                param($packageList, $cacheDir, $ParseSB)
                 $results = @{}
+
+                # Define Parse-WingetShowOutput in the job scope from the passed script block
+                if ($ParseSB) {
+                    Set-Item -Path function:Parse-WingetShowOutput -Value $ParseSB
+                }
 
                 foreach ($packageId in $packageList) {
                     # Fetch from winget
                     $output = winget show --id $packageId 2>&1 | Out-String
 
                     # Parse winget show output - capture ALL available fields
-                    $info = @{
-                        Id = $packageId
-                        Version = $null
-                        Publisher = $null
-                        PublisherName = $null
-                        PublisherUrl = $null
-                        PublisherGitHub = $null
-                        Author = $null
-                        Homepage = $null
-                        Description = $null
-                        Category = $null
-                        Tags = @()
-                        License = $null
-                        LicenseUrl = $null
-                        Copyright = $null
-                        CopyrightUrl = $null
-                        PrivacyUrl = $null
-                        PackageUrl = $null
-                        ReleaseNotes = $null
-                        ReleaseNotesUrl = $null
-                        Installer = $null
-                        Pricing = $null
-                        StoreLicense = $null
-                        FreeTrial = $null
-                        AgeRating = $null
-                        Moniker = $null
-                    }
-
-                    foreach ($line in $output -split "`n") {
-                        if ($line -match '^\s*Version:\s*(.+)$') { $info.Version = $matches[1].Trim() }
-                        elseif ($line -match '^\s*Publisher:\s*(.+)$') {
-                            $info.PublisherName = $matches[1].Trim()
-                            $info.Publisher = $matches[1].Trim()
-                        }
-                        elseif ($line -match '^\s*Publisher Url:\s*(.+)$') {
-                            $url = $matches[1].Trim()
-                            $info.PublisherUrl = $url
-                            # Check if it's a GitHub URL
-                            if ($url -match 'github\.com/([^/]+)') {
-                                $info.PublisherGitHub = $url
-                            }
-                        }
-                        elseif ($line -match '^\s*Author:\s*(.+)$') { $info.Author = $matches[1].Trim() }
-                        elseif ($line -match '^\s*Homepage:\s*(.+)$') { $info.Homepage = $matches[1].Trim() }
-                        elseif ($line -match '^\s*Description:\s*(.+)$') { $info.Description = $matches[1].Trim() }
-                        elseif ($line -match '^\s*Category:\s*(.+)$') { $info.Category = $matches[1].Trim() }
-                        elseif ($line -match '^\s*Tags:\s*(.+)$') {
-                            $tagString = $matches[1].Trim()
-                            $info.Tags = $tagString -split ',\s*'
-                        }
-                        elseif ($line -match '^\s*License:\s*(.+)$') { $info.License = $matches[1].Trim() }
-                        elseif ($line -match '^\s*License Url:\s*(.+)$') { $info.LicenseUrl = $matches[1].Trim() }
-                        elseif ($line -match '^\s*Copyright:\s*(.+)$') { $info.Copyright = $matches[1].Trim() }
-                        elseif ($line -match '^\s*Copyright Url:\s*(.+)$') { $info.CopyrightUrl = $matches[1].Trim() }
-                        elseif ($line -match '^\s*Privacy Url:\s*(.+)$') { $info.PrivacyUrl = $matches[1].Trim() }
-                        elseif ($line -match '^\s*Package Url:\s*(.+)$') { $info.PackageUrl = $matches[1].Trim() }
-                        elseif ($line -match '^\s*Release Notes:\s*(.+)$') { $info.ReleaseNotes = $matches[1].Trim() }
-                        elseif ($line -match '^\s*Release Notes Url:\s*(.+)$') { $info.ReleaseNotesUrl = $matches[1].Trim() }
-                        elseif ($line -match '^\s*Installer Type:\s*(.+)$') { $info.Installer = $matches[1].Trim() }
-                        elseif ($line -match '^\s*Pricing:\s*(.+)$') { $info.Pricing = $matches[1].Trim() }
-                        elseif ($line -match '^\s*Store License:\s*(.+)$') { $info.StoreLicense = $matches[1].Trim() }
-                        elseif ($line -match '^\s*Free Trial:\s*(.+)$') { $info.FreeTrial = $matches[1].Trim() }
-                        elseif ($line -match '^\s*Age Rating:\s*(.+)$') { $info.AgeRating = $matches[1].Trim() }
-                        elseif ($line -match '^\s*Moniker:\s*(.+)$') { $info.Moniker = $matches[1].Trim() }
-                    }
+                    $info = Parse-WingetShowOutput -Output $output -PackageId $packageId
 
                     $results[$packageId] = $info
                 }
 
                 return $results
-            } -ArgumentList (,$packageBatch), $configDir
+            } -ArgumentList (,$packageBatch), $configDir, $function:Parse-WingetShowOutput
 
             $jobs.Add($job)
             $jobPackageMap[$job.Id] = $packageBatch
@@ -1462,33 +1344,8 @@ function Get-WingetNewPackages {
                                         Write-Host "  Fetching $pkgId..." -ForegroundColor DarkGray
                                         $output = winget show --id $pkgId 2>&1 | Out-String
 
-                                        $info = @{
-                                            Id = $pkgId
-                                            Version = $null
-                                            Publisher = $null
-                                            PublisherName = $null
-                                            PublisherUrl = $null
-                                            PublisherGitHub = $null
-                                            License = $null
-                                            Description = $null
-                                        }
-
-                                        foreach ($line in $output -split "`n") {
-                                            if ($line -match '^\s*Version:\s*(.+)$') { $info.Version = $matches[1].Trim() }
-                                            elseif ($line -match '^\s*Publisher:\s*(.+)$') {
-                                                $info.PublisherName = $matches[1].Trim()
-                                                $info.Publisher = $matches[1].Trim()
-                                            }
-                                            elseif ($line -match '^\s*Publisher Url:\s*(.+)$') {
-                                                $url = $matches[1].Trim()
-                                                $info.PublisherUrl = $url
-                                                if ($url -match 'github\.com/([^/]+)') {
-                                                    $info.PublisherGitHub = $url
-                                                }
-                                            }
-                                            elseif ($line -match '^\s*License:\s*(.+)$') { $info.License = $matches[1].Trim() }
-                                            elseif ($line -match '^\s*Description:\s*(.+)$') { $info.Description = $matches[1].Trim() }
-                                        }
+                                        # Parse winget show output
+                                        $info = Parse-WingetShowOutput -Output $output -PackageId $pkgId
 
                                         Set-PackageDetailsCache -PackageId $pkgId -Details $info
                                         $reselectedPackageDetails[$pkgId] = $info
@@ -2797,6 +2654,85 @@ function Remove-WingetRecent {
     catch {
         Write-Error "Failed to get installed packages: $_"
     }
+}
+
+function Parse-WingetShowOutput {
+    <#
+    .SYNOPSIS
+        Internal helper to parse 'winget show' output into a structured hashtable.
+    #>
+    param(
+        [string]$Output,
+        [string]$PackageId
+    )
+
+    $info = @{
+        Id = $PackageId
+        Version = $null
+        Publisher = $null
+        PublisherName = $null
+        PublisherUrl = $null
+        PublisherGitHub = $null
+        Author = $null
+        Homepage = $null
+        Description = $null
+        Category = $null
+        Tags = @()
+        License = $null
+        LicenseUrl = $null
+        Copyright = $null
+        CopyrightUrl = $null
+        PrivacyUrl = $null
+        PackageUrl = $null
+        ReleaseNotes = $null
+        ReleaseNotesUrl = $null
+        Installer = $null
+        Pricing = $null
+        StoreLicense = $null
+        FreeTrial = $null
+        AgeRating = $null
+        Moniker = $null
+    }
+
+    foreach ($line in $Output -split "`n") {
+        if ($line -match '^\s*Version:\s*(.+)$') { $info.Version = $matches[1].Trim() }
+        elseif ($line -match '^\s*Publisher:\s*(.+)$') {
+            $info.PublisherName = $matches[1].Trim()
+            $info.Publisher = $matches[1].Trim()
+        }
+        elseif ($line -match '^\s*Publisher Url:\s*(.+)$') {
+            $url = $matches[1].Trim()
+            $info.PublisherUrl = $url
+            # Check if it's a GitHub URL
+            if ($url -match 'github\.com/([^/]+)') {
+                $info.PublisherGitHub = $url
+            }
+        }
+        elseif ($line -match '^\s*Author:\s*(.+)$') { $info.Author = $matches[1].Trim() }
+        elseif ($line -match '^\s*Homepage:\s*(.+)$') { $info.Homepage = $matches[1].Trim() }
+        elseif ($line -match '^\s*Description:\s*(.+)$') { $info.Description = $matches[1].Trim() }
+        elseif ($line -match '^\s*Category:\s*(.+)$') { $info.Category = $matches[1].Trim() }
+        elseif ($line -match '^\s*Tags:\s*(.+)$') {
+            $tagString = $matches[1].Trim()
+            $info.Tags = $tagString -split ',\s*'
+        }
+        elseif ($line -match '^\s*License:\s*(.+)$') { $info.License = $matches[1].Trim() }
+        elseif ($line -match '^\s*License Url:\s*(.+)$') { $info.LicenseUrl = $matches[1].Trim() }
+        elseif ($line -match '^\s*Copyright:\s*(.+)$') { $info.Copyright = $matches[1].Trim() }
+        elseif ($line -match '^\s*Copyright Url:\s*(.+)$') { $info.CopyrightUrl = $matches[1].Trim() }
+        elseif ($line -match '^\s*Privacy Url:\s*(.+)$') { $info.PrivacyUrl = $matches[1].Trim() }
+        elseif ($line -match '^\s*Package Url:\s*(.+)$') { $info.PackageUrl = $matches[1].Trim() }
+        elseif ($line -match '^\s*Release Notes:\s*(.+)$') { $info.ReleaseNotes = $matches[1].Trim() }
+        elseif ($line -match '^\s*Release Notes Url:\s*(.+)$') { $info.ReleaseNotesUrl = $matches[1].Trim() }
+        elseif ($line -match '^\s*Installer Type:\s*(.+)$') { $info.Installer = $matches[1].Trim() }
+        elseif ($line -match '^\s*Pricing:\s*(.+)$') { $info.Pricing = $matches[1].Trim() }
+        elseif ($line -match '^\s*Store License:\s*(.+)$') { $info.StoreLicense = $matches[1].Trim() }
+        elseif ($line -match '^\s*Free Trial:\s*(.+)$') { $info.FreeTrial = $matches[1].Trim() }
+        elseif ($line -match '^\s*Age Rating:\s*(.+)$') { $info.AgeRating = $matches[1].Trim() }
+        elseif ($line -match '^\s*Moniker:\s*(.+)$') { $info.Moniker = $matches[1].Trim() }
+    }
+
+    return $info
 }
 
 function ConvertTo-SpectreEscaped {
