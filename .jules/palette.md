@@ -5,3 +5,7 @@
 ## 2025-11-21 - [Emoji Scanability in CLI]
 **Learning:** Adding semantic emojis (e.g., 🏢 for Publisher, ⚖️ for License) to detailed CLI output significantly improves scanability and helps users quickly locate specific metadata fields without reading labels.
 **Action:** Use consistent emojis as visual anchors for key metadata fields in detailed views.
+
+## 2026-02-12 - [Visual Hierarchy in CLI Output]
+**Learning:** Flat lists of metadata are hard to scan. Grouping related fields (Basic, Publisher, Tech, Links) with visual spacers creates a clear hierarchy that guides the user's eye and reduces cognitive load.
+**Action:** Use logical grouping and spacing when displaying dense information in terminal interfaces.
