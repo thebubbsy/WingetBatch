@@ -178,7 +178,7 @@ Configuration is stored in `~\.wingetbatch\config.json`:
 
 ### GitHub Token
 
-Token is stored in `~\.wingetbatch\github_token.txt` (plain text - keep secure!)
+Token is stored securely in `~\.wingetbatch\github_token.clixml` using PowerShell's encryption (bound to your user account).
 
 ### Cache Files
 

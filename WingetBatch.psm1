@@ -1691,7 +1691,8 @@ function New-WingetBatchGitHubToken {
     Write-Host ""
 
     # Prompt for token
-    $token = Read-Host "Paste your token here (it won't be visible)"
+    $secureInput = Read-Host "Paste your token here" -AsSecureString
+    $token = [System.Net.NetworkCredential]::new("", $secureInput).Password
 
     if ([string]::IsNullOrWhiteSpace($token)) {
         Write-Host ""
@@ -1761,6 +1762,7 @@ function Set-WingetBatchGitHubToken {
     .DESCRIPTION
         Stores a GitHub token securely to avoid API rate limits when checking for new packages.
         Without a token, you're limited to 60 requests/hour. With a token, you get 5,000 requests/hour.
+        The token is stored securely using PowerShell's Export-Clixml with SecureString.
 
         For an interactive wizard, use New-WingetBatchGitHubToken instead.
 
@@ -1797,11 +1799,21 @@ function Set-WingetBatchGitHubToken {
     )
 
     $configDir = Join-Path $env:USERPROFILE ".wingetbatch"
-    $tokenFile = Join-Path $configDir "github_token.txt"
+    $tokenFile = Join-Path $configDir "github_token.clixml"
+    $legacyFile = Join-Path $configDir "github_token.txt"
 
     if ($Remove) {
+        $removed = $false
         if (Test-Path $tokenFile) {
             Remove-Item $tokenFile -Force
+            $removed = $true
+        }
+        if (Test-Path $legacyFile) {
+            Remove-Item $legacyFile -Force
+            $removed = $true
+        }
+
+        if ($removed) {
             Write-Host "✓ GitHub token removed successfully" -ForegroundColor Green
         }
         else {
@@ -1815,18 +1827,29 @@ function Set-WingetBatchGitHubToken {
         New-Item -ItemType Directory -Path $configDir -Force | Out-Null
     }
 
-    # Store token
-    $Token | Out-File -FilePath $tokenFile -Encoding UTF8 -Force
+    # Store token securely
+    try {
+        $SecureToken = $Token | ConvertTo-SecureString -AsPlainText -Force
+        $SecureToken | Export-Clixml -Path $tokenFile
 
-    Write-Host "✓ GitHub token saved successfully!" -ForegroundColor Green
-    Write-Host "  Location: $tokenFile" -ForegroundColor DarkGray
-    Write-Host "  The token will now be used automatically for API requests." -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "  ℹ Security Note:" -ForegroundColor Yellow
-    Write-Host "  • Token stored in plain text (no permissions required for this module)" -ForegroundColor DarkGray
-    Write-Host "  • Only increases API rate limits - cannot modify repositories or access private data" -ForegroundColor DarkGray
-    Write-Host "  • If stolen, someone could make API requests as you (read public repos only)" -ForegroundColor DarkGray
-    Write-Host "  • Revoke anytime at: https://github.com/settings/tokens" -ForegroundColor DarkGray
+        # Remove legacy plaintext file if it exists
+        if (Test-Path $legacyFile) {
+            Remove-Item $legacyFile -Force
+        }
+
+        Write-Host "✓ GitHub token saved securely!" -ForegroundColor Green
+        Write-Host "  Location: $tokenFile" -ForegroundColor DarkGray
+        Write-Host "  The token will now be used automatically for API requests." -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "  ℹ Security Note:" -ForegroundColor Yellow
+        Write-Host "  • Token stored securely using PowerShell encryption (bound to your user account)" -ForegroundColor DarkGray
+        Write-Host "  • Only increases API rate limits - cannot modify repositories or access private data" -ForegroundColor DarkGray
+        Write-Host "  • Revoke anytime at: https://github.com/settings/tokens" -ForegroundColor DarkGray
+    }
+    catch {
+        Write-Host "❌ Failed to save token securely: $($_.Exception.Message)" -ForegroundColor Red
+        throw
+    }
 }
 
 function Get-PackageDetailsCache {
@@ -1935,6 +1958,7 @@ function Get-WingetBatchGitHubToken {
 
     .DESCRIPTION
         Internal function to get the stored GitHub token for API authentication.
+        Handles both secure CliXml and legacy plaintext formats with automatic migration.
 
     .OUTPUTS
         String - The GitHub token if found, otherwise $null
@@ -1943,10 +1967,36 @@ function Get-WingetBatchGitHubToken {
     [CmdletBinding()]
     param()
 
-    $tokenFile = Join-Path $env:USERPROFILE ".wingetbatch\github_token.txt"
+    $configDir = Join-Path $env:USERPROFILE ".wingetbatch"
+    $tokenFile = Join-Path $configDir "github_token.clixml"
+    $legacyFile = Join-Path $configDir "github_token.txt"
 
+    # 1. Try to load from secure storage
     if (Test-Path $tokenFile) {
-        return (Get-Content $tokenFile -Raw).Trim()
+        try {
+            $SecureToken = Import-Clixml -Path $tokenFile -ErrorAction Stop
+            if ($SecureToken -is [System.Security.SecureString]) {
+                return [System.Net.NetworkCredential]::new("", $SecureToken).Password
+            }
+        }
+        catch {
+            # If clixml is corrupted or not a SecureString, we'll try legacy as fallback
+        }
+    }
+
+    # 2. Migration: Try legacy plaintext storage
+    if (Test-Path $legacyFile) {
+        try {
+            $Token = (Get-Content $legacyFile -Raw).Trim()
+            if (-not [string]::IsNullOrWhiteSpace($Token)) {
+                # Silently migrate to secure format
+                Set-WingetBatchGitHubToken -Token $Token | Out-Null
+                return $Token
+            }
+        }
+        catch {
+            return $null
+        }
     }
 
     return $null

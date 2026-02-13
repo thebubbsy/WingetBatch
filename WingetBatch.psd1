@@ -87,15 +87,15 @@ v2.0.0 - Major Feature Release
   * 30-minute cache TTL for update notifications
 
 - NEW: Token Management
-  * Set-WingetBatchGitHubToken - Store GitHub PAT securely
-  * New-WingetBatchGitHubToken - Interactive token creation wizard
+  * Set-WingetBatchGitHubToken - Store GitHub PAT securely (AES encrypted CliXml)
+  * New-WingetBatchGitHubToken - Interactive token creation wizard with masked input
 
 - FIXED: Date parsing bug in API rate limit tracking (timezone handling)
 - FIXED: Package selection workflow when going back to change selections
 
 Configuration stored in: ~/.wingetbatch/
   - config.json - Update notification settings
-  - github_token.txt - GitHub Personal Access Token
+  - github_token.clixml - Secure GitHub Personal Access Token
   - github_ratelimit.json - API usage tracking
   - package_cache.json - 30-day package details cache
   - update_cache.json - Cached update results
