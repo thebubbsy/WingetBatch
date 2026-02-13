@@ -243,6 +243,18 @@ function Install-WingetAll {
         # Keep all packages (including potential duplicates across queries) for display
         $foundPackages = $allPackages
 
+        # Build a lookup map for faster access to package details
+        $pkgMap = @{}
+        if ($null -ne $foundPackages) {
+            foreach ($pkg in $foundPackages) {
+                # Use the first encounter of a package ID to match original behavior of Select-Object -First 1
+                # Check for null Id to prevent hashtable errors and cast to string for safety
+                if ($null -ne $pkg.Id -and -not $pkgMap.ContainsKey([string]$pkg.Id)) {
+                    $pkgMap[[string]$pkg.Id] = $pkg
+                }
+            }
+        }
+
         if ($foundPackages.Count -eq 0) {
             Write-Warning "No packages found matching '$($SearchTerms -join ", ")'"
             return
@@ -366,7 +378,7 @@ function Install-WingetAll {
                     }
                 }
 
-                Show-WingetPackageDetails -PackageIds $packagesToInstall -DetailsMap $allPackageDetails -FallbackInfo $foundPackages
+                Show-WingetPackageDetails -PackageIds $packagesToInstall -DetailsMap $allPackageDetails -FallbackInfo $foundPackages -FallbackMap $pkgMap
 
                 # Ask for confirmation
                 Write-Host "Press " -NoNewline -ForegroundColor Yellow
@@ -398,7 +410,7 @@ function Install-WingetAll {
             $summaryList = [System.Collections.Generic.List[PSCustomObject]]::new()
 
             foreach ($packageId in $uniquePackagesToInstall) {
-                $pkgInfo = $foundPackages | Where-Object { $_.Id -eq $packageId } | Select-Object -First 1
+                $pkgInfo = $pkgMap[$packageId]
 
                 if ($pkgInfo) {
                     $summaryList.Add([PSCustomObject]@{
@@ -465,8 +477,8 @@ function Install-WingetAll {
         }
 
         foreach ($packageId in $uniquePackagesToInstall) {
-            # Find info for better display (use first match from foundPackages)
-            $pkgInfo = $foundPackages | Where-Object { $_.Id -eq $packageId } | Select-Object -First 1
+            # Find info for better display (use lookup map)
+            $pkgInfo = $pkgMap[$packageId]
 
             $pkgName = if ($pkgInfo) { $pkgInfo.Name } else { $packageId }
             $pkgVersion = if ($pkgInfo -and $pkgInfo.Version -ne "Unknown") { "v$($pkgInfo.Version)" } else { "" }
@@ -622,7 +634,8 @@ function Show-WingetPackageDetails {
     param(
         [string[]]$PackageIds,
         [hashtable]$DetailsMap,
-        [array]$FallbackInfo = @()
+        [array]$FallbackInfo = @(),
+        [hashtable]$FallbackMap = @{}
     )
 
     Write-Host ("=" * 80) -ForegroundColor Cyan
@@ -633,7 +646,11 @@ function Show-WingetPackageDetails {
     foreach ($pkgId in $PackageIds) {
         $details = $DetailsMap[$pkgId]
         # Try to find fallback info from the original search results if available
-        $pkgInfo = $FallbackInfo | Where-Object { $_.Name -eq $pkgId -or $_.Id -eq $pkgId } | Select-Object -First 1
+        $pkgInfo = if ($FallbackMap.Count -gt 0) { $FallbackMap[$pkgId] } else { $null }
+
+        if (-not $pkgInfo) {
+            $pkgInfo = $FallbackInfo | Where-Object { $_.Name -eq $pkgId -or $_.Id -eq $pkgId } | Select-Object -First 1
+        }
 
         Write-Host "▶ " -ForegroundColor Yellow -NoNewline
         Write-Host " $pkgId " -ForegroundColor White -BackgroundColor DarkBlue
