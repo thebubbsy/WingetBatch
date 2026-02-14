@@ -13,3 +13,7 @@
 ## 2026-02-14 - [Double Iteration with Regex Overhead]
 **Learning:** `Install-WingetAll` iterated over `$foundPackages` twice: once to build a display list and again to build a lookup map. Both loops performed identical, expensive `ConvertTo-SpectreEscaped` (regex replacement) operations.
 **Action:** Consolidate such loops into a single pass. Build multiple data structures simultaneously to avoid redundant iterations and re-calculations.
+
+## 2026-02-14 - [Pester 5 Scope for Internal Functions]
+**Learning:** `InModuleScope` executes immediately during Discovery phase to find tests. If `Import-Module` is placed inside `BeforeAll` (which runs after Discovery), `InModuleScope` fails because the module isn't loaded yet.
+**Action:** Place `Import-Module` at the script scope (top of file) when testing internal functions with `InModuleScope` in Pester 5.
