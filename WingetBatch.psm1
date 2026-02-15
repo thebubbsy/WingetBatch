@@ -80,6 +80,9 @@ function Install-WingetAll {
     }
 
     process {
+        # Initialize package details map
+        $allPackageDetails = $null
+
         # Parse multiple search terms: handle both arrays (PowerShell comma list) and comma-separated strings
         $searchQueries = $SearchTerms | ForEach-Object { $_ -split ',' } | Where-Object { $_ -ne '' }
         $allPackages = [System.Collections.Generic.List[Object]]::new()
@@ -404,6 +407,14 @@ function Install-WingetAll {
             foreach ($packageId in $uniquePackagesToInstall) {
                 $pkgInfo = $pkgMap[$packageId]
 
+                # Enhance with Publisher info if available
+                $publisher = "Unknown"
+                if ($allPackageDetails -and $allPackageDetails.ContainsKey($packageId)) {
+                    $details = $allPackageDetails[$packageId]
+                    if ($details.Publisher) { $publisher = $details.Publisher }
+                    elseif ($details.PublisherName) { $publisher = $details.PublisherName }
+                }
+
                 if ($pkgInfo) {
                     $summaryList.Add([PSCustomObject]@{
                         Name = $pkgInfo.Name
@@ -411,6 +422,7 @@ function Install-WingetAll {
                         Version = $pkgInfo.Version
                         Source = $pkgInfo.Source
                         SearchTerm = $pkgInfo.SearchTerm
+                        Publisher = $publisher
                     })
                 } else {
                     $summaryList.Add([PSCustomObject]@{
@@ -419,6 +431,7 @@ function Install-WingetAll {
                         Version = "Unknown"
                         Source = "Unknown"
                         SearchTerm = "Manual"
+                        Publisher = $publisher
                     })
                 }
             }
@@ -434,16 +447,28 @@ function Install-WingetAll {
                 $uniqueSearchTerms = $summaryList | Select-Object -ExpandProperty SearchTerm -Unique
                 $showSearchTerm = ($uniqueSearchTerms | Measure-Object).Count -gt 1
 
+                # Check if we have publisher info to show
+                $hasPublisher = $summaryList | Where-Object { $_.Publisher -ne "Unknown" } | Measure-Object | Select-Object -ExpandProperty Count
+                $showPublisher = $hasPublisher -gt 0
+
                 foreach ($item in $summaryList) {
                     $verColor = if ($item.Version -ne "Unknown") { "green" } else { "grey" }
                     $srcColor = if ($item.Source -match 'msstore') { "magenta" } else { "cyan" }
+
+                    $pub = if ($item.Publisher) { ConvertTo-SpectreEscaped $item.Publisher } else { "Unknown" }
+                    $pubColor = if ($pub -ne "Unknown") { "grey" } else { "dim grey" }
 
                     $obj = [ordered]@{
                         Name = "📦 " + (ConvertTo-SpectreEscaped $item.Name)
                         Id = ConvertTo-SpectreEscaped $item.Id
                         Version = "[$verColor]$($item.Version)[/]"
-                        Source = "[$srcColor]$($item.Source)[/]"
                     }
+
+                    if ($showPublisher) {
+                        $obj['Publisher'] = "[$pubColor]$pub[/]"
+                    }
+
+                    $obj['Source'] = "[$srcColor]$($item.Source)[/]"
 
                     if ($showSearchTerm) {
                         $obj['Search Term'] = "[grey]$(ConvertTo-SpectreEscaped $item.SearchTerm)[/]"
@@ -457,14 +482,20 @@ function Install-WingetAll {
             else {
                 Write-Host "`nPackage Installation Summary ($($summaryList.Count) packages):" -ForegroundColor Cyan
 
-                # Simple modification for fallback table too
-                $fallbackList = $summaryList | Select-Object @{N='Name';E={"📦 " + $_.Name}}, Id, Version, Source, SearchTerm
+                # Check if we have publisher info to show
+                $hasPublisher = $summaryList | Where-Object { $_.Publisher -ne "Unknown" } | Measure-Object | Select-Object -ExpandProperty Count
+                $showPublisher = $hasPublisher -gt 0
+                $showSearchTerm = ($summaryList | Select-Object -ExpandProperty SearchTerm -Unique | Measure-Object).Count -gt 1
 
-                if (($summaryList | Select-Object -ExpandProperty SearchTerm -Unique | Measure-Object).Count -gt 1) {
-                    $fallbackList | Format-Table -Property Name, Id, Version, Source, SearchTerm -AutoSize | Out-Host
-                } else {
-                    $fallbackList | Format-Table -Property Name, Id, Version, Source -AutoSize | Out-Host
-                }
+                # Simple modification for fallback table too
+                $fallbackList = $summaryList | Select-Object @{N='Name';E={"📦 " + $_.Name}}, Id, Version, Publisher, Source, SearchTerm
+
+                $props = @("Name", "Id", "Version")
+                if ($showPublisher) { $props += "Publisher" }
+                $props += "Source"
+                if ($showSearchTerm) { $props += "SearchTerm" }
+
+                $fallbackList | Format-Table -Property $props -AutoSize | Out-Host
             }
         }
 
