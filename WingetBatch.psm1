@@ -2796,42 +2796,46 @@ function Parse-WingetShowOutput {
         Moniker = $null
     }
 
-    foreach ($line in $Output -split "`n") {
-        if ($line -match '^\s*Version:\s*(.+)$') { $info.Version = $matches[1].Trim() }
-        elseif ($line -match '^\s*Publisher:\s*(.+)$') {
-            $info.PublisherName = $matches[1].Trim()
-            $info.Publisher = $matches[1].Trim()
-        }
-        elseif ($line -match '^\s*Publisher Url:\s*(.+)$') {
-            $url = $matches[1].Trim()
-            $info.PublisherUrl = $url
-            # Check if it's a GitHub URL
-            if ($url -match 'github\.com/([^/]+)') {
-                $info.PublisherGitHub = $url
+    $lines = $Output -split "`n"
+    foreach ($line in $lines) {
+        $idx = $line.IndexOf(':')
+        if ($idx -le 0) { continue }
+
+        $key = $line.Substring(0, $idx).Trim()
+        $value = $line.Substring($idx + 1).Trim()
+
+        switch ($key) {
+            'Version' { $info.Version = $value }
+            'Publisher' {
+                $info.PublisherName = $value
+                $info.Publisher = $value
             }
+            'Publisher Url' {
+                $info.PublisherUrl = $value
+                if ($value -match 'github\.com/') {
+                    $info.PublisherGitHub = $value
+                }
+            }
+            'Author' { $info.Author = $value }
+            'Homepage' { $info.Homepage = $value }
+            'Description' { $info.Description = $value }
+            'Category' { $info.Category = $value }
+            'Tags' { $info.Tags = $value -split ',\s*' }
+            'License' { $info.License = $value }
+            'License Url' { $info.LicenseUrl = $value }
+            'Copyright' { $info.Copyright = $value }
+            'Copyright Url' { $info.CopyrightUrl = $value }
+            'Privacy Url' { $info.PrivacyUrl = $value }
+            'Package Url' { $info.PackageUrl = $value }
+            'Release Notes' { $info.ReleaseNotes = $value }
+            'Release Notes Url' { $info.ReleaseNotesUrl = $value }
+            'Installer Type' { $info.Installer = $value }
+            'Pricing' { $info.Pricing = $value }
+            'Store License' { $info.StoreLicense = $value }
+            'Free Trial' { $info.FreeTrial = $value }
+            'Age Rating' { $info.AgeRating = $value }
+            'Moniker' { $info.Moniker = $value }
         }
-        elseif ($line -match '^\s*Author:\s*(.+)$') { $info.Author = $matches[1].Trim() }
-        elseif ($line -match '^\s*Homepage:\s*(.+)$') { $info.Homepage = $matches[1].Trim() }
-        elseif ($line -match '^\s*Description:\s*(.+)$') { $info.Description = $matches[1].Trim() }
-        elseif ($line -match '^\s*Category:\s*(.+)$') { $info.Category = $matches[1].Trim() }
-        elseif ($line -match '^\s*Tags:\s*(.+)$') {
-            $tagString = $matches[1].Trim()
-            $info.Tags = $tagString -split ',\s*'
-        }
-        elseif ($line -match '^\s*License:\s*(.+)$') { $info.License = $matches[1].Trim() }
-        elseif ($line -match '^\s*License Url:\s*(.+)$') { $info.LicenseUrl = $matches[1].Trim() }
-        elseif ($line -match '^\s*Copyright:\s*(.+)$') { $info.Copyright = $matches[1].Trim() }
-        elseif ($line -match '^\s*Copyright Url:\s*(.+)$') { $info.CopyrightUrl = $matches[1].Trim() }
-        elseif ($line -match '^\s*Privacy Url:\s*(.+)$') { $info.PrivacyUrl = $matches[1].Trim() }
-        elseif ($line -match '^\s*Package Url:\s*(.+)$') { $info.PackageUrl = $matches[1].Trim() }
-        elseif ($line -match '^\s*Release Notes:\s*(.+)$') { $info.ReleaseNotes = $matches[1].Trim() }
-        elseif ($line -match '^\s*Release Notes Url:\s*(.+)$') { $info.ReleaseNotesUrl = $matches[1].Trim() }
-        elseif ($line -match '^\s*Installer Type:\s*(.+)$') { $info.Installer = $matches[1].Trim() }
-        elseif ($line -match '^\s*Pricing:\s*(.+)$') { $info.Pricing = $matches[1].Trim() }
-        elseif ($line -match '^\s*Store License:\s*(.+)$') { $info.StoreLicense = $matches[1].Trim() }
-        elseif ($line -match '^\s*Free Trial:\s*(.+)$') { $info.FreeTrial = $matches[1].Trim() }
-        elseif ($line -match '^\s*Age Rating:\s*(.+)$') { $info.AgeRating = $matches[1].Trim() }
-        elseif ($line -match '^\s*Moniker:\s*(.+)$') { $info.Moniker = $matches[1].Trim() }
     }
 
     return $info
