@@ -648,6 +648,13 @@ function Show-WingetPackageDetails {
         Write-Host " $pkgId " -ForegroundColor White -BackgroundColor DarkBlue
         Write-Host ""
 
+        # Description (The "blurb") - Moved to top for visibility
+        if ($details.Description) {
+            Write-Host "  ℹ️  Description: " -ForegroundColor DarkGray -NoNewline
+            Write-Host $details.Description -ForegroundColor Gray
+            Write-Host ""
+        }
+
         # --- Basic Info ---
         # Version
         if ($details.Version -or ($pkgInfo -and $pkgInfo.Version)) {
@@ -723,13 +730,6 @@ function Show-WingetPackageDetails {
         if ($details.Tags -and $details.Tags.Count -gt 0) {
             Write-Host "  🏷️  Tags:        " -ForegroundColor DarkGray -NoNewline
             Write-Host ($details.Tags -join ", ") -ForegroundColor Yellow
-            Write-Host ""
-        }
-
-        # Description (The "blurb")
-        if ($details.Description) {
-            Write-Host "  ℹ️  Description: " -ForegroundColor DarkGray -NoNewline
-            Write-Host $details.Description -ForegroundColor Gray
             Write-Host ""
         }
 
