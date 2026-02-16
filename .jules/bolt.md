@@ -13,3 +13,7 @@
 ## 2026-02-14 - [Double Iteration with Regex Overhead]
 **Learning:** `Install-WingetAll` iterated over `$foundPackages` twice: once to build a display list and again to build a lookup map. Both loops performed identical, expensive `ConvertTo-SpectreEscaped` (regex replacement) operations.
 **Action:** Consolidate such loops into a single pass. Build multiple data structures simultaneously to avoid redundant iterations and re-calculations.
+
+## 2026-02-14 - [Regex vs String Operations in Parsing]
+**Learning:** `Parse-WingetShowOutput` was using ~20 sequential regex matches per line to parse output, which is expensive. Replacing this with `IndexOf(':')` and a `switch` statement improved performance by ~2.5x in benchmarks.
+**Action:** When parsing structured "Key: Value" text output, prefer simple string splitting and switch statements over repeated regex matching.
