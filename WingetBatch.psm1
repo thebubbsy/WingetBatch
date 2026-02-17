@@ -648,6 +648,13 @@ function Show-WingetPackageDetails {
         Write-Host " $pkgId " -ForegroundColor White -BackgroundColor DarkBlue
         Write-Host ""
 
+        # Description (The "blurb")
+        if ($details.Description) {
+            Write-Host "  ℹ️  Description: " -ForegroundColor DarkGray -NoNewline
+            Write-Host $details.Description -ForegroundColor Gray
+            Write-Host ""
+        }
+
         # --- Basic Info ---
         # Version
         if ($details.Version -or ($pkgInfo -and $pkgInfo.Version)) {
@@ -726,13 +733,6 @@ function Show-WingetPackageDetails {
             Write-Host ""
         }
 
-        # Description (The "blurb")
-        if ($details.Description) {
-            Write-Host "  ℹ️  Description: " -ForegroundColor DarkGray -NoNewline
-            Write-Host $details.Description -ForegroundColor Gray
-            Write-Host ""
-        }
-
         # --- Links ---
         $links = [System.Collections.Generic.List[PSCustomObject]]::new()
         if ($details.Homepage) { $links.Add([PSCustomObject]@{ Label="Homepage"; Url=$details.Homepage; Color="Blue" }) }
@@ -748,7 +748,9 @@ function Show-WingetPackageDetails {
             Write-Host "  🔗 Links:" -ForegroundColor Cyan
             foreach ($link in $links) {
                 # Align manually (max label length + 2)
-                $padding = " " * (15 - $link.Label.Length)
+                $padLen = 15 - $link.Label.Length
+                if ($padLen -lt 0) { $padLen = 0 }
+                $padding = " " * $padLen
                 Write-Host "     • $($link.Label):$padding" -ForegroundColor DarkGray -NoNewline
                 Write-Host $link.Url -ForegroundColor $link.Color
             }
