@@ -9,3 +9,7 @@
 ## 2026-02-12 - [Visual Hierarchy in CLI Output]
 **Learning:** Flat lists of metadata are hard to scan. Grouping related fields (Basic, Publisher, Tech, Links) with visual spacers creates a clear hierarchy that guides the user's eye and reduces cognitive load.
 **Action:** Use logical grouping and spacing when displaying dense information in terminal interfaces.
+
+## 2026-02-13 - [Information Priority in CLI]
+**Learning:** Users need immediate context about "what is this?" before "what version is this?". Prioritizing the Description field at the top of the detailed view significantly reduces cognitive load and confirms selection faster.
+**Action:** Always place the Description or Summary field immediately after the Item Header, before secondary metadata like Version or Publisher.
