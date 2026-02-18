@@ -404,6 +404,16 @@ function Install-WingetAll {
             foreach ($packageId in $uniquePackagesToInstall) {
                 $pkgInfo = $pkgMap[$packageId]
 
+                # Try to get publisher from details if available
+                $publisher = $null
+                if ($null -ne $allPackageDetails -and $allPackageDetails.ContainsKey($packageId)) {
+                    $details = $allPackageDetails[$packageId]
+                    if ($details.PublisherName) { $publisher = $details.PublisherName }
+                    elseif ($details.Publisher) { $publisher = $details.Publisher }
+                }
+
+                if (-not $publisher) { $publisher = "" }
+
                 if ($pkgInfo) {
                     $summaryList.Add([PSCustomObject]@{
                         Name = $pkgInfo.Name
@@ -411,6 +421,7 @@ function Install-WingetAll {
                         Version = $pkgInfo.Version
                         Source = $pkgInfo.Source
                         SearchTerm = $pkgInfo.SearchTerm
+                        Publisher = $publisher
                     })
                 } else {
                     $summaryList.Add([PSCustomObject]@{
@@ -419,6 +430,7 @@ function Install-WingetAll {
                         Version = "Unknown"
                         Source = "Unknown"
                         SearchTerm = "Manual"
+                        Publisher = $publisher
                     })
                 }
             }
@@ -434,6 +446,9 @@ function Install-WingetAll {
                 $uniqueSearchTerms = $summaryList | Select-Object -ExpandProperty SearchTerm -Unique
                 $showSearchTerm = ($uniqueSearchTerms | Measure-Object).Count -gt 1
 
+                # Check if we have any publishers to show
+                $showPublisher = ($summaryList | Where-Object { -not [string]::IsNullOrWhiteSpace($_.Publisher) } | Measure-Object).Count -gt 0
+
                 foreach ($item in $summaryList) {
                     $verColor = if ($item.Version -ne "Unknown") { "green" } else { "grey" }
                     $srcColor = if ($item.Source -match 'msstore') { "magenta" } else { "cyan" }
@@ -443,6 +458,10 @@ function Install-WingetAll {
                         Id = ConvertTo-SpectreEscaped $item.Id
                         Version = "[$verColor]$($item.Version)[/]"
                         Source = "[$srcColor]$($item.Source)[/]"
+                    }
+
+                    if ($showPublisher) {
+                        $obj['Publisher'] = if ($item.Publisher) { (ConvertTo-SpectreEscaped $item.Publisher) } else { "" }
                     }
 
                     if ($showSearchTerm) {
@@ -458,13 +477,22 @@ function Install-WingetAll {
                 Write-Host "`nPackage Installation Summary ($($summaryList.Count) packages):" -ForegroundColor Cyan
 
                 # Simple modification for fallback table too
-                $fallbackList = $summaryList | Select-Object @{N='Name';E={"📦 " + $_.Name}}, Id, Version, Source, SearchTerm
+                $showPublisher = ($summaryList | Where-Object { -not [string]::IsNullOrWhiteSpace($_.Publisher) } | Measure-Object).Count -gt 0
+
+                $fallbackList = $summaryList | Select-Object @{N='Name';E={"📦 " + $_.Name}}, Id, Version, Source, Publisher, SearchTerm
+
+                $props = [System.Collections.Generic.List[string]]::new()
+                $props.AddRange([string[]]@('Name', 'Id', 'Version', 'Source'))
+
+                if ($showPublisher) {
+                    $props.Add('Publisher')
+                }
 
                 if (($summaryList | Select-Object -ExpandProperty SearchTerm -Unique | Measure-Object).Count -gt 1) {
-                    $fallbackList | Format-Table -Property Name, Id, Version, Source, SearchTerm -AutoSize | Out-Host
-                } else {
-                    $fallbackList | Format-Table -Property Name, Id, Version, Source -AutoSize | Out-Host
+                    $props.Add('SearchTerm')
                 }
+
+                $fallbackList | Format-Table -Property $props -AutoSize | Out-Host
             }
         }
 
