@@ -2827,41 +2827,52 @@ function Parse-WingetShowOutput {
     }
 
     foreach ($line in $Output -split "`n") {
-        if ($line -match '^\s*Version:\s*(.+)$') { $info.Version = $matches[1].Trim() }
-        elseif ($line -match '^\s*Publisher:\s*(.+)$') {
-            $info.PublisherName = $matches[1].Trim()
-            $info.Publisher = $matches[1].Trim()
-        }
-        elseif ($line -match '^\s*Publisher Url:\s*(.+)$') {
-            $url = $matches[1].Trim()
-            $info.PublisherUrl = $url
-            # Check if it's a GitHub URL
-            if ($url -match 'github\.com/([^/]+)') {
-                $info.PublisherGitHub = $url
+        $colonIndex = $line.IndexOf(':')
+        if ($colonIndex -gt 0) {
+            $key = $line.Substring(0, $colonIndex).Trim()
+
+            switch ($key) {
+                'Version' { $info.Version = $line.Substring($colonIndex + 1).Trim(); break }
+                'Publisher' {
+                    $val = $line.Substring($colonIndex + 1).Trim()
+                    $info.PublisherName = $val
+                    $info.Publisher = $val
+                    break
+                }
+                'Publisher Url' {
+                    $url = $line.Substring($colonIndex + 1).Trim()
+                    $info.PublisherUrl = $url
+                    # Check if it's a GitHub URL
+                    if ($url -match 'github\.com/([^/]+)') {
+                        $info.PublisherGitHub = $url
+                    }
+                    break
+                }
+                'Author' { $info.Author = $line.Substring($colonIndex + 1).Trim(); break }
+                'Homepage' { $info.Homepage = $line.Substring($colonIndex + 1).Trim(); break }
+                'Description' { $info.Description = $line.Substring($colonIndex + 1).Trim(); break }
+                'Category' { $info.Category = $line.Substring($colonIndex + 1).Trim(); break }
+                'Tags' {
+                    $val = $line.Substring($colonIndex + 1).Trim()
+                    $info.Tags = @($val -split ',\s*') # Force array
+                    break
+                }
+                'License' { $info.License = $line.Substring($colonIndex + 1).Trim(); break }
+                'License Url' { $info.LicenseUrl = $line.Substring($colonIndex + 1).Trim(); break }
+                'Copyright' { $info.Copyright = $line.Substring($colonIndex + 1).Trim(); break }
+                'Copyright Url' { $info.CopyrightUrl = $line.Substring($colonIndex + 1).Trim(); break }
+                'Privacy Url' { $info.PrivacyUrl = $line.Substring($colonIndex + 1).Trim(); break }
+                'Package Url' { $info.PackageUrl = $line.Substring($colonIndex + 1).Trim(); break }
+                'Release Notes' { $info.ReleaseNotes = $line.Substring($colonIndex + 1).Trim(); break }
+                'Release Notes Url' { $info.ReleaseNotesUrl = $line.Substring($colonIndex + 1).Trim(); break }
+                'Installer Type' { $info.Installer = $line.Substring($colonIndex + 1).Trim(); break }
+                'Pricing' { $info.Pricing = $line.Substring($colonIndex + 1).Trim(); break }
+                'Store License' { $info.StoreLicense = $line.Substring($colonIndex + 1).Trim(); break }
+                'Free Trial' { $info.FreeTrial = $line.Substring($colonIndex + 1).Trim(); break }
+                'Age Rating' { $info.AgeRating = $line.Substring($colonIndex + 1).Trim(); break }
+                'Moniker' { $info.Moniker = $line.Substring($colonIndex + 1).Trim(); break }
             }
         }
-        elseif ($line -match '^\s*Author:\s*(.+)$') { $info.Author = $matches[1].Trim() }
-        elseif ($line -match '^\s*Homepage:\s*(.+)$') { $info.Homepage = $matches[1].Trim() }
-        elseif ($line -match '^\s*Description:\s*(.+)$') { $info.Description = $matches[1].Trim() }
-        elseif ($line -match '^\s*Category:\s*(.+)$') { $info.Category = $matches[1].Trim() }
-        elseif ($line -match '^\s*Tags:\s*(.+)$') {
-            $tagString = $matches[1].Trim()
-            $info.Tags = $tagString -split ',\s*'
-        }
-        elseif ($line -match '^\s*License:\s*(.+)$') { $info.License = $matches[1].Trim() }
-        elseif ($line -match '^\s*License Url:\s*(.+)$') { $info.LicenseUrl = $matches[1].Trim() }
-        elseif ($line -match '^\s*Copyright:\s*(.+)$') { $info.Copyright = $matches[1].Trim() }
-        elseif ($line -match '^\s*Copyright Url:\s*(.+)$') { $info.CopyrightUrl = $matches[1].Trim() }
-        elseif ($line -match '^\s*Privacy Url:\s*(.+)$') { $info.PrivacyUrl = $matches[1].Trim() }
-        elseif ($line -match '^\s*Package Url:\s*(.+)$') { $info.PackageUrl = $matches[1].Trim() }
-        elseif ($line -match '^\s*Release Notes:\s*(.+)$') { $info.ReleaseNotes = $matches[1].Trim() }
-        elseif ($line -match '^\s*Release Notes Url:\s*(.+)$') { $info.ReleaseNotesUrl = $matches[1].Trim() }
-        elseif ($line -match '^\s*Installer Type:\s*(.+)$') { $info.Installer = $matches[1].Trim() }
-        elseif ($line -match '^\s*Pricing:\s*(.+)$') { $info.Pricing = $matches[1].Trim() }
-        elseif ($line -match '^\s*Store License:\s*(.+)$') { $info.StoreLicense = $matches[1].Trim() }
-        elseif ($line -match '^\s*Free Trial:\s*(.+)$') { $info.FreeTrial = $matches[1].Trim() }
-        elseif ($line -match '^\s*Age Rating:\s*(.+)$') { $info.AgeRating = $matches[1].Trim() }
-        elseif ($line -match '^\s*Moniker:\s*(.+)$') { $info.Moniker = $matches[1].Trim() }
     }
 
     return $info
