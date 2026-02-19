@@ -648,6 +648,13 @@ function Show-WingetPackageDetails {
         Write-Host " $pkgId " -ForegroundColor White -BackgroundColor DarkBlue
         Write-Host ""
 
+        # Description (The "blurb")
+        if ($details.Description) {
+            Write-Host "  ℹ️  Description: " -ForegroundColor DarkGray -NoNewline
+            Write-Host $details.Description -ForegroundColor Gray
+            Write-Host ""
+        }
+
         # --- Basic Info ---
         # Version
         if ($details.Version -or ($pkgInfo -and $pkgInfo.Version)) {
@@ -726,13 +733,6 @@ function Show-WingetPackageDetails {
             Write-Host ""
         }
 
-        # Description (The "blurb")
-        if ($details.Description) {
-            Write-Host "  ℹ️  Description: " -ForegroundColor DarkGray -NoNewline
-            Write-Host $details.Description -ForegroundColor Gray
-            Write-Host ""
-        }
-
         # --- Links ---
         $links = [System.Collections.Generic.List[PSCustomObject]]::new()
         if ($details.Homepage) { $links.Add([PSCustomObject]@{ Label="Homepage"; Url=$details.Homepage; Color="Blue" }) }
@@ -761,6 +761,11 @@ function Show-WingetPackageDetails {
             Write-Host $details.License -ForegroundColor White
             Write-Host ""
         }
+
+        # Install Command
+        Write-Host "  💻 Command:     " -ForegroundColor DarkGray -NoNewline
+        Write-Host "winget install --id $pkgId -e" -ForegroundColor Cyan
+        Write-Host ""
     }
 
     Write-Host ("=" * 80) -ForegroundColor Cyan
