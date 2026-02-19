@@ -344,7 +344,7 @@ function Install-WingetAll {
 
         if (-not $Silent -and $packagesToInstall.Count -gt 0) {
             Write-Host "`nFetching package details..." -ForegroundColor DarkGray
-            $configDir = Join-Path $env:USERPROFILE ".wingetbatch"
+            $configDir = Get-WingetBatchConfigDir
 
             $jobsResult = Start-PackageDetailJobs -PackageIds $packagesToInstall -ConfigDir $configDir
             $jobs = $jobsResult[0]
@@ -1062,7 +1062,7 @@ function Get-WingetNewPackages {
         Write-Host ""
         Write-Host "⏳ Fetching detailed package information in background..." -ForegroundColor DarkGray
 
-        $configDir = Join-Path $env:USERPROFILE ".wingetbatch"
+        $configDir = Get-WingetBatchConfigDir
         $maxConcurrentJobs = 10
         $allPackageIds = @($newPackages | ForEach-Object { $_.Name })
 
@@ -1707,7 +1707,7 @@ function Set-WingetBatchGitHubToken {
         [switch]$Remove
     )
 
-    $configDir = Join-Path $env:USERPROFILE ".wingetbatch"
+    $configDir = Get-WingetBatchConfigDir
     $tokenFile = Join-Path $configDir "github_token.clixml"
     $legacyFile = Join-Path $configDir "github_token.txt"
 
@@ -1777,7 +1777,7 @@ function Get-PackageDetailsCache {
         [string]$PackageId
     )
 
-    $cacheFile = Join-Path $env:USERPROFILE ".wingetbatch\package_cache.json"
+    $cacheFile = Join-Path (Get-WingetBatchConfigDir) "package_cache.json"
 
     if (-not (Test-Path $cacheFile)) {
         return $null
@@ -1821,7 +1821,7 @@ function Set-PackageDetailsCache {
         [hashtable]$Details
     )
 
-    $configDir = Join-Path $env:USERPROFILE ".wingetbatch"
+    $configDir = Get-WingetBatchConfigDir
     $cacheFile = Join-Path $configDir "package_cache.json"
 
     # Create config directory if it doesn't exist
@@ -1876,7 +1876,7 @@ function Get-WingetBatchGitHubToken {
     [CmdletBinding()]
     param()
 
-    $configDir = Join-Path $env:USERPROFILE ".wingetbatch"
+    $configDir = Get-WingetBatchConfigDir
     $tokenFile = Join-Path $configDir "github_token.clixml"
     $legacyFile = Join-Path $configDir "github_token.txt"
 
@@ -1926,7 +1926,7 @@ function Update-GitHubApiRequestCount {
         [int]$RequestCount = 1
     )
 
-    $configDir = Join-Path $env:USERPROFILE ".wingetbatch"
+    $configDir = Get-WingetBatchConfigDir
     $rateLimitFile = Join-Path $configDir "github_ratelimit.json"
 
     # Create config directory if it doesn't exist
@@ -1992,7 +1992,7 @@ function Get-GitHubApiRequestCount {
     [CmdletBinding()]
     param()
 
-    $rateLimitFile = Join-Path $env:USERPROFILE ".wingetbatch\github_ratelimit.json"
+    $rateLimitFile = Join-Path (Get-WingetBatchConfigDir) "github_ratelimit.json"
 
     if (Test-Path $rateLimitFile) {
         try {
@@ -2053,7 +2053,7 @@ function Enable-WingetUpdateNotifications {
         [bool]$CheckOnStartup = $true
     )
 
-    $configDir = Join-Path $env:USERPROFILE ".wingetbatch"
+    $configDir = Get-WingetBatchConfigDir
     $configFile = Join-Path $configDir "config.json"
 
     # Create config directory if it doesn't exist
@@ -2119,7 +2119,7 @@ function Disable-WingetUpdateNotifications {
     [CmdletBinding()]
     param()
 
-    $configDir = Join-Path $env:USERPROFILE ".wingetbatch"
+    $configDir = Get-WingetBatchConfigDir
     $configFile = Join-Path $configDir "config.json"
 
     # Update configuration
@@ -2158,7 +2158,7 @@ function Start-WingetUpdateCheck {
     [CmdletBinding()]
     param()
 
-    $configDir = Join-Path $env:USERPROFILE ".wingetbatch"
+    $configDir = Get-WingetBatchConfigDir
     $configFile = Join-Path $configDir "config.json"
     $cacheFile = Join-Path $configDir "update_cache.json"
 
@@ -2325,7 +2325,7 @@ function Get-WingetUpdates {
     Write-Host "Checking for winget package updates..." -ForegroundColor Cyan
 
     # Check cache first
-    $cacheFile = Join-Path $env:USERPROFILE ".wingetbatch\update_cache.json"
+    $cacheFile = Join-Path (Get-WingetBatchConfigDir) "update_cache.json"
     $useCache = $false
 
     if (-not $Force -and (Test-Path $cacheFile)) {
@@ -2837,6 +2837,17 @@ function Parse-WingetShowOutput {
     return $info
 }
 
+function Get-WingetBatchConfigDir {
+    <#
+    .SYNOPSIS
+        Get the configuration directory path.
+
+    .DESCRIPTION
+        Internal function to get the path to the .wingetbatch configuration directory.
+    #>
+    return Join-Path $env:USERPROFILE ".wingetbatch"
+}
+
 function ConvertTo-SpectreEscaped {
     <#
     .SYNOPSIS
@@ -2856,7 +2867,7 @@ function ConvertTo-SpectreEscaped {
 }
 
 # Export module members (public functions only)
-# Internal functions: Get-WingetBatchGitHubToken, Start-WingetUpdateCheck, Update-GitHubApiRequestCount
+# Internal functions: Get-WingetBatchConfigDir, Get-WingetBatchGitHubToken, Start-WingetUpdateCheck, Update-GitHubApiRequestCount
 Export-ModuleMember -Function Install-WingetAll, Get-WingetNewPackages, `
     Set-WingetBatchGitHubToken, New-WingetBatchGitHubToken, `
     Enable-WingetUpdateNotifications, Disable-WingetUpdateNotifications, `
