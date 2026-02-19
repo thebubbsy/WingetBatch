@@ -1390,6 +1390,15 @@ function Get-WingetNewPackages {
                             # Fetch details for newly selected packages (from cache or jobs)
                             Write-Host "⏳ Fetching package details..." -ForegroundColor DarkGray
 
+                            # Load cache once before the loop to avoid repeated I/O
+                            $cacheFile = Join-Path $configDir "package_cache.json"
+                            $cache = $null
+                            if (Test-Path $cacheFile) {
+                                try {
+                                    $cache = Get-Content $cacheFile -Raw | ConvertFrom-Json
+                                } catch { }
+                            }
+
                             $reselectedPackageDetails = @{}
                             foreach ($pkgId in $packagesToInstallIds) {
                                 # Check if we already have it in packageDetails
@@ -1398,15 +1407,13 @@ function Get-WingetNewPackages {
                                 }
                                 else {
                                     # Try to get from cache
-                                    $cacheFile = Join-Path $configDir "package_cache.json"
                                     $cached = $null
 
-                                    if (Test-Path $cacheFile) {
+                                    if ($null -ne $cache) {
                                         try {
-                                            $cache = Get-Content $cacheFile -Raw | ConvertFrom-Json
-                                            $packageCache = $cache.PSObject.Properties[$pkgId]
-
-                                            if ($packageCache) {
+                                            $packageProperty = $cache.PSObject.Properties[$pkgId]
+                                            if ($packageProperty) {
+                                                $packageCache = $packageProperty.Value
                                                 $cachedDate = [DateTime]$packageCache.CachedDate
                                                 $daysSinceCached = ((Get-Date) - $cachedDate).TotalDays
 
@@ -1414,8 +1421,7 @@ function Get-WingetNewPackages {
                                                     $cached = $packageCache.Details
                                                 }
                                             }
-                                        }
-                                        catch { }
+                                        } catch { }
                                     }
 
                                     if ($cached) {
