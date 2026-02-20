@@ -624,7 +624,7 @@ function Start-PackageDetailJobs {
             }
 
             # Not in cache, fetch from winget
-            $output = winget show --id $packageId 2>&1 | Out-String
+            $output = winget show --id $packageId 2>&1
 
             # Parse winget show output - capture ALL available fields
             $info = Parse-WingetShowOutput -Output $output -PackageId $packageId
@@ -1164,7 +1164,7 @@ function Get-WingetNewPackages {
 
                 foreach ($packageId in $packageList) {
                     # Fetch from winget
-                    $output = winget show --id $packageId 2>&1 | Out-String
+                    $output = winget show --id $packageId 2>&1
 
                     # Parse winget show output - capture ALL available fields
                     $info = Parse-WingetShowOutput -Output $output -PackageId $packageId
@@ -1430,7 +1430,7 @@ function Get-WingetNewPackages {
                                     else {
                                         # Fetch from winget
                                         Write-Host "  Fetching $pkgId..." -ForegroundColor DarkGray
-                                        $output = winget show --id $pkgId 2>&1 | Out-String
+                                        $output = winget show --id $pkgId 2>&1
 
                                         # Parse winget show output
                                         $info = Parse-WingetShowOutput -Output $output -PackageId $pkgId
@@ -2800,7 +2800,7 @@ function Parse-WingetShowOutput {
         Internal helper to parse 'winget show' output into a structured hashtable.
     #>
     param(
-        [string]$Output,
+        [object]$Output,
         [string]$PackageId
     )
 
@@ -2832,9 +2832,18 @@ function Parse-WingetShowOutput {
         Moniker = $null
     }
 
-    # Optimized parsing: Replace sequential regex matching with O(1) string operations and switch
-    # This significantly reduces CPU usage when parsing many packages in parallel
-    foreach ($line in $Output -split "`n") {
+    # Optimized parsing: Handle both array (direct) and string (legacy) input
+    # Avoids unnecessary join/split operations when processing winget output
+    if ($Output -is [string]) {
+        $lines = $Output.Split([char[]]@("`n", "`r"), [System.StringSplitOptions]::RemoveEmptyEntries)
+    } elseif ($Output -is [System.Collections.IEnumerable]) {
+        $lines = $Output
+    } else {
+        $lines = @($Output)
+    }
+
+    foreach ($item in $lines) {
+        $line = "$item" # Convert to string (handles ErrorRecord etc)
         $colonIndex = $line.IndexOf(':')
 
         if ($colonIndex -gt 0) {
