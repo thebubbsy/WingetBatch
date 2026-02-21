@@ -587,40 +587,39 @@ function Start-PackageDetailJobs {
             Set-Item -Path function:Parse-WingetShowOutput -Value $ParseSB
         }
 
-        # Helper function to get cached details
-        function Get-CachedDetails {
-            param($PackageId, $CacheFile)
+        $cacheFile = Join-Path $cacheDir "package_cache.json"
+        $localCache = @{}
 
-            if (-not (Test-Path $CacheFile)) { return $null }
-
+        # Optimization: Read cache file ONCE, not per package
+        if (Test-Path $cacheFile) {
             try {
-                $cache = Get-Content $CacheFile -Raw | ConvertFrom-Json
-                $packageCache = $cache.PSObject.Properties[$PackageId]
-
-                if ($packageCache) {
-                    $cachedDate = [DateTime]$packageCache.CachedDate
-                    $daysSinceCached = ((Get-Date) - $cachedDate).TotalDays
-
-                    if ($daysSinceCached -lt 30) {
-                        return $packageCache.Details
+                $json = Get-Content $cacheFile -Raw | ConvertFrom-Json
+                if ($json) {
+                    $json.PSObject.Properties | ForEach-Object {
+                        $localCache[$_.Name] = $_.Value
                     }
                 }
-            }
-            catch { }
-
-            return $null
+            } catch { }
         }
 
-        $cacheFile = Join-Path $cacheDir "package_cache.json"
+        # Optimization: Call Get-Date once outside the loop
+        $now = Get-Date
 
         foreach ($packageId in $packageList) {
             # Try to get from cache first
-            $cachedInfo = Get-CachedDetails -PackageId $packageId -CacheFile $cacheFile
+            if ($localCache.ContainsKey($packageId)) {
+                $packageCache = $localCache[$packageId]
+                if ($packageCache) {
+                    try {
+                        $cachedDate = [DateTime]$packageCache.CachedDate
+                        $daysSinceCached = ($now - $cachedDate).TotalDays
 
-            if ($cachedInfo) {
-                # Use cached data
-                $results[$packageId] = $cachedInfo
-                continue
+                        if ($daysSinceCached -lt 30) {
+                            $results[$packageId] = $packageCache.Details
+                            continue
+                        }
+                    } catch {}
+                }
             }
 
             # Not in cache, fetch from winget
