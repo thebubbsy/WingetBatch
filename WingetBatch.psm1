@@ -769,6 +769,7 @@ function Show-WingetPackageDetails {
 
         if ($details.ReleaseNotesUrl) { $links.Add([PSCustomObject]@{ Label="Release Notes"; Url=$details.ReleaseNotesUrl; Color="Blue" }) }
         if ($details.LicenseUrl) { $links.Add([PSCustomObject]@{ Label="License"; Url=$details.LicenseUrl; Color="Blue" }) }
+        if ($details.CopyrightUrl) { $links.Add([PSCustomObject]@{ Label="Copyright"; Url=$details.CopyrightUrl; Color="Blue" }) }
         if ($details.PrivacyUrl) { $links.Add([PSCustomObject]@{ Label="Privacy"; Url=$details.PrivacyUrl; Color="Blue" }) }
         if ($details.PackageUrl) { $links.Add([PSCustomObject]@{ Label="Package"; Url=$details.PackageUrl; Color="Blue" }) }
 
@@ -791,6 +792,11 @@ function Show-WingetPackageDetails {
             Write-Host $details.License -ForegroundColor White
             Write-Host ""
         }
+
+        # Installation Command
+        Write-Host "  💻 Command:     " -ForegroundColor DarkGray -NoNewline
+        Write-Host "winget install --id $pkgId -e" -ForegroundColor Cyan
+        Write-Host ""
     }
 
     Write-Host ("=" * 80) -ForegroundColor Cyan
