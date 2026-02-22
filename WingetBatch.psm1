@@ -791,6 +791,11 @@ function Show-WingetPackageDetails {
             Write-Host $details.License -ForegroundColor White
             Write-Host ""
         }
+
+        # Command
+        Write-Host "  💻 Command:     " -ForegroundColor DarkGray -NoNewline
+        Write-Host "winget install --id $pkgId -e" -ForegroundColor Cyan
+        Write-Host ""
     }
 
     Write-Host ("=" * 80) -ForegroundColor Cyan
@@ -2889,7 +2894,7 @@ function Get-WingetBatchConfigDir {
     .DESCRIPTION
         Internal function to get the path to the .wingetbatch configuration directory.
     #>
-    return Join-Path $env:USERPROFILE ".wingetbatch"
+    return Join-Path $HOME ".wingetbatch"
 }
 
 function ConvertTo-SpectreEscaped {
