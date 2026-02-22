@@ -587,35 +587,46 @@ function Start-PackageDetailJobs {
             Set-Item -Path function:Parse-WingetShowOutput -Value $ParseSB
         }
 
-        # Helper function to get cached details
-        function Get-CachedDetails {
-            param($PackageId, $CacheFile)
-
-            if (-not (Test-Path $CacheFile)) { return $null }
-
-            try {
-                $cache = Get-Content $CacheFile -Raw | ConvertFrom-Json
-                $packageCache = $cache.PSObject.Properties[$PackageId]
-
-                if ($packageCache) {
-                    $cachedDate = [DateTime]$packageCache.CachedDate
-                    $daysSinceCached = ((Get-Date) - $cachedDate).TotalDays
-
-                    if ($daysSinceCached -lt 30) {
-                        return $packageCache.Details
-                    }
-                }
-            }
-            catch { }
-
-            return $null
+        # Fix for nested array issue when batch size > 1
+        if ($packageList.Count -eq 1 -and ($packageList[0] -is [Array] -or $packageList[0] -is [System.Collections.ArrayList])) {
+            $packageList = $packageList[0]
         }
 
         $cacheFile = Join-Path $cacheDir "package_cache.json"
 
+        # Load cache into memory once
+        $localCache = @{}
+        if (Test-Path $cacheFile) {
+            try {
+                $cacheJson = Get-Content $cacheFile -Raw | ConvertFrom-Json
+                # Convert to Hashtable for O(1) lookup and correct property access
+                if ($cacheJson) {
+                    foreach ($prop in $cacheJson.PSObject.Properties) {
+                        $localCache[$prop.Name] = $prop.Value
+                    }
+                }
+            }
+            catch { }
+        }
+
         foreach ($packageId in $packageList) {
-            # Try to get from cache first
-            $cachedInfo = Get-CachedDetails -PackageId $packageId -CacheFile $cacheFile
+            # Try to get from cache first (in-memory lookup)
+            $cachedInfo = $null
+
+            if ($localCache.ContainsKey($packageId)) {
+                $entry = $localCache[$packageId]
+                if ($entry -and $entry.CachedDate) {
+                    try {
+                        $cachedDate = [DateTime]$entry.CachedDate
+                        $daysSinceCached = ((Get-Date) - $cachedDate).TotalDays
+
+                        if ($daysSinceCached -lt 30) {
+                            $cachedInfo = $entry.Details
+                        }
+                    }
+                    catch { }
+                }
+            }
 
             if ($cachedInfo) {
                 # Use cached data
