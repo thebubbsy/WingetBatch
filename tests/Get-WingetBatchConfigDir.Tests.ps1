@@ -5,7 +5,8 @@ Describe "Get-WingetBatchConfigDir" {
     }
 
     It "Returns the expected configuration directory path" {
-        $expectedPath = Join-Path $env:USERPROFILE ".wingetbatch"
+        $homeDir = if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
+        $expectedPath = Join-Path $homeDir ".wingetbatch"
         $actualPath = Get-WingetBatchConfigDir
         $actualPath | Should -Be $expectedPath
     }
