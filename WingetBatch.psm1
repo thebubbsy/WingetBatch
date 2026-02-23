@@ -587,35 +587,45 @@ function Start-PackageDetailJobs {
             Set-Item -Path function:Parse-WingetShowOutput -Value $ParseSB
         }
 
-        # Helper function to get cached details
-        function Get-CachedDetails {
-            param($PackageId, $CacheFile)
+        $cacheFile = Join-Path $cacheDir "package_cache.json"
+        $localCache = @{}
 
-            if (-not (Test-Path $CacheFile)) { return $null }
-
+        # Read cache once at start of job - optimization to avoid repeated file I/O
+        if (Test-Path $cacheFile) {
             try {
-                $cache = Get-Content $CacheFile -Raw | ConvertFrom-Json
-                $packageCache = $cache.PSObject.Properties[$PackageId]
-
-                if ($packageCache) {
-                    $cachedDate = [DateTime]$packageCache.CachedDate
-                    $daysSinceCached = ((Get-Date) - $cachedDate).TotalDays
-
-                    if ($daysSinceCached -lt 30) {
-                        return $packageCache.Details
+                $cacheJson = Get-Content $cacheFile -Raw | ConvertFrom-Json
+                if ($cacheJson) {
+                    # Convert to hashtable for fast O(1) lookup
+                    # Iterate properties to handle both PSObject (from JSON object) and Hashtable
+                    $cacheJson.PSObject.Properties | ForEach-Object {
+                        $localCache[$_.Name] = $_.Value
                     }
                 }
             }
             catch { }
-
-            return $null
         }
 
-        $cacheFile = Join-Path $cacheDir "package_cache.json"
+        foreach ($pkgIdItem in $packageList) {
+            # Ensure packageId is a string (handle potential array wrapping artifacts)
+            $packageId = [string]$pkgIdItem
+            $cachedInfo = $null
 
-        foreach ($packageId in $packageList) {
-            # Try to get from cache first
-            $cachedInfo = Get-CachedDetails -PackageId $packageId -CacheFile $cacheFile
+            # Try to get from cache first (check local hashtable)
+            if ($localCache.ContainsKey($packageId)) {
+                $entry = $localCache[$packageId]
+                # Check for cached date on the entry object
+                if ($entry -and $entry.CachedDate) {
+                    try {
+                        $cachedDate = [DateTime]$entry.CachedDate
+                        $daysSinceCached = ((Get-Date) - $cachedDate).TotalDays
+
+                        if ($daysSinceCached -lt 30) {
+                            $cachedInfo = $entry.Details
+                        }
+                    }
+                    catch { }
+                }
+            }
 
             if ($cachedInfo) {
                 # Use cached data
@@ -2889,7 +2899,12 @@ function Get-WingetBatchConfigDir {
     .DESCRIPTION
         Internal function to get the path to the .wingetbatch configuration directory.
     #>
-    return Join-Path $env:USERPROFILE ".wingetbatch"
+    if ($env:USERPROFILE) {
+        $homeDir = $env:USERPROFILE
+    } else {
+        $homeDir = $HOME
+    }
+    return Join-Path $homeDir ".wingetbatch"
 }
 
 function ConvertTo-SpectreEscaped {
