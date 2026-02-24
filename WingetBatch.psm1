@@ -993,37 +993,12 @@ function Get-WingetNewPackages {
 
             $message = $commit.commit.message
 
-            # Skip removal/deletion commits, updates, moves, and automatic updates
-            if ($message -match '^(Remove|Delete|Deprecat|Update:|New version:|Automatic|Move)') {
-                continue
-            }
+            # Use optimized helper function to parse message
+            $pkgInfo = Parse-WingetCommitMessage -Message $message
 
-            # Extract package name and version
-            $packageName = $null
-            $version = $null
-
-            # Pattern 1: "New package: PackageName version X.X.X"
-            if ($message -match '^New package:\s*(.+?)\s+version\s+(.+?)(\s+\(#|\s*$)') {
-                $packageName = $matches[1].Trim()
-                $version = $matches[2].Trim()
-            }
-            # Pattern 2: "Add: PackageName version X.X.X"
-            elseif ($message -match '^Add:\s*(.+?)\s+version\s+(.+?)(\s+\(#|\s*$)') {
-                $packageName = $matches[1].Trim()
-                $version = $matches[2].Trim()
-            }
-            # Pattern 3: "PackageName version X.X.X (#PR)"
-            elseif ($message -match '^([A-Za-z0-9\.\-_]+)\s+version\s+(.+?)\s+\(#\d+\)') {
-                $packageName = $matches[1].Trim()
-                $version = $matches[2].Trim()
-            }
-            # Pattern 4: "PackageName version X.X.X"
-            elseif ($message -match '^([A-Za-z0-9\.\-_]+)\s+version\s+(.+?)$') {
-                $packageName = $matches[1].Trim()
-                $version = $matches[2].Trim()
-            }
-
-            if ($packageName -and -not $processedPackages.ContainsKey($packageName)) {
+            if ($pkgInfo -and -not $processedPackages.ContainsKey($pkgInfo.Name)) {
+                $packageName = $pkgInfo.Name
+                $version = $pkgInfo.Version
                 # Check if package should be excluded
                 $shouldExclude = $false
                 if ($ExcludeTerm -and $packageName -match [regex]::Escape($ExcludeTerm)) {
@@ -2879,6 +2854,71 @@ function Parse-WingetShowOutput {
     }
 
     return $info
+}
+
+function Parse-WingetCommitMessage {
+    <#
+    .SYNOPSIS
+        Internal helper to parse commit messages for new package additions.
+    #>
+    param([string]$Message)
+
+    if ([string]::IsNullOrWhiteSpace($Message)) { return $null }
+
+    # Fast path: check for exclusions using string methods
+    if ($Message.StartsWith("Update:", [System.StringComparison]::OrdinalIgnoreCase) -or
+        $Message.StartsWith("Delete", [System.StringComparison]::OrdinalIgnoreCase) -or
+        $Message.StartsWith("Remove", [System.StringComparison]::OrdinalIgnoreCase) -or
+        $Message.StartsWith("Deprecat", [System.StringComparison]::OrdinalIgnoreCase) -or
+        $Message.StartsWith("New version:", [System.StringComparison]::OrdinalIgnoreCase) -or
+        $Message.StartsWith("Automatic", [System.StringComparison]::OrdinalIgnoreCase) -or
+        $Message.StartsWith("Move", [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $null
+    }
+
+    # Fast path: must contain "version" to be a valid package addition
+    if ($Message.IndexOf("version", [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+        return $null
+    }
+
+    $packageName = $null
+    $version = $null
+
+    # Pattern 1: "New package: PackageName version X.X.X"
+    if ($Message.StartsWith("New package:", [System.StringComparison]::OrdinalIgnoreCase)) {
+         if ($Message -match '^New package:\s*(.+?)\s+version\s+(.+?)(\s+\(#|\s*$)') {
+            $packageName = $matches[1].Trim()
+            $version = $matches[2].Trim()
+        }
+    }
+    # Pattern 2: "Add: PackageName version X.X.X"
+    elseif ($Message.StartsWith("Add:", [System.StringComparison]::OrdinalIgnoreCase)) {
+        if ($Message -match '^Add:\s*(.+?)\s+version\s+(.+?)(\s+\(#|\s*$)') {
+            $packageName = $matches[1].Trim()
+            $version = $matches[2].Trim()
+        }
+    }
+    else {
+        # Pattern 3 & 4: Starts with package ID
+        # "PackageName version X.X.X"
+        # We already know it contains "version"
+
+        # Use regex for these complicated ones, but we filtered many out already
+         if ($Message -match '^([A-Za-z0-9\.\-_]+)\s+version\s+(.+?)\s+\(#\d+\)') {
+            $packageName = $matches[1].Trim()
+            $version = $matches[2].Trim()
+        }
+        elseif ($Message -match '^([A-Za-z0-9\.\-_]+)\s+version\s+(.+?)$') {
+            $packageName = $matches[1].Trim()
+            $version = $matches[2].Trim()
+        }
+    }
+
+    if ($packageName) {
+        return [PSCustomObject]@{ Name = $packageName; Version = $version }
+    }
+
+    return $null
 }
 
 function Get-WingetBatchConfigDir {
