@@ -13,3 +13,7 @@
 ## 2026-02-13 - [Information Priority in CLI]
 **Learning:** Users need immediate context about "what is this?" before "what version is this?". Prioritizing the Description field at the top of the detailed view significantly reduces cognitive load and confirms selection faster.
 **Action:** Always place the Description or Summary field immediately after the Item Header, before secondary metadata like Version or Publisher.
+
+## 2026-02-24 - [Actionable Commands in CLI]
+**Learning:** Users often use CLI tools to explore packages but prefer manual execution for final control. Displaying the exact, copy-pasteable command (e.g., `winget install --id <ID> -e`) reduces friction for users who want to verify or script the action themselves.
+**Action:** Include the full execution command in detailed views for items that can be acted upon.
