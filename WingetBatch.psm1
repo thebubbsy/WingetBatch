@@ -589,20 +589,24 @@ function Start-PackageDetailJobs {
 
         # Helper function to get cached details
         function Get-CachedDetails {
-            param($PackageId, $CacheFile)
+            param($PackageId, $CacheObject)
 
-            if (-not (Test-Path $CacheFile)) { return $null }
+            if ($null -eq $CacheObject) { return $null }
 
             try {
-                $cache = Get-Content $CacheFile -Raw | ConvertFrom-Json
-                $packageCache = $cache.PSObject.Properties[$PackageId]
+                $packageCache = $CacheObject.PSObject.Properties[$PackageId]
 
                 if ($packageCache) {
-                    $cachedDate = [DateTime]$packageCache.CachedDate
-                    $daysSinceCached = ((Get-Date) - $cachedDate).TotalDays
+                    # Note: When accessing dynamic properties on PSCustomObject via Properties collection,
+                    # we must access the .Value property first.
+                    $entry = $packageCache.Value
+                    if ($entry.CachedDate) {
+                        $cachedDate = [DateTime]$entry.CachedDate
+                        $daysSinceCached = ((Get-Date) - $cachedDate).TotalDays
 
-                    if ($daysSinceCached -lt 30) {
-                        return $packageCache.Details
+                        if ($daysSinceCached -lt 30) {
+                            return $entry.Details
+                        }
                     }
                 }
             }
@@ -612,10 +616,22 @@ function Start-PackageDetailJobs {
         }
 
         $cacheFile = Join-Path $cacheDir "package_cache.json"
+        $localCache = $null
 
-        foreach ($packageId in $packageList) {
+        if (Test-Path $cacheFile) {
+            try {
+                $localCache = Get-Content $cacheFile -Raw | ConvertFrom-Json
+            }
+            catch {
+                Write-Warning "Failed to read cache file '$cacheFile': $_"
+            }
+        }
+
+        foreach ($packageIdRaw in $packageList) {
+            $packageId = [string]$packageIdRaw
+
             # Try to get from cache first
-            $cachedInfo = Get-CachedDetails -PackageId $packageId -CacheFile $cacheFile
+            $cachedInfo = Get-CachedDetails -PackageId $packageId -CacheObject $localCache
 
             if ($cachedInfo) {
                 # Use cached data
