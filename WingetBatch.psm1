@@ -112,132 +112,11 @@ function Install-WingetAll {
                 continue
             }
 
-            # Parse the search results to extract package IDs and Names
-            $lines = $querySearchResults
-            $queryPackages = [System.Collections.Generic.List[PSCustomObject]]::new()
-
-            # Pre-calculate regex patterns for filtering to improve performance
-            $searchPatterns = if ($searchWords.Count -gt 1) {
-                $searchWords | ForEach-Object { "(?i)$([regex]::Escape($_))" }
-            } else { $null }
-
-            $headerFound = $false
-            $nameColEnd = -1
-            $idColStart = -1
-            $idColEnd = -1
-            $versionColStart = -1
-            $sourceColStart = -1
-            $matchColStart = -1
-
-            foreach ($line in $lines) {
-                # Find the header line to determine column positions
-                if ($line -match '^Name\s+Id\s+') {
-                    $nameColEnd = $line.IndexOf('Id') - 1
-                    $idColStart = $line.IndexOf('Id')
-
-                    # Reset
-                    $versionColStart = -1
-                    $sourceColStart = -1
-                    $matchColStart = -1
-
-                    # Find Version
-                    if ($line -match 'Version') {
-                        $idColEnd = $line.IndexOf('Version') - 1
-                        $versionColStart = $line.IndexOf('Version')
-                    } else {
-                        $idColEnd = $line.Length
-                    }
-
-                    # Find Match
-                    if ($line -match 'Match') {
-                        $matchColStart = $line.IndexOf('Match')
-                    }
-
-                    # Find Source
-                    if ($line -match 'Source') {
-                        $sourceColStart = $line.IndexOf('Source')
-                    }
-                    continue
-                }
-
-                # Skip until we find the header separator line (dashes)
-                if ($line -match '^-+') {
-                    $headerFound = $true
-                    continue
-                }
-
-                if ($headerFound -and $line.Trim() -ne '' -and $idColStart -gt 0 -and $line.Length -gt $idColStart) {
-                    # Extract the entire line for filtering and the ID
-                    $endPos = if ($idColEnd -lt $line.Length) { $idColEnd } else { $line.Length }
-                    $packageId = $line.Substring($idColStart, $endPos - $idColStart).Trim()
-
-                    # Extract Name
-                    $packageName = if ($nameColEnd -gt 0 -and $line.Length -gt $nameColEnd) {
-                        $line.Substring(0, $nameColEnd).Trim()
-                    } else {
-                        $packageId # Fallback
-                    }
-
-                    # Extract Version
-                    $packageVersion = "Unknown"
-                    if ($versionColStart -gt -1 -and $line.Length -gt $versionColStart) {
-                        $vEnd = $line.Length
-                        # If Match is present
-                        if ($matchColStart -gt $versionColStart) {
-                            $vEnd = $matchColStart
-                        }
-                        # If Source is present (and no Match or Match is after Source)
-                        elseif ($sourceColStart -gt $versionColStart) {
-                            $vEnd = $sourceColStart
-                        }
-
-                        if ($vEnd -gt $line.Length) { $vEnd = $line.Length }
-                        $packageVersion = $line.Substring($versionColStart, $vEnd - $versionColStart).Trim()
-                    }
-
-                    # Extract Source
-                    $packageSource = "Unknown"
-                    if ($sourceColStart -gt -1 -and $line.Length -gt $sourceColStart) {
-                        $packageSource = $line.Substring($sourceColStart).Trim()
-                    }
-
-                    # Only add if it looks like a valid package ID
-                    if ($packageId -and $packageId -match '^[A-Za-z0-9\.\-_]+$' -and $packageId -notmatch '^\d+\.\d+') {
-                        # If multiple search words, filter to only packages matching ALL words (case-insensitive)
-                        if ($searchWords.Count -gt 1) {
-                            $matchesAll = $true
-                            foreach ($pattern in $searchPatterns) {
-                                if ($line -notmatch $pattern) {
-                                    $matchesAll = $false
-                                    break
-                                }
-                            }
-                            if ($matchesAll) {
-                                $queryPackages.Add([PSCustomObject]@{
-                                    Id = $packageId
-                                    Name = $packageName
-                                    Version = $packageVersion
-                                    Source = $packageSource
-                                    SearchTerm = $query
-                                })
-                            }
-                        }
-                        else {
-                            $queryPackages.Add([PSCustomObject]@{
-                                Id = $packageId
-                                Name = $packageName
-                                Version = $packageVersion
-                                Source = $packageSource
-                                SearchTerm = $query
-                            })
-                        }
-                    }
-                }
-            }
-
-            # Deduplicate packages within this query based on Id (preserving order)
-            $uniqueQueryPackages = $queryPackages | Group-Object Id | ForEach-Object { $_.Group[0] }
-            $allPackages.AddRange([array]$uniqueQueryPackages)
+            # Parse the search results to extract package IDs and Names efficiently
+            # Note: We rely on the optimized helper which handles header parsing, data extraction,
+            # and deduplication (using HashSet) much faster than the previous regex loop.
+            $uniqueQueryPackages = Parse-WingetSearchOutput -Lines $querySearchResults -Query $query
+            $allPackages.AddRange($uniqueQueryPackages)
         }
 
         # Keep all packages (including potential duplicates across queries) for display
@@ -2792,6 +2671,156 @@ function Remove-WingetRecent {
     catch {
         Write-Error "Failed to get installed packages: $_"
     }
+}
+
+function Parse-WingetSearchOutput {
+    <#
+    .SYNOPSIS
+        Internal helper to parse 'winget search' output efficiently.
+    #>
+    param(
+        [string[]]$Lines,
+        [string]$Query
+    )
+
+    $parsedPackages = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+    if ($null -eq $Lines -or $Lines.Count -eq 0) {
+        return $parsedPackages
+    }
+
+    $seenIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+
+    # Pre-calculate search tokens for filtering (to match behavior of ensuring all terms are present)
+    $searchTokens = if (-not [string]::IsNullOrWhiteSpace($Query)) {
+        $Query -split '\s+' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    } else { @() }
+
+    $headerFound = $false
+    $nameColEnd = -1
+    $idColStart = -1
+    $idColEnd = -1
+    $versionColStart = -1
+    $sourceColStart = -1
+    $matchColStart = -1
+
+    foreach ($line in $Lines) {
+        # Skip empty lines
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+
+        if (-not $headerFound) {
+            # Check for header
+            if ($line.StartsWith('Name') -and $line.Contains('Id')) {
+                # Determine column positions based on header
+                $idColStart = $line.IndexOf('Id')
+                $nameColEnd = $idColStart - 1
+
+                # Find Version
+                $versionIndex = $line.IndexOf('Version')
+                if ($versionIndex -gt 0) {
+                    $idColEnd = $versionIndex - 1
+                    $versionColStart = $versionIndex
+                } else {
+                    $idColEnd = $line.Length
+                }
+
+                # Find Match
+                $matchIndex = $line.IndexOf('Match')
+                if ($matchIndex -gt 0) {
+                    $matchColStart = $matchIndex
+                }
+
+                # Find Source
+                $sourceIndex = $line.IndexOf('Source')
+                if ($sourceIndex -gt 0) {
+                    $sourceColStart = $sourceIndex
+                }
+                continue
+            }
+
+            # Check for separator line
+            if ($line.StartsWith('-')) {
+                $headerFound = $true
+                continue
+            }
+        }
+        else {
+            # Header found, parse data lines
+            if ($idColStart -gt 0 -and $line.Length -gt $idColStart) {
+                # Extract ID
+                $lineLength = $line.Length
+                $currIdEnd = if ($idColEnd -lt $lineLength) { $idColEnd } else { $lineLength }
+
+                # Substring is safe if indices are within bounds
+                $packageId = $line.Substring($idColStart, $currIdEnd - $idColStart).Trim()
+
+                # Validation: ID must not be empty, must look like an ID, and not just a version number
+                if ([string]::IsNullOrWhiteSpace($packageId) -or
+                    $packageId -notmatch '^[A-Za-z0-9\.\-_]+$' -or
+                    $packageId -match '^\d+\.\d+') {
+                    continue
+                }
+
+                # Deduplicate immediately
+                if (-not $seenIds.Add($packageId)) { continue }
+
+                # Filter: If query has multiple words, ensure line contains ALL of them (case-insensitive)
+                # This restores intended functionality that was broken in original code
+                if ($searchTokens.Count -gt 1) {
+                    $matchesAll = $true
+                    foreach ($token in $searchTokens) {
+                        if ($line.IndexOf($token, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+                            $matchesAll = $false
+                            break
+                        }
+                    }
+                    if (-not $matchesAll) { continue }
+                }
+
+                # Extract Name
+                $packageName = if ($nameColEnd -gt 0 -and $lineLength -gt $nameColEnd) {
+                    $line.Substring(0, $nameColEnd).Trim()
+                } else {
+                    $packageId # Fallback
+                }
+
+                # Extract Version
+                $packageVersion = "Unknown"
+                if ($versionColStart -gt -1 -and $lineLength -gt $versionColStart) {
+                    $vEnd = $lineLength
+                    # If Match is present
+                    if ($matchColStart -gt $versionColStart) {
+                        $vEnd = $matchColStart
+                    }
+                    # If Source is present (and no Match or Match is after Source)
+                    elseif ($sourceColStart -gt $versionColStart) {
+                        $vEnd = $sourceColStart
+                    }
+
+                    if ($vEnd -gt $lineLength) { $vEnd = $lineLength }
+                    if ($vEnd -gt $versionColStart) {
+                        $packageVersion = $line.Substring($versionColStart, $vEnd - $versionColStart).Trim()
+                    }
+                }
+
+                # Extract Source
+                $packageSource = "Unknown"
+                if ($sourceColStart -gt -1 -and $lineLength -gt $sourceColStart) {
+                    $packageSource = $line.Substring($sourceColStart).Trim()
+                }
+
+                $parsedPackages.Add([PSCustomObject]@{
+                    Id = $packageId
+                    Name = $packageName
+                    Version = $packageVersion
+                    Source = $packageSource
+                    SearchTerm = $Query
+                })
+            }
+        }
+    }
+
+    return $parsedPackages
 }
 
 function Parse-WingetShowOutput {
