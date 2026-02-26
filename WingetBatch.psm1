@@ -587,35 +587,37 @@ function Start-PackageDetailJobs {
             Set-Item -Path function:Parse-WingetShowOutput -Value $ParseSB
         }
 
-        # Helper function to get cached details
-        function Get-CachedDetails {
-            param($PackageId, $CacheFile)
-
-            if (-not (Test-Path $CacheFile)) { return $null }
-
-            try {
-                $cache = Get-Content $CacheFile -Raw | ConvertFrom-Json
-                $packageCache = $cache.PSObject.Properties[$PackageId]
-
-                if ($packageCache) {
-                    $cachedDate = [DateTime]$packageCache.CachedDate
-                    $daysSinceCached = ((Get-Date) - $cachedDate).TotalDays
-
-                    if ($daysSinceCached -lt 30) {
-                        return $packageCache.Details
-                    }
-                }
-            }
-            catch { }
-
-            return $null
-        }
-
         $cacheFile = Join-Path $cacheDir "package_cache.json"
+
+        # OPTIMIZATION: Read cache file once per job instead of once per package (reduces I/O by N times)
+        $localCache = $null
+        if (Test-Path $cacheFile) {
+            try {
+                $localCache = Get-Content $cacheFile -Raw | ConvertFrom-Json
+            } catch { }
+        }
 
         foreach ($packageId in $packageList) {
             # Try to get from cache first
-            $cachedInfo = Get-CachedDetails -PackageId $packageId -CacheFile $cacheFile
+            $cachedInfo = $null
+
+            if ($localCache) {
+                # Access property on PSObject.Properties collection
+                $prop = $localCache.PSObject.Properties[$packageId]
+
+                # BUG FIX: Access .Value property of the PSNoteProperty object
+                if ($prop -and $prop.Value) {
+                    $entry = $prop.Value
+                    if ($entry.CachedDate) {
+                        $cachedDate = [DateTime]$entry.CachedDate
+                        $daysSinceCached = ((Get-Date) - $cachedDate).TotalDays
+
+                        if ($daysSinceCached -lt 30) {
+                            $cachedInfo = $entry.Details
+                        }
+                    }
+                }
+            }
 
             if ($cachedInfo) {
                 # Use cached data
@@ -1823,12 +1825,12 @@ function Get-PackageDetailsCache {
         $cache = Get-Content $cacheFile -Raw | ConvertFrom-Json
         $packageCache = $cache.PSObject.Properties[$PackageId]
 
-        if ($packageCache) {
-            $cachedDate = [DateTime]$packageCache.CachedDate
+        if ($packageCache -and $packageCache.Value) {
+            $cachedDate = [DateTime]$packageCache.Value.CachedDate
             $daysSinceCached = ((Get-Date) - $cachedDate).TotalDays
 
             if ($daysSinceCached -lt 30) {
-                return $packageCache.Details
+                return $packageCache.Value.Details
             }
         }
     }
