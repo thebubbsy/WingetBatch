@@ -35,4 +35,38 @@ Describe "Show-WingetPackageDetails UX Improvements" {
 
         $descPos | Should -BeLessThan $verPos
     }
+
+    It "Displays Name and Id in the header when available" {
+        $pkgId = "Test.Pkg"
+        $details = @{ "Test.Pkg" = @{ Id = "Test.Pkg" } }
+        $fallbackMap = @{ "Test.Pkg" = @{ Name = "Test Package"; Id = "Test.Pkg" } }
+
+        $module = Get-Module WingetBatch
+        $scriptBlock = {
+            param($id, $map, $fbMap)
+            Show-WingetPackageDetails -PackageIds @($id) -DetailsMap $map -FallbackMap $fbMap 6>&1
+        }
+
+        $output = & $module $scriptBlock $pkgId $details $fallbackMap
+        $outputStr = $output | Out-String
+
+        $outputStr | Should -Match "Test Package \(Test.Pkg\)"
+    }
+
+    It "Displays the installation command at the bottom" {
+        $pkgId = "Test.Pkg"
+        $details = @{ "Test.Pkg" = @{ Id = "Test.Pkg" } }
+
+        $module = Get-Module WingetBatch
+        $scriptBlock = {
+            param($id, $map)
+            Show-WingetPackageDetails -PackageIds @($id) -DetailsMap $map 6>&1
+        }
+
+        $output = & $module $scriptBlock $pkgId $details
+        $outputStr = $output | Out-String
+
+        $outputStr | Should -Match "Command:"
+        $outputStr | Should -Match "winget install --id `"Test.Pkg`" -e"
+    }
 }
