@@ -785,6 +785,11 @@ function Show-WingetPackageDetails {
             Write-Host ""
         }
 
+        # Command
+        Write-Host "  💻 Command:     " -ForegroundColor DarkGray -NoNewline
+        Write-Host "winget install --id `"$pkgId`" -e" -ForegroundColor Cyan
+        Write-Host ""
+
         # License (Text)
         if ($details.License) {
             Write-Host "  ⚖️  License:     " -ForegroundColor DarkGray -NoNewline
