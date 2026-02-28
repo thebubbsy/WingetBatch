@@ -35,4 +35,44 @@ Describe "Show-WingetPackageDetails UX Improvements" {
 
         $descPos | Should -BeLessThan $verPos
     }
+
+    It "Displays Name (Id) format in header when Name is available and different" {
+        $pkgId = "Test.Pkg"
+        $detailsMap = @{
+            "Test.Pkg" = @{ Id = "Test.Pkg" }
+        }
+        $fallbackMap = @{
+            "Test.Pkg" = @{ Id = "Test.Pkg"; Name = "Test Package" }
+        }
+
+        $module = Get-Module WingetBatch
+        $scriptBlock = {
+            param($id, $detailsMap, $fallbackMap)
+            Show-WingetPackageDetails -PackageIds @($id) -DetailsMap $detailsMap -FallbackMap $fallbackMap 6>&1
+        }
+
+        $output = & $module $scriptBlock $pkgId $detailsMap $fallbackMap
+        $outputStr = $output | Out-String
+
+        $outputStr | Should -Match "Test Package \(Test.Pkg\)"
+    }
+
+    It "Displays explicit Command section" {
+        $pkgId = "Test.Pkg"
+        $detailsMap = @{
+            "Test.Pkg" = @{ Id = "Test.Pkg" }
+        }
+
+        $module = Get-Module WingetBatch
+        $scriptBlock = {
+            param($id, $map)
+            Show-WingetPackageDetails -PackageIds @($id) -DetailsMap $map 6>&1
+        }
+
+        $output = & $module $scriptBlock $pkgId $detailsMap
+        $outputStr = $output | Out-String
+
+        $outputStr | Should -Match "Command:"
+        $outputStr | Should -Match "winget install --id `"Test.Pkg`" -e"
+    }
 }
