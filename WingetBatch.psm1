@@ -672,8 +672,16 @@ function Show-WingetPackageDetails {
             $pkgInfo = $FallbackInfo | Where-Object { $_.Name -eq $pkgId -or $_.Id -eq $pkgId } | Select-Object -First 1
         }
 
+        # Header Format: Name (Id) or just Id
+        $displayName = $pkgId
+        $pkgName = if ($pkgInfo -and $pkgInfo.Name) { $pkgInfo.Name } else { $null }
+
+        if ($pkgName -and $pkgName -ne $pkgId) {
+            $displayName = "$pkgName ($pkgId)"
+        }
+
         Write-Host "▶ " -ForegroundColor Yellow -NoNewline
-        Write-Host " $pkgId " -ForegroundColor White -BackgroundColor DarkBlue
+        Write-Host " $displayName " -ForegroundColor White -BackgroundColor DarkBlue
         Write-Host ""
 
         # Description (The "blurb")
@@ -791,6 +799,11 @@ function Show-WingetPackageDetails {
             Write-Host $details.License -ForegroundColor White
             Write-Host ""
         }
+
+        # Command
+        Write-Host "  💻 Command:     " -ForegroundColor DarkGray -NoNewline
+        Write-Host "winget install --id `"$pkgId`" -e" -ForegroundColor Cyan
+        Write-Host ""
     }
 
     Write-Host ("=" * 80) -ForegroundColor Cyan
@@ -2889,7 +2902,8 @@ function Get-WingetBatchConfigDir {
     .DESCRIPTION
         Internal function to get the path to the .wingetbatch configuration directory.
     #>
-    return Join-Path $env:USERPROFILE ".wingetbatch"
+    $basePath = if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
+    return Join-Path -Path $basePath -ChildPath ".wingetbatch"
 }
 
 function ConvertTo-SpectreEscaped {
