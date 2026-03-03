@@ -13,3 +13,7 @@
 ## 2026-02-14 - [Double Iteration with Regex Overhead]
 **Learning:** `Install-WingetAll` iterated over `$foundPackages` twice: once to build a display list and again to build a lookup map. Both loops performed identical, expensive `ConvertTo-SpectreEscaped` (regex replacement) operations.
 **Action:** Consolidate such loops into a single pass. Build multiple data structures simultaneously to avoid redundant iterations and re-calculations.
+
+## 2026-03-03 - [Group-Object Overhead for Deduplication]
+**Learning:** Using `Group-Object` for array deduplication (`| Group-Object Id | ForEach-Object { $_.Group[0] }`) incurs significant O(N) performance overhead compared to a `HashSet[string]` loop. In tests with 5,000 objects, `Group-Object` took ~160ms, while `HashSet` took ~14ms (11x faster).
+**Action:** Use a `System.Collections.Generic.HashSet[T]` inside a loop for fast, O(1) deduplication of large collections in performance-critical code paths.

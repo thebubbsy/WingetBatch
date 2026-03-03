@@ -236,7 +236,16 @@ function Install-WingetAll {
             }
 
             # Deduplicate packages within this query based on Id (preserving order)
-            $uniqueQueryPackages = $queryPackages | Group-Object Id | ForEach-Object { $_.Group[0] }
+            # Use HashSet for O(1) deduplication instead of Group-Object (O(N) overhead)
+            $seenIds = [System.Collections.Generic.HashSet[string]]::new()
+            $uniqueQueryPackages = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+            foreach ($pkg in $queryPackages) {
+                if ($seenIds.Add($pkg.Id)) {
+                    $uniqueQueryPackages.Add($pkg)
+                }
+            }
+
             $allPackages.AddRange([array]$uniqueQueryPackages)
         }
 
