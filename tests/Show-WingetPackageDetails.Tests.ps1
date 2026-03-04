@@ -35,4 +35,26 @@ Describe "Show-WingetPackageDetails UX Improvements" {
 
         $descPos | Should -BeLessThan $verPos
     }
+
+    It "Displays explicit Command section at the bottom" {
+        $pkgId = "Microsoft.PowerToys"
+        $details = @{
+            "Microsoft.PowerToys" = @{
+                Id = "Microsoft.PowerToys"
+                Description = "System utilities"
+            }
+        }
+
+        $module = Get-Module WingetBatch
+        $scriptBlock = {
+            param($id, $map)
+            Show-WingetPackageDetails -PackageIds @($id) -DetailsMap $map 6>&1
+        }
+
+        $output = & $module $scriptBlock $pkgId $details
+        $outputStr = $output | Out-String
+
+        $outputStr | Should -Match "💻 Command:"
+        $outputStr | Should -Match "winget install --id `"$pkgId`" -e"
+    }
 }
