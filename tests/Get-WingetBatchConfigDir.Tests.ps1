@@ -1,12 +1,12 @@
 Describe "Get-WingetBatchConfigDir" {
     BeforeAll {
-        # Dot-source the module to access internal functions
-        . "$PSScriptRoot/../WingetBatch.psm1"
+        Import-Module "$PSScriptRoot/../WingetBatch.psm1" -Force
     }
 
     It "Returns the expected configuration directory path" {
-        $expectedPath = Join-Path $env:USERPROFILE ".wingetbatch"
-        $actualPath = Get-WingetBatchConfigDir
+        $profile = if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
+        $expectedPath = Join-Path $profile ".wingetbatch"
+        $actualPath = InModuleScope WingetBatch { Get-WingetBatchConfigDir }
         $actualPath | Should -Be $expectedPath
     }
 }

@@ -31,9 +31,7 @@ Installer:
   Installer Type: wix
 "@
             # InModuleScope is required to test internal function
-            $result = InModuleScope WingetBatch {
-                Parse-WingetShowOutput -Output $output -PackageId "MongoDB.Shell"
-            }
+            $result = & (Get-Module WingetBatch) { Parse-WingetShowOutput -Output $args[0] -PackageId $args[1] } $output "MongoDB.Shell"
 
             $result.Id | Should -Be "MongoDB.Shell"
             $result.Version | Should -Be "2.3.2"
@@ -56,9 +54,7 @@ Installer:
              $output = @"
 Publisher Url: https://github.com/microsoft/winget-cli
 "@
-             $result = InModuleScope WingetBatch {
-                Parse-WingetShowOutput -Output $output -PackageId "Test"
-             }
+             $result = & (Get-Module WingetBatch) { Parse-WingetShowOutput -Output $args[0] -PackageId $args[1] } $output "Test"
 
              $result.PublisherGitHub | Should -Be "https://github.com/microsoft/winget-cli"
         }
@@ -70,9 +66,7 @@ Publisher Url: https://github.com/microsoft/winget-cli
   Version:   1.0.0
    Publisher:    Test Pub
 "@
-             $result = InModuleScope WingetBatch {
-                Parse-WingetShowOutput -Output $output -PackageId "Test"
-             }
+             $result = & (Get-Module WingetBatch) { Parse-WingetShowOutput -Output $args[0] -PackageId $args[1] } $output "Test"
 
              $result.Version | Should -Be "1.0.0"
              $result.Publisher | Should -Be "Test Pub"
@@ -83,9 +77,7 @@ Publisher Url: https://github.com/microsoft/winget-cli
 Version:
 Publisher:
 "@
-             $result = InModuleScope WingetBatch {
-                Parse-WingetShowOutput -Output $output -PackageId "Test"
-             }
+             $result = & (Get-Module WingetBatch) { Parse-WingetShowOutput -Output $args[0] -PackageId $args[1] } $output "Test"
 
              $result.Version | Should -BeNullOrEmpty
              $result.Publisher | Should -BeNullOrEmpty
@@ -96,9 +88,7 @@ Publisher:
 Just some text
 Another line
 "@
-             $result = InModuleScope WingetBatch {
-                Parse-WingetShowOutput -Output $output -PackageId "Test"
-             }
+             $result = & (Get-Module WingetBatch) { Parse-WingetShowOutput -Output $args[0] -PackageId $args[1] } $output "Test"
 
              $result.Version | Should -BeNull
         }
@@ -107,9 +97,7 @@ Another line
              $output = @"
 Release Notes Url: https://example.com/notes
 "@
-             $result = InModuleScope WingetBatch {
-                Parse-WingetShowOutput -Output $output -PackageId "Test"
-             }
+             $result = & (Get-Module WingetBatch) { Parse-WingetShowOutput -Output $args[0] -PackageId $args[1] } $output "Test"
 
              $result.ReleaseNotesUrl | Should -Be "https://example.com/notes"
         }
@@ -118,9 +106,7 @@ Release Notes Url: https://example.com/notes
              $output = @"
 Description: This is a description: with a colon
 "@
-             $result = InModuleScope WingetBatch {
-                Parse-WingetShowOutput -Output $output -PackageId "Test"
-             }
+             $result = & (Get-Module WingetBatch) { Parse-WingetShowOutput -Output $args[0] -PackageId $args[1] } $output "Test"
 
              $result.Description | Should -Be "This is a description: with a colon"
         }

@@ -13,3 +13,7 @@
 ## 2026-02-13 - [Information Priority in CLI]
 **Learning:** Users need immediate context about "what is this?" before "what version is this?". Prioritizing the Description field at the top of the detailed view significantly reduces cognitive load and confirms selection faster.
 **Action:** Always place the Description or Summary field immediately after the Item Header, before secondary metadata like Version or Publisher.
+
+## 2026-02-14 - [Opaque ID Context in CLI Headers]
+**Learning:** Package IDs (e.g., Microsoft Store app IDs like `9N0ENZ92RNZ4`) can be completely opaque to users. Showing only the ID in detailed views fails to immediately confirm *what* the user is looking at.
+**Action:** Always format primary headers as "Human-Readable Name (ID)" when displaying detailed information to provide immediate, recognizable context.

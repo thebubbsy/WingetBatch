@@ -673,7 +673,11 @@ function Show-WingetPackageDetails {
         }
 
         Write-Host "▶ " -ForegroundColor Yellow -NoNewline
-        Write-Host " $pkgId " -ForegroundColor White -BackgroundColor DarkBlue
+        $displayName = $pkgId
+        if ($pkgInfo -and $pkgInfo.Name -and $pkgInfo.Name -ne $pkgId) {
+            $displayName = "$($pkgInfo.Name) ($pkgId)"
+        }
+        Write-Host " $displayName " -ForegroundColor White -BackgroundColor DarkBlue
         Write-Host ""
 
         # Description (The "blurb")
@@ -2834,7 +2838,8 @@ function Parse-WingetShowOutput {
 
     # Optimized parsing: Replace sequential regex matching with O(1) string operations and switch
     # This significantly reduces CPU usage when parsing many packages in parallel
-    foreach ($line in $Output -split "`n") {
+    $lines = $Output -split '\r?\n'
+    foreach ($line in $lines) {
         $colonIndex = $line.IndexOf(':')
 
         if ($colonIndex -gt 0) {
@@ -2889,7 +2894,8 @@ function Get-WingetBatchConfigDir {
     .DESCRIPTION
         Internal function to get the path to the .wingetbatch configuration directory.
     #>
-    return Join-Path $env:USERPROFILE ".wingetbatch"
+    $profile = if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
+    return Join-Path $profile ".wingetbatch"
 }
 
 function ConvertTo-SpectreEscaped {
