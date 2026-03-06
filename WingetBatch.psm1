@@ -673,7 +673,14 @@ function Show-WingetPackageDetails {
         }
 
         Write-Host "▶ " -ForegroundColor Yellow -NoNewline
-        Write-Host " $pkgId " -ForegroundColor White -BackgroundColor DarkBlue
+
+        # Display Name (Id) if name is available and distinct, otherwise just Id
+        $displayName = $pkgId
+        if ($pkgInfo -and $pkgInfo.Name -and $pkgInfo.Name -ne $pkgId) {
+            $displayName = "$($pkgInfo.Name) ($pkgId)"
+        }
+
+        Write-Host " $displayName " -ForegroundColor White -BackgroundColor DarkBlue
         Write-Host ""
 
         # Description (The "blurb")
@@ -791,6 +798,12 @@ function Show-WingetPackageDetails {
             Write-Host $details.License -ForegroundColor White
             Write-Host ""
         }
+
+        # --- Command ---
+        Write-Host ""
+        Write-Host "  💻 Command:     " -ForegroundColor DarkGray -NoNewline
+        Write-Host "winget install --id ""$pkgId"" -e" -ForegroundColor Cyan
+        Write-Host ""
     }
 
     Write-Host ("=" * 80) -ForegroundColor Cyan

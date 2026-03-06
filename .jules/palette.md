@@ -13,3 +13,11 @@
 ## 2026-02-13 - [Information Priority in CLI]
 **Learning:** Users need immediate context about "what is this?" before "what version is this?". Prioritizing the Description field at the top of the detailed view significantly reduces cognitive load and confirms selection faster.
 **Action:** Always place the Description or Summary field immediately after the Item Header, before secondary metadata like Version or Publisher.
+
+## 2026-03-06 - [Human-Readable Identifiers in Headers]
+**Learning:** Displaying only technical IDs (like 'Publisher.App') in headers reduces user confidence when confirming actions. Providing the natural, human-readable Name alongside the ID (e.g., 'Application Name (Publisher.App)') increases clarity, especially if the internal ID differs from the product name.
+**Action:** Always format primary headers as 'Name (ID)' when displaying detailed views for items that have both human-readable and technical identifiers.
+
+## 2026-03-06 - [Actionable CLI Outputs]
+**Learning:** In terminal utilities, displaying the exact underlying command used to perform an action (e.g., 'winget install --id "ID" -e') directly to the user serves as an educational tool, debug info, and a quick copy-paste fallback if they decide not to use the automated process.
+**Action:** Append the explicit underlying command to the bottom of detailed CLI views.
