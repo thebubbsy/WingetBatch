@@ -13,3 +13,7 @@
 ## 2026-02-14 - [Double Iteration with Regex Overhead]
 **Learning:** `Install-WingetAll` iterated over `$foundPackages` twice: once to build a display list and again to build a lookup map. Both loops performed identical, expensive `ConvertTo-SpectreEscaped` (regex replacement) operations.
 **Action:** Consolidate such loops into a single pass. Build multiple data structures simultaneously to avoid redundant iterations and re-calculations.
+
+## 2026-03-05 - [JSON File Parsing in Loop Overhead]
+**Learning:** `Start-PackageDetailJobs` was repeatedly reading and parsing `package_cache.json` using `Get-Content ... | ConvertFrom-Json` inside a loop iterating over `$packageList`. This caused `O(N)` disk I/O and JSON deserialization operations within each job. Loading the JSON into memory once at the beginning of the job reduces this cost significantly.
+**Action:** When a loop requires data from a JSON file, read and parse the JSON file into an in-memory hashtable *once* before entering the loop. Look up data from the hashtable inside the loop.
