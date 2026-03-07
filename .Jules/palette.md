@@ -1,0 +1,3 @@
+## 2025-11-06 - Actionable CLI Outputs
+**Learning:** Providing explicit, copy-pasteable commands in CLI details output (e.g., `winget install --id "Pkg.Id" -e`) bridges the gap between discovery and execution, significantly improving UX by making information actionable without requiring users to construct commands manually.
+**Action:** When designing detail views for packages, files, or resources, always include a designated "Command" or "Usage" section with the exact syntax needed to act on that resource.
