@@ -7,7 +7,7 @@ Describe "Parse-WingetShowOutput" {
         # Best practice for testing internal functions is InModuleScope, but that requires the module to be imported.
 
         # Try to import the module
-        Import-Module "$PSScriptRoot/../WingetBatch.psm1" -Force
+        Import-Module "$PSScriptRoot/../WingetBatch.psd1" -Force
     }
 
     Context "Standard Output Parsing" {

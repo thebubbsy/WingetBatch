@@ -236,7 +236,14 @@ function Install-WingetAll {
             }
 
             # Deduplicate packages within this query based on Id (preserving order)
-            $uniqueQueryPackages = $queryPackages | Group-Object Id | ForEach-Object { $_.Group[0] }
+            $seenIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+            $uniqueQueryPackages = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+            foreach ($pkg in $queryPackages) {
+                if ($seenIds.Add($pkg.Id)) {
+                    $uniqueQueryPackages.Add($pkg)
+                }
+            }
             $allPackages.AddRange([array]$uniqueQueryPackages)
         }
 
@@ -266,17 +273,26 @@ function Install-WingetAll {
 
         if ($WhatIf) {
             Write-Host "`n[WhatIf] Would display interactive selection for:" -ForegroundColor Yellow
-            $foundPackages | Group-Object SearchTerm | ForEach-Object {
-                Write-Host "$($_.Name):" -ForegroundColor Yellow
-                $_.Group | ForEach-Object {
+
+            $groups = @{}
+            foreach ($pkg in $foundPackages) {
+                if (-not $groups.ContainsKey($pkg.SearchTerm)) {
+                    $groups[$pkg.SearchTerm] = [System.Collections.Generic.List[PSCustomObject]]::new()
+                }
+                $groups[$pkg.SearchTerm].Add($pkg)
+            }
+
+            foreach ($term in $groups.Keys) {
+                Write-Host "$($term):" -ForegroundColor Yellow
+                foreach ($pkg in $groups[$term]) {
                     Write-Host "  • " -ForegroundColor Cyan -NoNewline
-                    Write-Host "$($_.Name) ($($_.Id))" -ForegroundColor White -NoNewline
-                    if ($_.Version -ne "Unknown") {
-                        Write-Host " v$($_.Version)" -ForegroundColor Green -NoNewline
+                    Write-Host "$($pkg.Name) ($($pkg.Id))" -ForegroundColor White -NoNewline
+                    if ($pkg.Version -ne "Unknown") {
+                        Write-Host " v$($pkg.Version)" -ForegroundColor Green -NoNewline
                     }
-                    if ($_.Source) {
-                        $sColor = if ($_.Source -match 'msstore') { "Magenta" } else { "Cyan" }
-                        Write-Host " [$($_.Source)]" -ForegroundColor $sColor
+                    if ($pkg.Source) {
+                        $sColor = if ($pkg.Source -match 'msstore') { "Magenta" } else { "Cyan" }
+                        Write-Host " [$($pkg.Source)]" -ForegroundColor $sColor
                     } else { Write-Host "" }
                 }
             }

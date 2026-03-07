@@ -1,4 +1,4 @@
-Import-Module "$PSScriptRoot/../WingetBatch.psm1" -Force
+Import-Module "$PSScriptRoot/../WingetBatch.psd1" -Force
 
 Describe "ConvertTo-SpectreEscaped" {
     InModuleScope "WingetBatch" {
