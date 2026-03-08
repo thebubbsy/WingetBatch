@@ -784,11 +784,6 @@ function Show-WingetPackageDetails {
             Write-Host ""
         }
 
-        # Command
-        Write-Host "  💻 Command:     " -ForegroundColor DarkGray -NoNewline
-        Write-Host "winget install --id $pkgId -e" -ForegroundColor Cyan
-        Write-Host ""
-
         # Tags
         if ($details.Tags -and $details.Tags.Count -gt 0) {
             Write-Host "  🏷️  Tags:        " -ForegroundColor DarkGray -NoNewline
@@ -2886,7 +2881,7 @@ function Parse-WingetShowOutput {
 
     # Optimized parsing: Replace sequential regex matching with O(1) string operations and switch
     # This significantly reduces CPU usage when parsing many packages in parallel
-    foreach ($line in $Output -split "`n") {
+    foreach ($line in $Output -split '\r?\n') {
         $colonIndex = $line.IndexOf(':')
 
         if ($colonIndex -gt 0) {

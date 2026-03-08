@@ -1,12 +1,5 @@
 Describe "Parse-WingetShowOutput" {
     BeforeAll {
-        # Dot-source the module to access internal functions
-        # We need to use Import-Module to load the module properly if it exports members
-        # But for testing internal functions, dot-sourcing is often required if they are not exported
-        # However, Export-ModuleMember might interfere.
-        # Best practice for testing internal functions is InModuleScope, but that requires the module to be imported.
-
-        # Try to import the module
         Import-Module "$PSScriptRoot/../WingetBatch.psd1" -Force
     }
 
