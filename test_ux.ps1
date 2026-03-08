@@ -1,29 +1,26 @@
-Import-Module ./WingetBatch.psm1 -Force
+$PSScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Definition
+Import-Module "$PSScriptRoot/WingetBatch.psd1" -Force
 
-$pkgId = "Test.Package"
+$pkgId = "Microsoft.PowerToys"
 $details = @{
-    "Test.Package" = @{
-        Id = "Test.Package"
-        Description = "A test package description."
-        Version = "1.2.3"
-        Category = "Developer Tools"
-        Pricing = "Free"
-        Publisher = "Test Publisher"
-        Installer = "EXE"
-        Moniker = "testpkg"
-        Homepage = "https://example.com"
-        PublisherGitHub = "https://github.com/example/test"
-        LicenseUrl = "https://example.com/license"
-        PrivacyUrl = "https://example.com/privacy"
+    "Microsoft.PowerToys" = @{
+        Id = "Microsoft.PowerToys"
+        Name = "PowerToys"
+        Version = "0.75.0"
+        Description = "Microsoft PowerToys is a set of utilities for power users to tune and streamline their Windows experience for greater productivity."
+        Publisher = "Microsoft Corporation"
+        Tags = @("utility", "powertoys")
+        Homepage = "https://github.com/microsoft/PowerToys"
+        Installer = "msix"
+        License = "MIT"
     }
 }
+$fallbackInfo = @()
+$fallbackMap = @{}
 
 $module = Get-Module WingetBatch
 $scriptBlock = {
-    param($id, $map)
-    # Redirect Write-Host (stream 6) to success stream
-    Show-WingetPackageDetails -PackageIds @($id) -DetailsMap $map 6>&1
+    param($id, $map, $fi, $fm)
+    Show-WingetPackageDetails -PackageIds @($id) -DetailsMap $map -FallbackInfo $fi -FallbackMap $fm
 }
-
-$output = & $module $scriptBlock $pkgId $details
-$output | Out-String | Write-Host
+& $module $scriptBlock $pkgId $details $fallbackInfo $fallbackMap
