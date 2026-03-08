@@ -784,6 +784,11 @@ function Show-WingetPackageDetails {
             Write-Host ""
         }
 
+        # Command
+        Write-Host "  💻 Command:     " -ForegroundColor DarkGray -NoNewline
+        Write-Host "winget install --id $pkgId -e" -ForegroundColor Cyan
+        Write-Host ""
+
         # Tags
         if ($details.Tags -and $details.Tags.Count -gt 0) {
             Write-Host "  🏷️  Tags:        " -ForegroundColor DarkGray -NoNewline
@@ -805,11 +810,23 @@ function Show-WingetPackageDetails {
         if ($links.Count -gt 0) {
             Write-Host "  🔗 Links:" -ForegroundColor Cyan
             foreach ($link in $links) {
+                # Determine icon
+                $icon = switch ($link.Label) {
+                    "Homepage"      { "🏠" }
+                    "Source"        { "💾" }
+                    "Publisher"     { "🏢" }
+                    "Release Notes" { "📝" }
+                    "License"       { "⚖️ " }
+                    "Privacy"       { "🔒" }
+                    "Package"       { "📦" }
+                    Default         { "• " }
+                }
+
                 # Align manually (max label length + 2)
                 $padLen = 15 - $link.Label.Length
                 if ($padLen -lt 0) { $padLen = 0 }
                 $padding = " " * $padLen
-                Write-Host "     • $($link.Label):$padding" -ForegroundColor DarkGray -NoNewline
+                Write-Host "     $icon $($link.Label):$padding" -ForegroundColor DarkGray -NoNewline
                 Write-Host $link.Url -ForegroundColor $link.Color
             }
             Write-Host ""
