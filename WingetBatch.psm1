@@ -718,13 +718,13 @@ function Show-WingetPackageDetails {
         if ($details.Version -or ($pkgInfo -and $pkgInfo.Version)) {
             Write-Host "  🔖 Version:     " -ForegroundColor DarkGray -NoNewline
             $ver = if ($details.Version) { $details.Version } else { $pkgInfo.Version }
-            Write-Host $ver -ForegroundColor White
+            Write-Host $ver -ForegroundColor Green
         }
 
         # Category
         if ($details.Category) {
             Write-Host "  📂 Category:    " -ForegroundColor DarkGray -NoNewline
-            Write-Host $details.Category -ForegroundColor Yellow
+            Write-Host $details.Category -ForegroundColor Cyan
         }
 
         # Pricing & Free Trial
@@ -783,11 +783,6 @@ function Show-WingetPackageDetails {
             }
             Write-Host ""
         }
-
-        # Command
-        Write-Host "  💻 Command:     " -ForegroundColor DarkGray -NoNewline
-        Write-Host "winget install --id $pkgId -e" -ForegroundColor Cyan
-        Write-Host ""
 
         # Tags
         if ($details.Tags -and $details.Tags.Count -gt 0) {
