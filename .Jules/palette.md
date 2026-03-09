@@ -1,0 +1,3 @@
+## 2025-11-04 - [Enhance CLI Detail View Label Contrast]
+**Learning:** For terminal CLI output parsing, utilizing high contrast foreground colors for values (like Green and Cyan) when placed next to muted dark gray labels significantly improves rapid scanning and data hierarchy without needing whitespace formatting tricks.
+**Action:** Consistently pair `DarkGray` label names with bright standard console colors (Green/White/Cyan) in complex detail outputs to naturally group metadata fields for the user.
