@@ -1,18 +1,12 @@
 Describe "Parse-WingetShowOutput" {
     BeforeAll {
-        # Dot-source the module to access internal functions
-        # We need to use Import-Module to load the module properly if it exports members
-        # But for testing internal functions, dot-sourcing is often required if they are not exported
-        # However, Export-ModuleMember might interfere.
-        # Best practice for testing internal functions is InModuleScope, but that requires the module to be imported.
-
-        # Try to import the module
         Import-Module "$PSScriptRoot/../WingetBatch.psd1" -Force
     }
 
     Context "Standard Output Parsing" {
         It "Parses standard fields correctly" {
-            $output = @"
+            $result = InModuleScope WingetBatch {
+                $output = @"
 Found MongoDB Shell [MongoDB.Shell]
 Version: 2.3.2
 Publisher: MongoDB, Inc.
@@ -30,8 +24,6 @@ Tags: mongodb, shell, cli
 Installer:
   Installer Type: wix
 "@
-            # InModuleScope is required to test internal function
-            $result = InModuleScope WingetBatch {
                 Parse-WingetShowOutput -Output $output -PackageId "MongoDB.Shell"
             }
 
@@ -53,10 +45,10 @@ Installer:
         }
 
         It "Parses GitHub Publisher URL correctly" {
-             $output = @"
+             $result = InModuleScope WingetBatch {
+                $output = @"
 Publisher Url: https://github.com/microsoft/winget-cli
 "@
-             $result = InModuleScope WingetBatch {
                 Parse-WingetShowOutput -Output $output -PackageId "Test"
              }
 
@@ -66,11 +58,11 @@ Publisher Url: https://github.com/microsoft/winget-cli
 
     Context "Edge Cases" {
         It "Handles extra whitespace around keys and values" {
-             $output = @"
+             $result = InModuleScope WingetBatch {
+                $output = @"
   Version:   1.0.0
    Publisher:    Test Pub
 "@
-             $result = InModuleScope WingetBatch {
                 Parse-WingetShowOutput -Output $output -PackageId "Test"
              }
 
@@ -79,11 +71,11 @@ Publisher Url: https://github.com/microsoft/winget-cli
         }
 
         It "Handles empty values gracefully" {
-             $output = @"
+             $result = InModuleScope WingetBatch {
+                $output = @"
 Version:
 Publisher:
 "@
-             $result = InModuleScope WingetBatch {
                 Parse-WingetShowOutput -Output $output -PackageId "Test"
              }
 
@@ -92,11 +84,11 @@ Publisher:
         }
 
         It "Handles lines without colons (ignores them)" {
-             $output = @"
+             $result = InModuleScope WingetBatch {
+                $output = @"
 Just some text
 Another line
 "@
-             $result = InModuleScope WingetBatch {
                 Parse-WingetShowOutput -Output $output -PackageId "Test"
              }
 
@@ -104,10 +96,10 @@ Another line
         }
 
         It "Handles keys with spaces correctly" {
-             $output = @"
+             $result = InModuleScope WingetBatch {
+                $output = @"
 Release Notes Url: https://example.com/notes
 "@
-             $result = InModuleScope WingetBatch {
                 Parse-WingetShowOutput -Output $output -PackageId "Test"
              }
 
@@ -115,10 +107,10 @@ Release Notes Url: https://example.com/notes
         }
 
         It "Handles colons in values correctly" {
-             $output = @"
+             $result = InModuleScope WingetBatch {
+                $output = @"
 Description: This is a description: with a colon
 "@
-             $result = InModuleScope WingetBatch {
                 Parse-WingetShowOutput -Output $output -PackageId "Test"
              }
 

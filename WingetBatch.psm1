@@ -130,89 +130,101 @@ function Install-WingetAll {
             $matchColStart = -1
 
             foreach ($line in $lines) {
-                # Find the header line to determine column positions
-                if ($line -match '^Name\s+Id\s+') {
-                    $nameColEnd = $line.IndexOf('Id') - 1
-                    $idColStart = $line.IndexOf('Id')
+                if (-not $headerFound) {
+                    # Find the header line to determine column positions
+                    if ($line -match '^Name\s+Id\s+') {
+                        $nameColEnd = $line.IndexOf('Id') - 1
+                        $idColStart = $line.IndexOf('Id')
 
-                    # Reset
-                    $versionColStart = -1
-                    $sourceColStart = -1
-                    $matchColStart = -1
+                        # Reset
+                        $versionColStart = -1
+                        $sourceColStart = -1
+                        $matchColStart = -1
 
-                    # Find Version
-                    if ($line -match 'Version') {
-                        $idColEnd = $line.IndexOf('Version') - 1
-                        $versionColStart = $line.IndexOf('Version')
-                    } else {
-                        $idColEnd = $line.Length
-                    }
-
-                    # Find Match
-                    if ($line -match 'Match') {
-                        $matchColStart = $line.IndexOf('Match')
-                    }
-
-                    # Find Source
-                    if ($line -match 'Source') {
-                        $sourceColStart = $line.IndexOf('Source')
-                    }
-                    continue
-                }
-
-                # Skip until we find the header separator line (dashes)
-                if ($line -match '^-+') {
-                    $headerFound = $true
-                    continue
-                }
-
-                if ($headerFound -and $line.Trim() -ne '' -and $idColStart -gt 0 -and $line.Length -gt $idColStart) {
-                    # Extract the entire line for filtering and the ID
-                    $endPos = if ($idColEnd -lt $line.Length) { $idColEnd } else { $line.Length }
-                    $packageId = $line.Substring($idColStart, $endPos - $idColStart).Trim()
-
-                    # Extract Name
-                    $packageName = if ($nameColEnd -gt 0 -and $line.Length -gt $nameColEnd) {
-                        $line.Substring(0, $nameColEnd).Trim()
-                    } else {
-                        $packageId # Fallback
-                    }
-
-                    # Extract Version
-                    $packageVersion = "Unknown"
-                    if ($versionColStart -gt -1 -and $line.Length -gt $versionColStart) {
-                        $vEnd = $line.Length
-                        # If Match is present
-                        if ($matchColStart -gt $versionColStart) {
-                            $vEnd = $matchColStart
-                        }
-                        # If Source is present (and no Match or Match is after Source)
-                        elseif ($sourceColStart -gt $versionColStart) {
-                            $vEnd = $sourceColStart
+                        # Find Version
+                        if ($line -match 'Version') {
+                            $idColEnd = $line.IndexOf('Version') - 1
+                            $versionColStart = $line.IndexOf('Version')
+                        } else {
+                            $idColEnd = $line.Length
                         }
 
-                        if ($vEnd -gt $line.Length) { $vEnd = $line.Length }
-                        $packageVersion = $line.Substring($versionColStart, $vEnd - $versionColStart).Trim()
+                        # Find Match
+                        if ($line -match 'Match') {
+                            $matchColStart = $line.IndexOf('Match')
+                        }
+
+                        # Find Source
+                        if ($line -match 'Source') {
+                            $sourceColStart = $line.IndexOf('Source')
+                        }
+                        continue
                     }
 
-                    # Extract Source
-                    $packageSource = "Unknown"
-                    if ($sourceColStart -gt -1 -and $line.Length -gt $sourceColStart) {
-                        $packageSource = $line.Substring($sourceColStart).Trim()
+                    # Skip until we find the header separator line (dashes)
+                    if ($line -match '^-+') {
+                        $headerFound = $true
+                        continue
                     }
+                }
+                else {
+                    if (-not [string]::IsNullOrWhiteSpace($line) -and $idColStart -gt 0 -and $line.Length -gt $idColStart) {
+                        # Extract the entire line for filtering and the ID
+                        $endPos = if ($idColEnd -lt $line.Length) { $idColEnd } else { $line.Length }
+                        $packageId = $line.Substring($idColStart, $endPos - $idColStart).Trim()
 
-                    # Only add if it looks like a valid package ID
-                    if ($packageId -and $packageId -match '^[A-Za-z0-9\.\-_]+$' -and $packageId -notmatch '^\d+\.\d+') {
-                        # If multiple search words, filter to only packages matching ALL words (case-insensitive)
-                        if ($searchWords.Count -gt 1) {
-                            $matchesAll = $true
-                            foreach ($pattern in $searchPatterns) {
-                                if ($line -notmatch $pattern) {
-                                    $matchesAll = $false
-                                    break
+                        # Extract Name
+                        $packageName = if ($nameColEnd -gt 0 -and $line.Length -gt $nameColEnd) {
+                            $line.Substring(0, $nameColEnd).Trim()
+                        } else {
+                            $packageId # Fallback
+                        }
+
+                        # Extract Version
+                        $packageVersion = "Unknown"
+                        if ($versionColStart -gt -1 -and $line.Length -gt $versionColStart) {
+                            $vEnd = $line.Length
+                            # If Match is present
+                            if ($matchColStart -gt $versionColStart) {
+                                $vEnd = $matchColStart
+                            }
+                            # If Source is present (and no Match or Match is after Source)
+                            elseif ($sourceColStart -gt $versionColStart) {
+                                $vEnd = $sourceColStart
+                            }
+
+                            if ($vEnd -gt $line.Length) { $vEnd = $line.Length }
+                            $packageVersion = $line.Substring($versionColStart, $vEnd - $versionColStart).Trim()
+                        }
+
+                        # Extract Source
+                        $packageSource = "Unknown"
+                        if ($sourceColStart -gt -1 -and $line.Length -gt $sourceColStart) {
+                            $packageSource = $line.Substring($sourceColStart).Trim()
+                        }
+
+                        # Only add if it looks like a valid package ID
+                        if ($packageId -and $packageId -match '^[A-Za-z0-9\.\-_]+$' -and $packageId -notmatch '^\d+\.\d+') {
+                            # If multiple search words, filter to only packages matching ALL words (case-insensitive)
+                            if ($searchWords.Count -gt 1) {
+                                $matchesAll = $true
+                                foreach ($pattern in $searchPatterns) {
+                                    if ($line -notmatch $pattern) {
+                                        $matchesAll = $false
+                                        break
+                                    }
+                                }
+                                if ($matchesAll) {
+                                    $queryPackages.Add([PSCustomObject]@{
+                                        Id = $packageId
+                                        Name = $packageName
+                                        Version = $packageVersion
+                                        Source = $packageSource
+                                        SearchTerm = $query
+                                    })
                                 }
                             }
-                            if ($matchesAll) {
+                            else {
                                 $queryPackages.Add([PSCustomObject]@{
                                     Id = $packageId
                                     Name = $packageName
@@ -221,15 +233,6 @@ function Install-WingetAll {
                                     SearchTerm = $query
                                 })
                             }
-                        }
-                        else {
-                            $queryPackages.Add([PSCustomObject]@{
-                                Id = $packageId
-                                Name = $packageName
-                                Version = $packageVersion
-                                Source = $packageSource
-                                SearchTerm = $query
-                            })
                         }
                     }
                 }
@@ -621,6 +624,7 @@ function Start-PackageDetailJobs {
             catch { }
         }
 
+        $now = Get-Date
         foreach ($pkgIdItem in $packageList) {
             # Ensure packageId is a string (handle potential array wrapping artifacts)
             $packageId = [string]$pkgIdItem
@@ -633,7 +637,7 @@ function Start-PackageDetailJobs {
                 if ($entry -and $entry.CachedDate) {
                     try {
                         $cachedDate = [DateTime]$entry.CachedDate
-                        $daysSinceCached = ((Get-Date) - $cachedDate).TotalDays
+                        $daysSinceCached = ($now - $cachedDate).TotalDays
 
                         if ($daysSinceCached -lt 30) {
                             $cachedInfo = $entry.Details
@@ -1166,6 +1170,7 @@ function Get-WingetNewPackages {
         $packagesToFetchList = [System.Collections.Generic.List[string]]::new()
         $cachedResults = @{}
 
+        $now = Get-Date
         foreach ($pkgId in $allPackageIds) {
             $isCached = $false
             if ($localCache.ContainsKey($pkgId)) {
@@ -1174,7 +1179,7 @@ function Get-WingetNewPackages {
                     try {
                         $cachedDate = [DateTime]$entry.CachedDate
                         # Check if fresh (< 30 days)
-                        if ((Get-Date) -lt $cachedDate.AddDays(30)) {
+                        if ($now -lt $cachedDate.AddDays(30)) {
                             $cachedResults[$pkgId] = $entry.Details
                             $isCached = $true
                         }
@@ -1452,6 +1457,7 @@ function Get-WingetNewPackages {
                             }
 
                             $reselectedPackageDetails = @{}
+                            $now = Get-Date
                             foreach ($pkgId in $packagesToInstallIds) {
                                 # Check if we already have it in packageDetails
                                 if ($packageDetails.ContainsKey($pkgId)) {
@@ -1467,7 +1473,7 @@ function Get-WingetNewPackages {
                                             if ($packageProperty) {
                                                 $packageCache = $packageProperty.Value
                                                 $cachedDate = [DateTime]$packageCache.CachedDate
-                                                $daysSinceCached = ((Get-Date) - $cachedDate).TotalDays
+                                                $daysSinceCached = ($now - $cachedDate).TotalDays
 
                                                 if ($daysSinceCached -lt 30) {
                                                     $cached = $packageCache.Details
