@@ -17,3 +17,11 @@
 ## 2025-11-05 - [PowerShell Group-Object Anti-Pattern]
 **Learning:** `Group-Object` in PowerShell has significant overhead and exhibits O(N) performance for deduplication because it builds full group structures and properties. When using it simply to find unique items or group them for display, it adds substantial latency to array processing. Using a `System.Collections.Generic.HashSet[string]` for deduplication, or a native PowerShell Hashtable (`@{}`) for grouping, is substantially faster (reducing deduplication time from ~266ms to ~34ms for 2500 items).
 **Action:** Replace `Group-Object` in critical paths with `HashSet[string]` for distinct elements and Hashtables mapping keys to `System.Collections.Generic.List[T]` for grouping collections.
+
+## 2026-02-14 - [PowerShell Loop Execution Overhead]
+**Learning:** `Get-Date` has non-trivial overhead in PowerShell. When called repeatedly inside a high-iteration loop (like cache validation), it can add significant execution time. Hoisting `Get-Date` to a `$now` variable outside the loop reduces this overhead.
+**Action:** In performance-critical PowerShell loops, invariant calls like `Get-Date` should be hoisted outside the loop to reduce command execution overhead.
+
+## 2026-02-14 - [PowerShell Regex in Loops]
+**Learning:** Running regex operations (`-match`) on every line of a large text block (like `winget search` output) is computationally expensive. Wrapping the header checks in an `if (-not $headerFound)` block ensures that once the table header is parsed, the script no longer runs expensive `-match` regex operations on the bulk of the text output.
+**Action:** Minimize regex operations inside large loops. Use conditional blocks to skip regex checks once they are no longer needed.
