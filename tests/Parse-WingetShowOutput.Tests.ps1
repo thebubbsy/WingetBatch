@@ -1,12 +1,5 @@
 Describe "Parse-WingetShowOutput" {
     BeforeAll {
-        # Dot-source the module to access internal functions
-        # We need to use Import-Module to load the module properly if it exports members
-        # But for testing internal functions, dot-sourcing is often required if they are not exported
-        # However, Export-ModuleMember might interfere.
-        # Best practice for testing internal functions is InModuleScope, but that requires the module to be imported.
-
-        # Try to import the module
         Import-Module "$PSScriptRoot/../WingetBatch.psd1" -Force
     }
 
@@ -29,7 +22,8 @@ Copyright Url: https://www.mongodb.com/legal/copyright
 Tags: mongodb, shell, cli
 Installer:
   Installer Type: wix
-"@
+"@ -replace "`n", "`r`n"
+
             # InModuleScope is required to test internal function
             $result = InModuleScope WingetBatch {
                 Parse-WingetShowOutput -Output $output -PackageId "MongoDB.Shell"
@@ -55,7 +49,7 @@ Installer:
         It "Parses GitHub Publisher URL correctly" {
              $output = @"
 Publisher Url: https://github.com/microsoft/winget-cli
-"@
+"@ -replace "`n", "`r`n"
              $result = InModuleScope WingetBatch {
                 Parse-WingetShowOutput -Output $output -PackageId "Test"
              }
@@ -69,7 +63,7 @@ Publisher Url: https://github.com/microsoft/winget-cli
              $output = @"
   Version:   1.0.0
    Publisher:    Test Pub
-"@
+"@ -replace "`n", "`r`n"
              $result = InModuleScope WingetBatch {
                 Parse-WingetShowOutput -Output $output -PackageId "Test"
              }
@@ -82,7 +76,7 @@ Publisher Url: https://github.com/microsoft/winget-cli
              $output = @"
 Version:
 Publisher:
-"@
+"@ -replace "`n", "`r`n"
              $result = InModuleScope WingetBatch {
                 Parse-WingetShowOutput -Output $output -PackageId "Test"
              }
@@ -95,7 +89,7 @@ Publisher:
              $output = @"
 Just some text
 Another line
-"@
+"@ -replace "`n", "`r`n"
              $result = InModuleScope WingetBatch {
                 Parse-WingetShowOutput -Output $output -PackageId "Test"
              }
@@ -106,7 +100,7 @@ Another line
         It "Handles keys with spaces correctly" {
              $output = @"
 Release Notes Url: https://example.com/notes
-"@
+"@ -replace "`n", "`r`n"
              $result = InModuleScope WingetBatch {
                 Parse-WingetShowOutput -Output $output -PackageId "Test"
              }
@@ -117,7 +111,7 @@ Release Notes Url: https://example.com/notes
         It "Handles colons in values correctly" {
              $output = @"
 Description: This is a description: with a colon
-"@
+"@ -replace "`n", "`r`n"
              $result = InModuleScope WingetBatch {
                 Parse-WingetShowOutput -Output $output -PackageId "Test"
              }
