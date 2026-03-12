@@ -1,0 +1,3 @@
+## 2024-03-12 - Duplicate Command Fields in Detail Outputs
+**Learning:** Displaying the exact same command or usage instructions multiple times within a single package detail view creates visual clutter and confuses users about which one to use. It breaks the visual hierarchy of the "Description -> Metadata -> Links -> Action" flow.
+**Action:** Always include a designated copy-pasteable 'Command' or 'Usage' section (e.g., `winget install --id "Pkg.Id" -e`) to bridge the gap between discovery and execution, but display this command **only once** (typically at the end) to avoid visual clutter and confusion.
