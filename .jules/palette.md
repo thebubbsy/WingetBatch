@@ -1,0 +1,3 @@
+## 2024-05-18 - Consolidate Call-To-Action In CLI Output
+**Learning:** Having duplicate call-to-actions (like 'Command') in CLI output can cause visual clutter and make the output confusing to parse.
+**Action:** When designing CLI detail views, always bridge the gap between discovery and execution by including a designated copy-pasteable 'Command' or 'Usage' section, and display this command only once (typically at the end) to avoid visual clutter and confusion.
