@@ -1,0 +1,3 @@
+## 2025-11-06 - Removing Duplicated Call-to-Actions in CLI Detail Views
+**Learning:** Having the identical or very similar call-to-action (like the `winget install ...` command) duplicated in different sections of a detailed CLI view creates visual clutter and confuses the user about which command is "the right one" (especially if they are formatted slightly differently, e.g. one unquoted and one quoted).
+**Action:** When designing detail views, ensure critical, copy-pasteable execution commands are displayed exactly once, preferably at the very end of the output, so they are visually isolated and serve as a clear, definitive next step.
