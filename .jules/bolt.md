@@ -17,3 +17,7 @@
 ## 2025-11-05 - [PowerShell Group-Object Anti-Pattern]
 **Learning:** `Group-Object` in PowerShell has significant overhead and exhibits O(N) performance for deduplication because it builds full group structures and properties. When using it simply to find unique items or group them for display, it adds substantial latency to array processing. Using a `System.Collections.Generic.HashSet[string]` for deduplication, or a native PowerShell Hashtable (`@{}`) for grouping, is substantially faster (reducing deduplication time from ~266ms to ~34ms for 2500 items).
 **Action:** Replace `Group-Object` in critical paths with `HashSet[string]` for distinct elements and Hashtables mapping keys to `System.Collections.Generic.List[T]` for grouping collections.
+
+## 2025-05-18 - [PowerShell Regex Replace Overhead in Loops]
+**Learning:** `ConvertTo-SpectreEscaped` used the `-replace` operator with regular expressions (`-replace '\[', '[['`). When called frequently within loops (e.g., formatting multiple fields per package in search results), the regex compilation and evaluation overhead adds up significantly, even for strings that do not contain the characters being replaced.
+**Action:** Replace regex-based `-replace` operations with native string operations (`.Contains()` and `.Replace()`) for simple character escaping in performance-critical paths. A quick fast-path check (`-not $Text.Contains('[') -and -not $Text.Contains(']')`) further minimizes overhead for the majority of unescaped strings.
