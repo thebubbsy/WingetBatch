@@ -1,0 +1,3 @@
+## 2024-05-18 - Deduplicate Actionable Commands in Output
+**Learning:** Displaying actionable commands (like installation commands) multiple times in the same output block creates visual clutter and confuses the user about which command they should actually use.
+**Action:** Always include a designated copy-pasteable 'Command' or 'Usage' section only once, ideally at the very end of the output block where it naturally leads into the user's next action.
