@@ -1,0 +1,3 @@
+## 2025-03-05 - Remove Redundant "Command" Output in Package Details
+**Learning:** Having redundant elements, such as repeating the exact same command or variations of it in a UI, introduces visual clutter and causes confusion. Presenting actionable and copy-pasteable commands exactly once, preferably at the end of the related information block, provides better visibility and reduces cognitive load.
+**Action:** When designing or refactoring CLI detail views, evaluate all displayed fields for redundancy. Ensure the "Command" or "Usage" sections are clearly identified and displayed only once per resource context to bridge the gap between discovery and execution smoothly.
