@@ -784,10 +784,12 @@ function Show-WingetPackageDetails {
             Write-Host ""
         }
 
-        # Command
-        Write-Host "  💻 Command:     " -ForegroundColor DarkGray -NoNewline
-        Write-Host "winget install --id $pkgId -e" -ForegroundColor Cyan
-        Write-Host ""
+        # Release Notes (Text)
+        if ($details.ReleaseNotes) {
+            Write-Host "  📝 Release Notes: " -ForegroundColor DarkGray -NoNewline
+            Write-Host $details.ReleaseNotes -ForegroundColor White
+            Write-Host ""
+        }
 
         # Tags
         if ($details.Tags -and $details.Tags.Count -gt 0) {
@@ -816,7 +818,7 @@ function Show-WingetPackageDetails {
                     "Source"        { "💾" }
                     "Publisher"     { "🏢" }
                     "Release Notes" { "📝" }
-                    "License"       { "⚖️ " }
+                    "License"       { "⚖️" }
                     "Privacy"       { "🔒" }
                     "Package"       { "📦" }
                     Default         { "• " }
@@ -834,7 +836,7 @@ function Show-WingetPackageDetails {
 
         # License (Text)
         if ($details.License) {
-            Write-Host "  ⚖️  License:     " -ForegroundColor DarkGray -NoNewline
+            Write-Host "  ⚖️ License:     " -ForegroundColor DarkGray -NoNewline
             Write-Host $details.License -ForegroundColor White
             Write-Host ""
         }
