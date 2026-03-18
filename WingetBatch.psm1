@@ -92,7 +92,8 @@ function Install-WingetAll {
             Write-Host $query -ForegroundColor Yellow
 
             # Normalize query (collapse multiple spaces)
-            $normalizedQuery = ($query -split '\s+') -join ' '
+            $searchWords = $query -split '\s+' | Where-Object { $_ -ne '' }
+            $normalizedQuery = $searchWords -join ' '
 
             # Combine all search results from each word
             $querySearchResults = [System.Collections.Generic.List[string]]::new()
@@ -115,11 +116,6 @@ function Install-WingetAll {
             # Parse the search results to extract package IDs and Names
             $lines = $querySearchResults
             $queryPackages = [System.Collections.Generic.List[PSCustomObject]]::new()
-
-            # Pre-calculate regex patterns for filtering to improve performance
-            $searchPatterns = if ($searchWords.Count -gt 1) {
-                $searchWords | ForEach-Object { "(?i)$([regex]::Escape($_))" }
-            } else { $null }
 
             $headerFound = $false
             $nameColEnd = -1
@@ -206,8 +202,8 @@ function Install-WingetAll {
                         # If multiple search words, filter to only packages matching ALL words (case-insensitive)
                         if ($searchWords.Count -gt 1) {
                             $matchesAll = $true
-                            foreach ($pattern in $searchPatterns) {
-                                if ($line -notmatch $pattern) {
+                            foreach ($word in $searchWords) {
+                                if ($line.IndexOf($word, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
                                     $matchesAll = $false
                                     break
                                 }

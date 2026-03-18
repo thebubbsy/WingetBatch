@@ -825,7 +825,7 @@ function Show-WingetPackageDetails {
                     "Source"        { "ðŸ’¾" }
                     "Publisher"     { "ðŸ¢" }
                     "Release Notes" { "ðŸ“" }
-                    "License"       { "âš–ï¸ " }
+                    "License"       { "âš–ï¸" }
                     "Privacy"       { "ðŸ”’" }
                     "Package"       { "ðŸ“¦" }
                     Default         { "â€¢ " }
