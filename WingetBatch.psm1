@@ -816,7 +816,7 @@ function Show-WingetPackageDetails {
                     "Source"        { "💾" }
                     "Publisher"     { "🏢" }
                     "Release Notes" { "📝" }
-                    "License"       { "⚖️ " }
+                    "License"       { "⚖️" }
                     "Privacy"       { "🔒" }
                     "Package"       { "📦" }
                     Default         { "• " }
