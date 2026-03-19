@@ -2960,7 +2960,8 @@ function ConvertTo-SpectreEscaped {
     )
 
     if ([string]::IsNullOrEmpty($Text)) { return $Text }
-    return $Text -replace '\[', '[[' -replace '\]', ']]'
+    # Optimized string replacement: String.Replace() is much faster than regex -replace
+    return $Text.Replace('[', '[[').Replace(']', ']]')
 }
 
 # Export module members (public functions only)
