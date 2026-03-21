@@ -294,7 +294,7 @@ function Install-WingetAll {
             foreach ($term in $groups.Keys) {
                 Write-Host "$($term):" -ForegroundColor Yellow
                 foreach ($pkg in $groups[$term]) {
-                    Write-Host "  â€¢ " -ForegroundColor Cyan -NoNewline
+                    Write-Host "  • " -ForegroundColor Cyan -NoNewline
                     Write-Host "$($pkg.Name) ($($pkg.Id))" -ForegroundColor White -NoNewline
                     if ($pkg.Version -ne "Unknown") {
                         Write-Host " v$($pkg.Version)" -ForegroundColor Green -NoNewline
@@ -336,7 +336,7 @@ function Install-WingetAll {
 
             try {
                 # Create multi-selection prompt
-                $selectedChoices = Read-SpectreMultiSelection -Title "[cyan]Select packages to install[/]" `
+                $selectedChoices = Read-SpectreMultiSelection -Title "[cyan]Select packages to install (Space to toggle, Enter to confirm)[/]" `
                     -Choices $packageChoices `
                     -PageSize 20 `
                     -Color "Green"
@@ -479,7 +479,7 @@ function Install-WingetAll {
                     $srcColor = if ($item.Source -match 'msstore') { "magenta" } else { "cyan" }
 
                     $obj = [ordered]@{
-                        Name = "ðŸ“¦ " + (ConvertTo-SpectreEscaped $item.Name)
+                        Name = "📦 " + (ConvertTo-SpectreEscaped $item.Name)
                         Id = ConvertTo-SpectreEscaped $item.Id
                         Version = "[$verColor]$($item.Version)[/]"
                         Source = "[$srcColor]$($item.Source)[/]"
@@ -504,7 +504,7 @@ function Install-WingetAll {
                 # Simple modification for fallback table too
                 $showPublisher = ($summaryList | Where-Object { -not [string]::IsNullOrWhiteSpace($_.Publisher) } | Measure-Object).Count -gt 0
 
-                $fallbackList = $summaryList | Select-Object @{N='Name';E={"ðŸ“¦ " + $_.Name}}, Id, Version, Source, Publisher, SearchTerm
+                $fallbackList = $summaryList | Select-Object @{N='Name';E={"📦 " + $_.Name}}, Id, Version, Source, Publisher, SearchTerm
 
                 $props = [System.Collections.Generic.List[string]]::new()
                 $props.AddRange([string[]]@('Name', 'Id', 'Version', 'Source'))
@@ -543,12 +543,12 @@ function Install-WingetAll {
             winget install --id $packageId --accept-package-agreements --accept-source-agreements --silent | Out-Null
 
             if ($LASTEXITCODE -eq 0) {
-                Write-Host "âœ“ Successfully installed " -ForegroundColor Green -NoNewline
+                Write-Host "✓ Successfully installed " -ForegroundColor Green -NoNewline
                 Write-Host $packageId -ForegroundColor White
                 $successCount++
             }
             else {
-                Write-Host "âœ— Failed to install " -ForegroundColor Red -NoNewline
+                Write-Host "✗ Failed to install " -ForegroundColor Red -NoNewline
                 Write-Host $packageId -ForegroundColor White -NoNewline
                 Write-Host " (Exit code: $LASTEXITCODE)" -ForegroundColor Red
                 $failCount++
@@ -694,7 +694,7 @@ function Show-WingetPackageDetails {
     )
 
     Write-Host ("=" * 80) -ForegroundColor Cyan
-    Write-Host "ðŸ“¦ SELECTED PACKAGES - DETAILED INFORMATION" -ForegroundColor Cyan
+    Write-Host "📦 SELECTED PACKAGES - DETAILED INFORMATION" -ForegroundColor Cyan
     Write-Host ("=" * 80) -ForegroundColor Cyan
     Write-Host ""
 
@@ -711,13 +711,13 @@ function Show-WingetPackageDetails {
         $pkgName = if ($details.Name) { $details.Name } elseif ($pkgInfo.Name) { $pkgInfo.Name } else { $null }
         $headerText = if ($pkgName -and $pkgName -ne $pkgId) { "$pkgName ($pkgId)" } else { $pkgId }
 
-        Write-Host "â–¶ " -ForegroundColor Yellow -NoNewline
+        Write-Host "▶ " -ForegroundColor Yellow -NoNewline
         Write-Host " $headerText " -ForegroundColor White -BackgroundColor DarkBlue
         Write-Host ""
 
         # Description (The "blurb")
         if ($details.Description) {
-            Write-Host "  â„¹ï¸  Description: " -ForegroundColor DarkGray -NoNewline
+            Write-Host "  ℹ️  Description: " -ForegroundColor DarkGray -NoNewline
             Write-Host $details.Description -ForegroundColor Gray
             Write-Host ""
         }
@@ -725,20 +725,27 @@ function Show-WingetPackageDetails {
         # --- Basic Info ---
         # Version
         if ($details.Version -or ($pkgInfo -and $pkgInfo.Version)) {
-            Write-Host "  ðŸ”– Version:     " -ForegroundColor DarkGray -NoNewline
+            Write-Host "  🔖 Version:     " -ForegroundColor DarkGray -NoNewline
             $ver = if ($details.Version) { $details.Version } else { $pkgInfo.Version }
             Write-Host $ver -ForegroundColor White
         }
 
+        # Source
+        if ($pkgInfo -and $pkgInfo.Source -and $pkgInfo.Source -ne "Unknown") {
+            Write-Host "  💾 Source:      " -ForegroundColor DarkGray -NoNewline
+            $sColor = if ($pkgInfo.Source -match 'msstore') { "Magenta" } else { "Cyan" }
+            Write-Host $pkgInfo.Source -ForegroundColor $sColor
+        }
+
         # Category
         if ($details.Category) {
-            Write-Host "  ðŸ“‚ Category:    " -ForegroundColor DarkGray -NoNewline
+            Write-Host "  📂 Category:    " -ForegroundColor DarkGray -NoNewline
             Write-Host $details.Category -ForegroundColor Yellow
         }
 
         # Pricing & Free Trial
         if ($details.Pricing) {
-            Write-Host "  ðŸ’° Pricing:     " -ForegroundColor DarkGray -NoNewline
+            Write-Host "  💰 Pricing:     " -ForegroundColor DarkGray -NoNewline
             Write-Host $details.Pricing -ForegroundColor Green -NoNewline
 
             if ($details.FreeTrial) {
@@ -750,7 +757,7 @@ function Show-WingetPackageDetails {
 
         # Age Rating
         if ($details.AgeRating) {
-            Write-Host "  ðŸ”ž Age Rating:  " -ForegroundColor DarkGray -NoNewline
+            Write-Host "  🔞 Age Rating:  " -ForegroundColor DarkGray -NoNewline
             Write-Host $details.AgeRating -ForegroundColor White
         }
 
@@ -759,20 +766,20 @@ function Show-WingetPackageDetails {
         # --- Publisher Info ---
         # Publisher
         if ($details.PublisherName -or $details.Publisher) {
-            Write-Host "  ðŸ¢ Publisher:   " -ForegroundColor DarkGray -NoNewline
+            Write-Host "  🏢 Publisher:   " -ForegroundColor DarkGray -NoNewline
             $pub = if ($details.PublisherName) { $details.PublisherName } else { $details.Publisher }
             Write-Host $pub -ForegroundColor White
         }
 
         # Author
         if ($details.Author) {
-            Write-Host "  ðŸ‘¤ Author:      " -ForegroundColor DarkGray -NoNewline
+            Write-Host "  👤 Author:      " -ForegroundColor DarkGray -NoNewline
             Write-Host $details.Author -ForegroundColor White
         }
 
         # Copyright
         if ($details.Copyright) {
-            Write-Host "  Â©ï¸  Copyright:   " -ForegroundColor DarkGray -NoNewline
+            Write-Host "  ©️  Copyright:   " -ForegroundColor DarkGray -NoNewline
             Write-Host $details.Copyright -ForegroundColor Gray
         }
 
@@ -783,7 +790,7 @@ function Show-WingetPackageDetails {
         # --- Tech Info ---
         # Installer Type & Moniker
         if ($details.Installer) {
-            Write-Host "  ðŸ’¿ Installer:   " -ForegroundColor DarkGray -NoNewline
+            Write-Host "  💿 Installer:   " -ForegroundColor DarkGray -NoNewline
             Write-Host $details.Installer -ForegroundColor Cyan -NoNewline
             if ($details.Moniker) {
                 Write-Host " (command: " -ForegroundColor DarkGray -NoNewline
@@ -794,13 +801,13 @@ function Show-WingetPackageDetails {
         }
 
         # Command
-        Write-Host "  ðŸ’» Command:     " -ForegroundColor DarkGray -NoNewline
+        Write-Host "  💻 Command:     " -ForegroundColor DarkGray -NoNewline
         Write-Host "winget install --id $pkgId -e" -ForegroundColor Cyan
         Write-Host ""
 
         # Tags
         if ($details.Tags -and $details.Tags.Count -gt 0) {
-            Write-Host "  ðŸ·ï¸  Tags:        " -ForegroundColor DarkGray -NoNewline
+            Write-Host "  🏷️  Tags:        " -ForegroundColor DarkGray -NoNewline
             Write-Host ($details.Tags -join ", ") -ForegroundColor Yellow
             Write-Host ""
         }
@@ -817,18 +824,18 @@ function Show-WingetPackageDetails {
         if ($details.PackageUrl) { $links.Add([PSCustomObject]@{ Label="Package"; Url=$details.PackageUrl; Color="Blue" }) }
 
         if ($links.Count -gt 0) {
-            Write-Host "  ðŸ”— Links:" -ForegroundColor Cyan
+            Write-Host "  🔗 Links:" -ForegroundColor Cyan
             foreach ($link in $links) {
                 # Determine icon
                 $icon = switch ($link.Label) {
-                    "Homepage"      { "ðŸ " }
-                    "Source"        { "ðŸ’¾" }
-                    "Publisher"     { "ðŸ¢" }
-                    "Release Notes" { "ðŸ“" }
-                    "License"       { "âš–ï¸" }
-                    "Privacy"       { "ðŸ”’" }
-                    "Package"       { "ðŸ“¦" }
-                    Default         { "â€¢ " }
+                    "Homepage"      { "🏠" }
+                    "Source"        { "💾" }
+                    "Publisher"     { "🏢" }
+                    "Release Notes" { "📝" }
+                    "License"       { "⚖️" }
+                    "Privacy"       { "🔒" }
+                    "Package"       { "📦" }
+                    Default         { "• " }
                 }
 
                 # Align manually (max label length + 2)
@@ -843,13 +850,13 @@ function Show-WingetPackageDetails {
 
         # License (Text)
         if ($details.License) {
-            Write-Host "  âš–ï¸  License:     " -ForegroundColor DarkGray -NoNewline
+            Write-Host "  ⚖️  License:     " -ForegroundColor DarkGray -NoNewline
             Write-Host $details.License -ForegroundColor White
             Write-Host ""
         }
 
         # Command
-        Write-Host "  ðŸ’» Command:     " -ForegroundColor DarkGray -NoNewline
+        Write-Host "  💻 Command:     " -ForegroundColor DarkGray -NoNewline
         Write-Host "winget install --id `"$pkgId`" -e" -ForegroundColor Cyan
         Write-Host ""
     }
@@ -1024,7 +1031,7 @@ function Get-WingetNewPackages {
 
         # Show final API usage
         Write-Host ""
-        Write-Host "ðŸ“Š GitHub API: " -ForegroundColor Cyan -NoNewline
+        Write-Host "📊 GitHub API: " -ForegroundColor Cyan -NoNewline
         Write-Host "$apiRequestsMade" -ForegroundColor White -NoNewline
         Write-Host " requests made | " -ForegroundColor DarkGray -NoNewline
         Write-Host "$totalUsage" -ForegroundColor $(if ($totalUsage -gt ($limit * 0.8)) { "Red" } elseif ($totalUsage -gt ($limit * 0.5)) { "Yellow" } else { "Green" }) -NoNewline
@@ -1151,7 +1158,7 @@ function Get-WingetNewPackages {
 
         # Fetch detailed package info in parallel BEFORE showing selection UI
         Write-Host ""
-        Write-Host "â³ Fetching detailed package information in background..." -ForegroundColor DarkGray
+        Write-Host "⏳ Fetching detailed package information in background..." -ForegroundColor DarkGray
 
         $configDir = Get-WingetBatchConfigDir
         $maxConcurrentJobs = 10
@@ -1206,7 +1213,7 @@ function Get-WingetNewPackages {
         $jobPackageMap = @{}
 
         if ($cachedResults.Count -gt 0) {
-            Write-Host "âœ“ Found $($cachedResults.Count) packages in cache" -ForegroundColor Green
+            Write-Host "✓ Found $($cachedResults.Count) packages in cache" -ForegroundColor Green
         }
 
         for ($i = 0; $i -lt $actualJobCount; $i++) {
@@ -1300,12 +1307,12 @@ function Get-WingetNewPackages {
                     $runningRelevantJobs = @($relevantJobs | Where-Object { $_.State -eq 'Running' })
 
                     if ($runningRelevantJobs.Count -gt 0) {
-                        Write-Host "â³ Waiting for $($runningRelevantJobs.Count) background jobs with selected packages..." -ForegroundColor DarkGray
+                        Write-Host "⏳ Waiting for $($runningRelevantJobs.Count) background jobs with selected packages..." -ForegroundColor DarkGray
                         $timeout = 30
                         $runningRelevantJobs | Wait-Job -Timeout $timeout | Out-Null
                     }
                     else {
-                        Write-Host "âœ“ Selected package details already fetched!" -ForegroundColor Green
+                        Write-Host "✓ Selected package details already fetched!" -ForegroundColor Green
                     }
 
                     # Stop irrelevant jobs immediately (user doesn't need them)
@@ -1401,12 +1408,12 @@ function Get-WingetNewPackages {
                     if ($userChoice -eq "Go back and change selection") {
                         Write-Host "`nReturning to package selection..." -ForegroundColor Cyan
                         Write-Host ""
-                        Write-Host "âš  NOTE: All selections will be cleared when returning to the menu." -ForegroundColor Yellow
+                        Write-Host "⚠ NOTE: All selections will be cleared when returning to the menu." -ForegroundColor Yellow
                         Write-Host "   You will need to re-select your packages." -ForegroundColor Yellow
                         Write-Host ""
                         Write-Host "Previously selected packages:" -ForegroundColor Cyan
                         foreach ($pkg in $packagesToInstall) {
-                            Write-Host "  â€¢ " -ForegroundColor Green -NoNewline
+                            Write-Host "  • " -ForegroundColor Green -NoNewline
                             Write-Host $pkg -ForegroundColor White
                         }
                         Write-Host ""
@@ -1449,7 +1456,7 @@ function Get-WingetNewPackages {
                             Write-Host ""
 
                             # Fetch details for newly selected packages (from cache or jobs)
-                            Write-Host "â³ Fetching package details..." -ForegroundColor DarkGray
+                            Write-Host "⏳ Fetching package details..." -ForegroundColor DarkGray
 
                             # Load cache once before the loop to avoid repeated I/O
                             $cacheFile = Join-Path $configDir "package_cache.json"
@@ -1557,12 +1564,12 @@ function Get-WingetNewPackages {
                         winget install --id $packageId --accept-package-agreements --accept-source-agreements --silent | Out-Null
 
                         if ($LASTEXITCODE -eq 0) {
-                            Write-Host "âœ“ Successfully installed " -ForegroundColor Green -NoNewline
+                            Write-Host "✓ Successfully installed " -ForegroundColor Green -NoNewline
                             Write-Host $packageId -ForegroundColor White
                             $successCount++
                         }
                         else {
-                            Write-Host "âœ— Failed to install " -ForegroundColor Red -NoNewline
+                            Write-Host "✗ Failed to install " -ForegroundColor Red -NoNewline
                             Write-Host $packageId -ForegroundColor White -NoNewline
                             Write-Host " (Exit code: $LASTEXITCODE)" -ForegroundColor Red
                             $failCount++
@@ -1612,9 +1619,9 @@ function Get-WingetNewPackages {
     catch {
         Write-Error "Failed to fetch new packages from GitHub: $_"
         if ($_.Exception.Response.StatusCode -eq 403 -or $_ -match 'rate limit') {
-            Write-Host "`nâ”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”" -ForegroundColor Yellow
-            Write-Host "âš  GitHub API Rate Limit Exceeded" -ForegroundColor Yellow
-            Write-Host "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”" -ForegroundColor Yellow
+            Write-Host "`n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Yellow
+            Write-Host "⚠ GitHub API Rate Limit Exceeded" -ForegroundColor Yellow
+            Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Yellow
             Write-Host ""
             Write-Host "Unauthenticated requests are limited to 60 per hour." -ForegroundColor White
             Write-Host ""
@@ -1624,7 +1631,7 @@ function Get-WingetNewPackages {
             Write-Host "     (Interactive wizard to create and save a token)" -ForegroundColor DarkGray
             Write-Host ""
             Write-Host "Or wait an hour and try again with a shorter time period." -ForegroundColor DarkGray
-            Write-Host "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”" -ForegroundColor Yellow
+            Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Yellow
         }
     }
 }
@@ -1650,19 +1657,19 @@ function New-WingetBatchGitHubToken {
     param()
 
     Write-Host ""
-    Write-Host "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”" -ForegroundColor Cyan
-    Write-Host "ðŸ”‘ GitHub Token Setup Wizard" -ForegroundColor Green
-    Write-Host "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”" -ForegroundColor Cyan
+    Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
+    Write-Host "🔑 GitHub Token Setup Wizard" -ForegroundColor Green
+    Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "I'll help you create a GitHub token to avoid API rate limits." -ForegroundColor White
     Write-Host ""
     Write-Host "Benefits:" -ForegroundColor Cyan
-    Write-Host "  â€¢ " -NoNewline -ForegroundColor DarkGray
+    Write-Host "  • " -NoNewline -ForegroundColor DarkGray
     Write-Host "60 requests/hour" -NoNewline -ForegroundColor Red
-    Write-Host " â†’ " -NoNewline -ForegroundColor DarkGray
+    Write-Host " → " -NoNewline -ForegroundColor DarkGray
     Write-Host "5,000 requests/hour" -ForegroundColor Green
-    Write-Host "  â€¢ No special permissions needed" -ForegroundColor DarkGray
-    Write-Host "  â€¢ Free forever" -ForegroundColor DarkGray
+    Write-Host "  • No special permissions needed" -ForegroundColor DarkGray
+    Write-Host "  • Free forever" -ForegroundColor DarkGray
     Write-Host ""
     Write-Host "Press Enter to open GitHub in your browser..." -ForegroundColor Yellow
     $null = Read-Host
@@ -1672,9 +1679,9 @@ function New-WingetBatchGitHubToken {
     Start-Process $tokenUrl
 
     Write-Host ""
-    Write-Host "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”" -ForegroundColor Cyan
-    Write-Host "ðŸ“‹ Follow these steps on GitHub:" -ForegroundColor Green
-    Write-Host "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”" -ForegroundColor Cyan
+    Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
+    Write-Host "📋 Follow these steps on GitHub:" -ForegroundColor Green
+    Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "1. " -NoNewline -ForegroundColor Yellow
     Write-Host "The token is already named 'WingetBatch'" -ForegroundColor White
@@ -1693,7 +1700,7 @@ function New-WingetBatchGitHubToken {
     Write-Host "5. " -NoNewline -ForegroundColor Yellow
     Write-Host "COPY the token (starts with 'ghp_')" -ForegroundColor White
     Write-Host ""
-    Write-Host "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”" -ForegroundColor Cyan
+    Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
     Write-Host ""
 
     # Prompt for token
@@ -1702,7 +1709,7 @@ function New-WingetBatchGitHubToken {
 
     if ([string]::IsNullOrWhiteSpace($token)) {
         Write-Host ""
-        Write-Host "âŒ No token provided. Setup cancelled." -ForegroundColor Red
+        Write-Host "❌ No token provided. Setup cancelled." -ForegroundColor Red
         Write-Host "   Run this command again when you have your token." -ForegroundColor DarkGray
         return
     }
@@ -1710,7 +1717,7 @@ function New-WingetBatchGitHubToken {
     # Validate token format
     if ($token -notmatch '^ghp_[a-zA-Z0-9]{36}$' -and $token -notmatch '^github_pat_[a-zA-Z0-9_]+$') {
         Write-Host ""
-        Write-Host "âš ï¸  Warning: Token format doesn't look right." -ForegroundColor Yellow
+        Write-Host "⚠️  Warning: Token format doesn't look right." -ForegroundColor Yellow
         Write-Host "   Expected format: ghp_xxxxxxxxxxxx or github_pat_xxxxxxxxxxxx" -ForegroundColor DarkGray
         Write-Host ""
         $continue = Read-Host "Continue anyway? (y/n)"
@@ -1730,12 +1737,12 @@ function New-WingetBatchGitHubToken {
             'User-Agent' = 'PowerShell-WingetBatch'
         } -ErrorAction Stop
 
-        Write-Host "âœ“ Token is valid!" -ForegroundColor Green
+        Write-Host "✓ Token is valid!" -ForegroundColor Green
         Write-Host "  Authenticated as: " -NoNewline -ForegroundColor DarkGray
         Write-Host $response.login -ForegroundColor White
     }
     catch {
-        Write-Host "âŒ Token test failed!" -ForegroundColor Red
+        Write-Host "❌ Token test failed!" -ForegroundColor Red
         Write-Host "   Error: $($_.Exception.Message)" -ForegroundColor DarkGray
         Write-Host ""
         $continue = Read-Host "Save token anyway? (y/n)"
@@ -1749,9 +1756,9 @@ function New-WingetBatchGitHubToken {
     Set-WingetBatchGitHubToken -Token $token
 
     Write-Host ""
-    Write-Host "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”" -ForegroundColor Green
-    Write-Host "âœ“ Setup Complete!" -ForegroundColor Green
-    Write-Host "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”" -ForegroundColor Green
+    Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Green
+    Write-Host "✓ Setup Complete!" -ForegroundColor Green
+    Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Green
     Write-Host ""
     Write-Host "You can now use all WingetBatch commands without rate limits!" -ForegroundColor Cyan
     Write-Host ""
@@ -1820,7 +1827,7 @@ function Set-WingetBatchGitHubToken {
         }
 
         if ($removed) {
-            Write-Host "âœ“ GitHub token removed successfully" -ForegroundColor Green
+            Write-Host "✓ GitHub token removed successfully" -ForegroundColor Green
         }
         else {
             Write-Host "No GitHub token found to remove" -ForegroundColor Yellow
@@ -1843,17 +1850,17 @@ function Set-WingetBatchGitHubToken {
             Remove-Item $legacyFile -Force
         }
 
-        Write-Host "âœ“ GitHub token saved securely!" -ForegroundColor Green
+        Write-Host "✓ GitHub token saved securely!" -ForegroundColor Green
         Write-Host "  Location: $tokenFile" -ForegroundColor DarkGray
         Write-Host "  The token will now be used automatically for API requests." -ForegroundColor Cyan
         Write-Host ""
         Write-Host "  â„¹ Security Note:" -ForegroundColor Yellow
-        Write-Host "  â€¢ Token stored securely using PowerShell encryption (bound to your user account)" -ForegroundColor DarkGray
-        Write-Host "  â€¢ Only increases API rate limits - cannot modify repositories or access private data" -ForegroundColor DarkGray
-        Write-Host "  â€¢ Revoke anytime at: https://github.com/settings/tokens" -ForegroundColor DarkGray
+        Write-Host "  • Token stored securely using PowerShell encryption (bound to your user account)" -ForegroundColor DarkGray
+        Write-Host "  • Only increases API rate limits - cannot modify repositories or access private data" -ForegroundColor DarkGray
+        Write-Host "  • Revoke anytime at: https://github.com/settings/tokens" -ForegroundColor DarkGray
     }
     catch {
-        Write-Host "âŒ Failed to save token securely: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "❌ Failed to save token securely: $($_.Exception.Message)" -ForegroundColor Red
         throw
     }
 }
@@ -2187,7 +2194,7 @@ if (Get-Module -ListAvailable -Name WingetBatch) {
 
     if ($profileContent -notmatch 'Start-WingetUpdateCheck') {
         Add-Content -Path $profilePath -Value $initCode
-        Write-Host "âœ“ Update notifications enabled!" -ForegroundColor Green
+        Write-Host "✓ Update notifications enabled!" -ForegroundColor Green
         Write-Host "  Configuration saved to: $configFile" -ForegroundColor DarkGray
         Write-Host "  Profile updated: $profilePath" -ForegroundColor DarkGray
         Write-Host ""
@@ -2195,7 +2202,7 @@ if (Get-Module -ListAvailable -Name WingetBatch) {
         Write-Host ". `$PROFILE" -ForegroundColor Yellow
     }
     else {
-        Write-Host "âœ“ Configuration updated!" -ForegroundColor Green
+        Write-Host "✓ Configuration updated!" -ForegroundColor Green
         Write-Host "  Update notifications were already enabled in your profile." -ForegroundColor DarkGray
     }
 }
@@ -2238,7 +2245,7 @@ function Disable-WingetUpdateNotifications {
         $newContent | Out-File -FilePath $profilePath -Encoding UTF8 -Force
     }
 
-    Write-Host "âœ“ Update notifications disabled" -ForegroundColor Green
+    Write-Host "✓ Update notifications disabled" -ForegroundColor Green
     Write-Host "  Restart your terminal for changes to take effect." -ForegroundColor DarkGray
 }
 
@@ -2297,7 +2304,7 @@ function Start-WingetUpdateCheck {
             $cache = Get-Content $cacheFile | ConvertFrom-Json
             if ($cache.UpdateCount -gt 0) {
                 Write-Host ""
-                Write-Host "ðŸ“¦ " -NoNewline -ForegroundColor Cyan
+                Write-Host "📦 " -NoNewline -ForegroundColor Cyan
                 Write-Host "$($cache.UpdateCount) winget package update(s) available" -ForegroundColor Yellow
                 Write-Host "   Run " -NoNewline -ForegroundColor DarkGray
                 Write-Host "Get-WingetUpdates" -NoNewline -ForegroundColor White
@@ -2374,7 +2381,7 @@ function Start-WingetUpdateCheck {
 
         if ($updateCount -gt 0) {
             Write-Host ""
-            Write-Host "ðŸ“¦ " -NoNewline -ForegroundColor Cyan
+            Write-Host "📦 " -NoNewline -ForegroundColor Cyan
             Write-Host "$updateCount winget package update(s) available" -ForegroundColor Yellow
             Write-Host "   Run " -NoNewline -ForegroundColor DarkGray
             Write-Host "Get-WingetUpdates" -NoNewline -ForegroundColor White
@@ -2470,7 +2477,7 @@ function Get-WingetUpdates {
     }
 
     if ($updatesAvailable.Count -eq 0) {
-        Write-Host "âœ“ All packages are up to date!" -ForegroundColor Green
+        Write-Host "✓ All packages are up to date!" -ForegroundColor Green
         return
     }
 
@@ -2519,12 +2526,12 @@ function Get-WingetUpdates {
                 winget upgrade --id $packageId --accept-package-agreements --accept-source-agreements
 
                 if ($LASTEXITCODE -eq 0) {
-                    Write-Host "âœ“ Successfully updated " -ForegroundColor Green -NoNewline
+                    Write-Host "✓ Successfully updated " -ForegroundColor Green -NoNewline
                     Write-Host $packageId -ForegroundColor White
                     $successCount++
                 }
                 else {
-                    Write-Host "âœ— Failed to update " -ForegroundColor Red -NoNewline
+                    Write-Host "✗ Failed to update " -ForegroundColor Red -NoNewline
                     Write-Host $packageId -ForegroundColor White
                     $failCount++
                 }
@@ -2548,7 +2555,7 @@ function Get-WingetUpdates {
             Write-Warning "Interactive selection error: $_"
             Write-Host "Packages with updates available:" -ForegroundColor Cyan
             $updatesAvailable | ForEach-Object {
-                Write-Host "  â€¢ $($_.Id)" -ForegroundColor White
+                Write-Host "  • $($_.Id)" -ForegroundColor White
             }
             Write-Host ""
             Write-Host "Use 'winget upgrade <PackageName>' to update manually." -ForegroundColor Yellow
@@ -2559,7 +2566,7 @@ function Get-WingetUpdates {
         # Fallback without interactive selection
         Write-Host "Packages with updates available:" -ForegroundColor Cyan
         $updatesAvailable | ForEach-Object {
-            Write-Host "  â€¢ $($_.Id)" -ForegroundColor White
+            Write-Host "  • $($_.Id)" -ForegroundColor White
         }
         Write-Host ""
         Write-Host "To update a package: " -ForegroundColor Cyan -NoNewline
@@ -2756,7 +2763,7 @@ function Remove-WingetRecent {
                     $displayText
                 }
 
-                $selectedLines = Read-SpectreMultiSelection -Title "[red]âš  Select packages to UNINSTALL (Space to toggle, Enter to confirm)[/]" `
+                $selectedLines = Read-SpectreMultiSelection -Title "[red]⚠ Select packages to UNINSTALL (Space to toggle, Enter to confirm)[/]" `
                     -Choices $displayLines `
                     -PageSize 20 `
                     -Color "Red"
@@ -2770,14 +2777,14 @@ function Remove-WingetRecent {
                 $selectedPackages = $selectedLines | ForEach-Object { $displayToId[$_] }
 
                 Write-Host ""
-                Write-Host "âš  WARNING: " -ForegroundColor Red -NoNewline
+                Write-Host "⚠ WARNING: " -ForegroundColor Red -NoNewline
                 Write-Host "You are about to UNINSTALL " -ForegroundColor Yellow -NoNewline
                 Write-Host "$($selectedPackages.Count)" -ForegroundColor White -NoNewline
                 Write-Host " package(s):" -ForegroundColor Yellow
                 Write-Host ""
 
                 foreach ($pkgId in $selectedPackages) {
-                    Write-Host "   â€¢ " -ForegroundColor Red -NoNewline
+                    Write-Host "   • " -ForegroundColor Red -NoNewline
                     Write-Host $pkgId -ForegroundColor White
                 }
 
@@ -2808,12 +2815,12 @@ function Remove-WingetRecent {
                     winget uninstall --id $packageId --accept-source-agreements
 
                     if ($LASTEXITCODE -eq 0) {
-                        Write-Host "âœ“ Successfully uninstalled " -ForegroundColor Green -NoNewline
+                        Write-Host "✓ Successfully uninstalled " -ForegroundColor Green -NoNewline
                         Write-Host $packageId -ForegroundColor White
                         $successCount++
                     }
                     else {
-                        Write-Host "âœ— Failed to uninstall " -ForegroundColor Red -NoNewline
+                        Write-Host "✗ Failed to uninstall " -ForegroundColor Red -NoNewline
                         Write-Host $packageId -ForegroundColor White
                         $failCount++
                     }
@@ -2832,7 +2839,7 @@ function Remove-WingetRecent {
                 Write-Warning "Interactive selection error: $_"
                 Write-Host "Installed packages:" -ForegroundColor Cyan
                 $installedPackages | ForEach-Object {
-                    Write-Host "  â€¢ $($_.Id)" -ForegroundColor White
+                    Write-Host "  • $($_.Id)" -ForegroundColor White
                 }
                 Write-Host ""
                 Write-Host "Use 'winget uninstall <PackageName>' to uninstall manually." -ForegroundColor Yellow
@@ -2842,7 +2849,7 @@ function Remove-WingetRecent {
         else {
             Write-Host "Installed packages:" -ForegroundColor Cyan
             $installedPackages | ForEach-Object {
-                Write-Host "  â€¢ $($_.Id)" -ForegroundColor White
+                Write-Host "  • $($_.Id)" -ForegroundColor White
             }
             Write-Host ""
             Write-Host "To uninstall a package: " -ForegroundColor Cyan -NoNewline

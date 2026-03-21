@@ -323,7 +323,7 @@ function Install-WingetAll {
 
             try {
                 # Create multi-selection prompt
-                $selectedChoices = Read-SpectreMultiSelection -Title "[cyan]Select packages to install[/]" `
+                $selectedChoices = Read-SpectreMultiSelection -Title "[cyan]Select packages to install (Space to toggle, Enter to confirm)[/]" `
                     -Choices $packageChoices `
                     -PageSize 20 `
                     -Color "Green"
@@ -715,6 +715,13 @@ function Show-WingetPackageDetails {
             Write-Host "  🔖 Version:     " -ForegroundColor DarkGray -NoNewline
             $ver = if ($details.Version) { $details.Version } else { $pkgInfo.Version }
             Write-Host $ver -ForegroundColor White
+        }
+
+        # Source
+        if ($pkgInfo -and $pkgInfo.Source -and $pkgInfo.Source -ne "Unknown") {
+            Write-Host "  💾 Source:      " -ForegroundColor DarkGray -NoNewline
+            $sColor = if ($pkgInfo.Source -match 'msstore') { "Magenta" } else { "Cyan" }
+            Write-Host $pkgInfo.Source -ForegroundColor $sColor
         }
 
         # Category
