@@ -6,6 +6,7 @@ $details = @{
         Id = "Test.Package"
         Description = "A test package description."
         Version = "1.2.3"
+        Source = "winget"
         Category = "Developer Tools"
         Pricing = "Free"
         Publisher = "Test Publisher"
