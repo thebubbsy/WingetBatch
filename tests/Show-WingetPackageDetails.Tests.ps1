@@ -36,6 +36,30 @@ Describe "Show-WingetPackageDetails UX Improvements" {
         $descPos | Should -BeLessThan $verPos
     }
 
+    It "Displays Source when available from fallback info" {
+        $pkgId = "Microsoft.PowerToys"
+        $details = @{
+            "Microsoft.PowerToys" = @{
+                Id = "Microsoft.PowerToys"
+            }
+        }
+        $fallback = @(
+            @{ Id = "Microsoft.PowerToys"; Name = "PowerToys"; Source = "winget" }
+        )
+
+        $module = Get-Module WingetBatch
+        $scriptBlock = {
+            param($id, $map, $fallbackInfo)
+            Show-WingetPackageDetails -PackageIds @($id) -DetailsMap $map -FallbackInfo $fallbackInfo 6>&1
+        }
+
+        $output = & $module $scriptBlock $pkgId $details $fallback
+        $outputStr = $output | Out-String
+
+        $outputStr | Should -Match "💾 Source:"
+        $outputStr | Should -Match "winget"
+    }
+
     It "Displays explicit Command section at the bottom" {
         $pkgId = "Microsoft.PowerToys"
         $details = @{

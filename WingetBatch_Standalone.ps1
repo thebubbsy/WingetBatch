@@ -723,6 +723,13 @@ function Show-WingetPackageDetails {
         }
 
         # --- Basic Info ---
+        # Source
+        if ($pkgInfo -and $pkgInfo.Source -and $pkgInfo.Source -ne "Unknown") {
+            Write-Host "  ðŸ’¾ Source:      " -ForegroundColor DarkGray -NoNewline
+            $sColor = if ($pkgInfo.Source -match 'msstore') { "Magenta" } else { "Cyan" }
+            Write-Host $pkgInfo.Source -ForegroundColor $sColor
+        }
+
         # Version
         if ($details.Version -or ($pkgInfo -and $pkgInfo.Version)) {
             Write-Host "  ðŸ”– Version:     " -ForegroundColor DarkGray -NoNewline
@@ -792,11 +799,6 @@ function Show-WingetPackageDetails {
             }
             Write-Host ""
         }
-
-        # Command
-        Write-Host "  ðŸ’» Command:     " -ForegroundColor DarkGray -NoNewline
-        Write-Host "winget install --id $pkgId -e" -ForegroundColor Cyan
-        Write-Host ""
 
         # Tags
         if ($details.Tags -and $details.Tags.Count -gt 0) {
