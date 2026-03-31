@@ -21,3 +21,7 @@
 ## 2025-11-05 - [Regex Overhead in Nested Loops]
 **Learning:** Using regex pattern matching (e.g., `-notmatch`) inside tight nested loops for simple substring matching incurs significant overhead. In PowerShell, `String.IndexOf(..., [System.StringComparison]::OrdinalIgnoreCase)` is significantly faster (over 50% reduction in execution time in benchmarks) than `-match` or `-notmatch` for case-insensitive substring search because it bypasses regex compilation and evaluation entirely.
 **Action:** Replace `-match` and `-notmatch` with `.IndexOf(...)` or `.Contains(...)` when doing simple substring checks within large loops, especially when the search term is plain text and doesn't require regex features.
+
+## 2026-03-31 - [Regex Overhead in String Literal Substitution]
+**Learning:** Using `-replace` for simple string literal substitutions incurs significant regex compilation and evaluation overhead. Combining `.Replace()` with an early exit check using `.IndexOf()` significantly improves performance by avoiding unnecessary string allocations and regex overhead.
+**Action:** Use `.IndexOf()` and `.Replace()` instead of `-replace` for simple string literal escaping, especially in frequently called functions like `ConvertTo-SpectreEscaped`.
