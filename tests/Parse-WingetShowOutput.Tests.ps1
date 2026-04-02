@@ -32,7 +32,8 @@ Installer:
 "@
             # InModuleScope is required to test internal function
             $result = InModuleScope WingetBatch {
-                Parse-WingetShowOutput -Output $output -PackageId "MongoDB.Shell"
+                $testOutput = $output -replace "`n", "`r`n"
+                Parse-WingetShowOutput -Output $testOutput -PackageId "MongoDB.Shell"
             }
 
             $result.Id | Should -Be "MongoDB.Shell"
@@ -57,7 +58,8 @@ Installer:
 Publisher Url: https://github.com/microsoft/winget-cli
 "@
              $result = InModuleScope WingetBatch {
-                Parse-WingetShowOutput -Output $output -PackageId "Test"
+                $testOutput = $output -replace "`n", "`r`n"
+                Parse-WingetShowOutput -Output $testOutput -PackageId "Test"
              }
 
              $result.PublisherGitHub | Should -Be "https://github.com/microsoft/winget-cli"
@@ -71,7 +73,8 @@ Publisher Url: https://github.com/microsoft/winget-cli
    Publisher:    Test Pub
 "@
              $result = InModuleScope WingetBatch {
-                Parse-WingetShowOutput -Output $output -PackageId "Test"
+                $testOutput = $output -replace "`n", "`r`n"
+                Parse-WingetShowOutput -Output $testOutput -PackageId "Test"
              }
 
              $result.Version | Should -Be "1.0.0"
@@ -84,7 +87,8 @@ Version:
 Publisher:
 "@
              $result = InModuleScope WingetBatch {
-                Parse-WingetShowOutput -Output $output -PackageId "Test"
+                $testOutput = $output -replace "`n", "`r`n"
+                Parse-WingetShowOutput -Output $testOutput -PackageId "Test"
              }
 
              $result.Version | Should -BeNullOrEmpty
@@ -97,7 +101,8 @@ Just some text
 Another line
 "@
              $result = InModuleScope WingetBatch {
-                Parse-WingetShowOutput -Output $output -PackageId "Test"
+                $testOutput = $output -replace "`n", "`r`n"
+                Parse-WingetShowOutput -Output $testOutput -PackageId "Test"
              }
 
              $result.Version | Should -BeNull
@@ -108,7 +113,8 @@ Another line
 Release Notes Url: https://example.com/notes
 "@
              $result = InModuleScope WingetBatch {
-                Parse-WingetShowOutput -Output $output -PackageId "Test"
+                $testOutput = $output -replace "`n", "`r`n"
+                Parse-WingetShowOutput -Output $testOutput -PackageId "Test"
              }
 
              $result.ReleaseNotesUrl | Should -Be "https://example.com/notes"
@@ -119,7 +125,8 @@ Release Notes Url: https://example.com/notes
 Description: This is a description: with a colon
 "@
              $result = InModuleScope WingetBatch {
-                Parse-WingetShowOutput -Output $output -PackageId "Test"
+                $testOutput = $output -replace "`n", "`r`n"
+                Parse-WingetShowOutput -Output $testOutput -PackageId "Test"
              }
 
              $result.Description | Should -Be "This is a description: with a colon"
