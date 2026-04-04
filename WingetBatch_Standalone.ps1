@@ -2973,7 +2973,8 @@ function ConvertTo-SpectreEscaped {
     )
 
     if ([string]::IsNullOrEmpty($Text)) { return $Text }
-    return $Text -replace '\[', '[[' -replace '\]', ']]'
+    if ($Text.IndexOf('[') -eq -1 -and $Text.IndexOf(']') -eq -1) { return $Text }
+    return $Text.Replace('[', '[[').Replace(']', ']]')
 }
 
 # Export module members (public functions only)
