@@ -714,7 +714,7 @@ function Show-WingetPackageDetails {
         if ($details.Version -or ($pkgInfo -and $pkgInfo.Version)) {
             Write-Host "  🔖 Version:     " -ForegroundColor DarkGray -NoNewline
             $ver = if ($details.Version) { $details.Version } else { $pkgInfo.Version }
-            Write-Host $ver -ForegroundColor White
+            Write-Host $ver -ForegroundColor Green
         }
 
         # Source
@@ -727,7 +727,7 @@ function Show-WingetPackageDetails {
         # Category
         if ($details.Category) {
             Write-Host "  📂 Category:    " -ForegroundColor DarkGray -NoNewline
-            Write-Host $details.Category -ForegroundColor Yellow
+            Write-Host $details.Category -ForegroundColor Cyan
         }
 
         # Source
