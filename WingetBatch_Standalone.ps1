@@ -2973,7 +2973,13 @@ function ConvertTo-SpectreEscaped {
     )
 
     if ([string]::IsNullOrEmpty($Text)) { return $Text }
-    return $Text -replace '\[', '[[' -replace '\]', ']]'
+
+    # ⚡ Bolt: Early exit if no brackets exist (avoid string allocation and regex replace overhead)
+    if ($Text.IndexOf('[') -eq -1 -and $Text.IndexOf(']') -eq -1) {
+        return $Text
+    }
+
+    return $Text.Replace('[', '[[').Replace(']', ']]')
 }
 
 # Export module members (public functions only)
