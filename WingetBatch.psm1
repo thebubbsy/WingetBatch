@@ -717,6 +717,13 @@ function Show-WingetPackageDetails {
             Write-Host $ver -ForegroundColor White
         }
 
+        # Source
+        if ($pkgInfo -and $pkgInfo.Source -and $pkgInfo.Source -ne "Unknown") {
+            Write-Host "  💾 Source:      " -ForegroundColor DarkGray -NoNewline
+            $srcColor = if ($pkgInfo.Source -match 'msstore') { "Magenta" } else { "Cyan" }
+            Write-Host $pkgInfo.Source -ForegroundColor $srcColor
+        }
+
         # Category
         if ($details.Category) {
             Write-Host "  📂 Category:    " -ForegroundColor DarkGray -NoNewline
