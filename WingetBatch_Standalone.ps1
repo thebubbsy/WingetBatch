@@ -2895,7 +2895,7 @@ function Parse-WingetShowOutput {
 
     # Optimized parsing: Replace sequential regex matching with O(1) string operations and switch
     # This significantly reduces CPU usage when parsing many packages in parallel
-    foreach ($line in $Output -split "`n") {
+    foreach ($line in $Output -split "`r?`n") {
         $colonIndex = $line.IndexOf(':')
 
         if ($colonIndex -gt 0) {
@@ -2973,7 +2973,12 @@ function ConvertTo-SpectreEscaped {
     )
 
     if ([string]::IsNullOrEmpty($Text)) { return $Text }
-    return $Text -replace '\[', '[[' -replace '\]', ']]'
+
+    # Fast path: skip expensive string allocations if no brackets are present
+    if ($Text.IndexOf('[') -eq -1 -and $Text.IndexOf(']') -eq -1) { return $Text }
+
+    # Replace regex with native string replace for better performance
+    return $Text.Replace('[', '[[').Replace(']', ']]')
 }
 
 # Export module members (public functions only)
