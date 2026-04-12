@@ -56,5 +56,31 @@ Describe "Show-WingetPackageDetails UX Improvements" {
 
         $outputStr | Should -Match "💻 Command:"
         $outputStr | Should -Match "winget install --id `"$pkgId`" -e"
+
+        # Verify Command section only appears once (duplicate removed)
+        $commandMatches = [regex]::Matches($outputStr, "💻 Command:")
+        $commandMatches.Count | Should -Be 1
+    }
+
+    It "Displays Source in Basic Info section" {
+        $pkgId = "Test.SourcePkg"
+        $details = @{
+            "Test.SourcePkg" = @{
+                Id = "Test.SourcePkg"
+                Source = "msstore"
+            }
+        }
+
+        $module = Get-Module WingetBatch
+        $scriptBlock = {
+            param($id, $map)
+            Show-WingetPackageDetails -PackageIds @($id) -DetailsMap $map 6>&1
+        }
+
+        $output = & $module $scriptBlock $pkgId $details
+        $outputStr = $output | Out-String
+
+        $outputStr | Should -Match "💾 Source:"
+        $outputStr | Should -Match "msstore"
     }
 }
