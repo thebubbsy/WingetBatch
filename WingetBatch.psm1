@@ -780,11 +780,6 @@ function Show-WingetPackageDetails {
             Write-Host ""
         }
 
-        # Command
-        Write-Host "  💻 Command:     " -ForegroundColor DarkGray -NoNewline
-        Write-Host "winget install --id $pkgId -e" -ForegroundColor Cyan
-        Write-Host ""
-
         # Tags
         if ($details.Tags -and $details.Tags.Count -gt 0) {
             Write-Host "  🏷️  Tags:        " -ForegroundColor DarkGray -NoNewline
@@ -835,7 +830,7 @@ function Show-WingetPackageDetails {
             Write-Host ""
         }
 
-        # Command
+        # Copy-pasteable command
         Write-Host "  💻 Command:     " -ForegroundColor DarkGray -NoNewline
         Write-Host "winget install --id `"$pkgId`" -e" -ForegroundColor Cyan
         Write-Host ""
