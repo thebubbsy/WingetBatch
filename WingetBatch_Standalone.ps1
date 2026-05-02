@@ -1,589 +1,528 @@
-﻿param([Parameter(ValueFromRemainingArguments=$true)]$Args)
-
-# Ensure PwshSpectreConsole is available
-if (!(Get-Module PwshSpectreConsole -ListAvailable)) {
-    Write-Host "Installing PwshSpectreConsole module..." -ForegroundColor Cyan
-    Install-Module PwshSpectreConsole -Force -Scope CurrentUser -AllowClobber
-}
-Import-Module PwshSpectreConsole
-
-1<#
+﻿<#
 .SYNOPSIS
-    WingetBatch - Batch installation utilities for Windows Package Manager (winget)
-
+    WingetBatch Standalone Script
+    
 .DESCRIPTION
-    This module provides batch installation functionality for winget, allowing you to
-    search for packages and install all matching results with a single command.
-
-.NOTES
-    Author: Matthew Bubb
-    Created: November 2, 2025
+    This is an automatically generated standalone script containing all the functions
+    from the WingetBatch module. You can dot-source this script directly if you don't
+    want to install the module.
 #>
 
-function Install-WingetAll {
+# Region: Private/ConvertTo-SpectreEscaped.ps1
+function ConvertTo-SpectreEscaped {
     <#
     .SYNOPSIS
-        Search for winget packages and install all results.
+        Escape special characters for Spectre Console markup.
 
     .DESCRIPTION
-        Searches for packages matching the provided search term and automatically
-        installs all packages found in the search results.
-
-    .PARAMETER SearchTerm
-        The search term to find packages. Required.
-
-    .PARAMETER Silent
-        Skip the confirmation prompt and install immediately.
-
-    .PARAMETER WhatIf
-        Show what packages would be installed without actually installing them.
-
-    .EXAMPLE
-        Install-WingetAll "python"
-        Searches for "python" and installs all matching packages after confirmation.
-
-    .EXAMPLE
-        Install-WingetAll "nodejs" -Silent
-        Installs all nodejs packages without confirmation prompt.
-
-    .EXAMPLE
-        Install-WingetAll "python" -WhatIf
-        Shows what would be installed without actually installing.
-
-    .LINK
-        https://github.com/microsoft/winget-cli
+        Internal function to escape brackets so they are rendered literally in Spectre Console.
+        [ becomes [[
+        ] becomes ]]
     #>
-
-    [CmdletBinding()]
     param(
-        [Parameter(Mandatory=$true, Position=0, ValueFromPipeline=$true)]
-        [Alias('SearchTerm')]
-        [string[]]$SearchTerms,
-
-        [Parameter()]
-        [switch]$Silent,
-
-        [Parameter()]
-        [switch]$WhatIf
+        [string]$Text
     )
 
-    begin {
-        # Check if PwshSpectreConsole is available
-        if (-not (Get-Module -ListAvailable -Name PwshSpectreConsole)) {
-            Write-Warning "PwshSpectreConsole module not found. Installing..."
-            try {
-                Install-Module -Name PwshSpectreConsole -Scope CurrentUser -Force -SkipPublisherCheck
-                Import-Module PwshSpectreConsole
-            }
-            catch {
-                Write-Error "Failed to install PwshSpectreConsole. Interactive selection will not be available."
-                Write-Error $_
-            }
-        }
-        else {
-            Import-Module PwshSpectreConsole -ErrorAction SilentlyContinue
-        }
-
-        Write-Host "Searching for packages matching: " -ForegroundColor Cyan -NoNewline
-        Write-Host ($SearchTerms -join ", ") -ForegroundColor Yellow
-    }
-
-    process {
-        # Parse multiple search terms: handle both arrays (PowerShell comma list) and comma-separated strings
-        $searchQueries = $SearchTerms | ForEach-Object { $_ -split ',' } | Where-Object { $_ -ne '' }
-        $allPackages = [System.Collections.Generic.List[Object]]::new()
-
-        foreach ($query in $searchQueries) {
-            $query = $query.Trim()
-            if ([string]::IsNullOrWhiteSpace($query)) { continue }
-
-            Write-Host "Searching for: " -ForegroundColor Cyan -NoNewline
-            Write-Host $query -ForegroundColor Yellow
-
-            # Normalize query (collapse multiple spaces)
-            $normalizedQuery = ($query -split '\s+') -join ' '
-
-            # Combine all search results from each word
-            $querySearchResults = [System.Collections.Generic.List[string]]::new()
-
-            try {
-                $wordResults = winget search $query --accept-source-agreements 2>&1
-
-                if ($LASTEXITCODE -eq 0 -and $null -ne $wordResults) {
-                    $querySearchResults.AddRange([string[]]$wordResults)
-                }
-            }
-            catch {
-                Write-Warning "Failed to search for query: $query"
-            }
-
-            if ($querySearchResults.Count -eq 0) {
-                continue
-            }
-
-            # Parse the search results to extract package IDs and Names
-            $lines = $querySearchResults
-            $queryPackages = [System.Collections.Generic.List[PSCustomObject]]::new()
-
-            # Pre-calculate regex patterns for filtering to improve performance
-            $searchPatterns = if ($searchWords.Count -gt 1) {
-                $searchWords | ForEach-Object { "(?i)$([regex]::Escape($_))" }
-            } else { $null }
-
-            $headerFound = $false
-            $nameColEnd = -1
-            $idColStart = -1
-            $idColEnd = -1
-            $versionColStart = -1
-            $sourceColStart = -1
-            $matchColStart = -1
-
-            foreach ($line in $lines) {
-                # Find the header line to determine column positions
-                if ($line -match '^Name\s+Id\s+') {
-                    $nameColEnd = $line.IndexOf('Id') - 1
-                    $idColStart = $line.IndexOf('Id')
-
-                    # Reset
-                    $versionColStart = -1
-                    $sourceColStart = -1
-                    $matchColStart = -1
-
-                    # Find Version
-                    if ($line -match 'Version') {
-                        $idColEnd = $line.IndexOf('Version') - 1
-                        $versionColStart = $line.IndexOf('Version')
-                    } else {
-                        $idColEnd = $line.Length
-                    }
-
-                    # Find Match
-                    if ($line -match 'Match') {
-                        $matchColStart = $line.IndexOf('Match')
-                    }
-
-                    # Find Source
-                    if ($line -match 'Source') {
-                        $sourceColStart = $line.IndexOf('Source')
-                    }
-                    continue
-                }
-
-                # Skip until we find the header separator line (dashes)
-                if ($line -match '^-+') {
-                    $headerFound = $true
-                    continue
-                }
-
-                if ($headerFound -and $line.Trim() -ne '' -and $idColStart -gt 0 -and $line.Length -gt $idColStart) {
-                    # Extract the entire line for filtering and the ID
-                    $endPos = if ($idColEnd -lt $line.Length) { $idColEnd } else { $line.Length }
-                    $packageId = $line.Substring($idColStart, $endPos - $idColStart).Trim()
-
-                    # Extract Name
-                    $packageName = if ($nameColEnd -gt 0 -and $line.Length -gt $nameColEnd) {
-                        $line.Substring(0, $nameColEnd).Trim()
-                    } else {
-                        $packageId # Fallback
-                    }
-
-                    # Extract Version
-                    $packageVersion = "Unknown"
-                    if ($versionColStart -gt -1 -and $line.Length -gt $versionColStart) {
-                        $vEnd = $line.Length
-                        # If Match is present
-                        if ($matchColStart -gt $versionColStart) {
-                            $vEnd = $matchColStart
-                        }
-                        # If Source is present (and no Match or Match is after Source)
-                        elseif ($sourceColStart -gt $versionColStart) {
-                            $vEnd = $sourceColStart
-                        }
-
-                        if ($vEnd -gt $line.Length) { $vEnd = $line.Length }
-                        $packageVersion = $line.Substring($versionColStart, $vEnd - $versionColStart).Trim()
-                    }
-
-                    # Extract Source
-                    $packageSource = "Unknown"
-                    if ($sourceColStart -gt -1 -and $line.Length -gt $sourceColStart) {
-                        $packageSource = $line.Substring($sourceColStart).Trim()
-                    }
-
-                    # Only add if it looks like a valid package ID
-                    if ($packageId -and $packageId -match '^[A-Za-z0-9\.\-_]+$' -and $packageId -notmatch '^\d+\.\d+') {
-                        # If multiple search words, filter to only packages matching ALL words (case-insensitive)
-                        if ($searchWords.Count -gt 1) {
-                            $matchesAll = $true
-                            foreach ($pattern in $searchPatterns) {
-                                if ($line -notmatch $pattern) {
-                                    $matchesAll = $false
-                                    break
-                                }
-                            }
-                            if ($matchesAll) {
-                                $queryPackages.Add([PSCustomObject]@{
-                                    Id = $packageId
-                                    Name = $packageName
-                                    Version = $packageVersion
-                                    Source = $packageSource
-                                    SearchTerm = $query
-                                })
-                            }
-                        }
-                        else {
-                            $queryPackages.Add([PSCustomObject]@{
-                                Id = $packageId
-                                Name = $packageName
-                                Version = $packageVersion
-                                Source = $packageSource
-                                SearchTerm = $query
-                            })
-                        }
-                    }
-                }
-            }
-
-            # Deduplicate packages within this query based on Id (preserving order)
-            $seenIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-            $uniqueQueryPackages = [System.Collections.Generic.List[PSCustomObject]]::new()
-
-            foreach ($pkg in $queryPackages) {
-                if ($seenIds.Add($pkg.Id)) {
-                    $uniqueQueryPackages.Add($pkg)
-                }
-            }
-            $allPackages.AddRange([array]$uniqueQueryPackages)
-        }
-
-        # Keep all packages (including potential duplicates across queries) for display
-        $foundPackages = $allPackages
-
-        # Build a lookup map for faster access to package details
-        $pkgMap = @{}
-        if ($null -ne $foundPackages) {
-            foreach ($pkg in $foundPackages) {
-                # Use the first encounter of a package ID to match original behavior of Select-Object -First 1
-                # Check for null Id to prevent hashtable errors and cast to string for safety
-                if ($null -ne $pkg.Id -and -not $pkgMap.ContainsKey([string]$pkg.Id)) {
-                    $pkgMap[[string]$pkg.Id] = $pkg
-                }
-            }
-        }
-
-        if ($foundPackages.Count -eq 0) {
-            Write-Warning "No packages found matching '$($SearchTerms -join ", ")'"
-            return
-        }
-
-        Write-Host "`nFound " -ForegroundColor Green -NoNewline
-        Write-Host "$($foundPackages.Count)" -ForegroundColor White -NoNewline
-        Write-Host " package(s)" -ForegroundColor Green
-
-        if ($WhatIf) {
-            Write-Host "`n[WhatIf] Would display interactive selection for:" -ForegroundColor Yellow
-
-            $groups = @{}
-            foreach ($pkg in $foundPackages) {
-                if (-not $groups.ContainsKey($pkg.SearchTerm)) {
-                    $groups[$pkg.SearchTerm] = [System.Collections.Generic.List[PSCustomObject]]::new()
-                }
-                $groups[$pkg.SearchTerm].Add($pkg)
-            }
-
-            foreach ($term in $groups.Keys) {
-                Write-Host "$($term):" -ForegroundColor Yellow
-                foreach ($pkg in $groups[$term]) {
-                    Write-Host "  â€¢ " -ForegroundColor Cyan -NoNewline
-                    Write-Host "$($pkg.Name) ($($pkg.Id))" -ForegroundColor White -NoNewline
-                    if ($pkg.Version -ne "Unknown") {
-                        Write-Host " v$($pkg.Version)" -ForegroundColor Green -NoNewline
-                    }
-                    if ($pkg.Source) {
-                        $sColor = if ($pkg.Source -match 'msstore') { "Magenta" } else { "Cyan" }
-                        Write-Host " [$($pkg.Source)]" -ForegroundColor $sColor
-                    } else { Write-Host "" }
-                }
-            }
-            return
-        }
-
-        # Prepare choices for selection with SearchTerm grouping prefix
-        # Consolidating loops to improve performance (avoid double iteration and regex operations)
-        $packageChoices = [System.Collections.Generic.List[string]]::new()
-        $packageMap = @{}
-
-        foreach ($pkg in $foundPackages) {
-            $sourceColor = if ($pkg.Source -match 'msstore') { "magenta" } else { "cyan" }
-            $versionStr = if ($pkg.Version -ne "Unknown") { " [green]v$($pkg.Version)[/]" } else { "" }
-
-            $term = ConvertTo-SpectreEscaped $pkg.SearchTerm
-            $name = ConvertTo-SpectreEscaped $pkg.Name
-            $id = ConvertTo-SpectreEscaped $pkg.Id
-            $source = ConvertTo-SpectreEscaped $pkg.Source
-
-            $displayString = "[yellow][[$term]][/] $name ($id)$versionStr [$sourceColor]$source[/]"
-
-            $packageChoices.Add($displayString)
-            $packageMap[$displayString] = $pkg.Id
-        }
-
-        $packagesToInstall = @()
-
-        # Interactive selection using Spectre Console
-        if (-not $Silent -and (Get-Module -Name PwshSpectreConsole)) {
-            Write-Host ""
-
-            try {
-                # Create multi-selection prompt
-                $selectedChoices = Read-SpectreMultiSelection -Title "[cyan]Select packages to install[/]" `
-                    -Choices $packageChoices `
-                    -PageSize 20 `
-                    -Color "Green"
-
-                if ($selectedChoices.Count -eq 0) {
-                    Write-Host "`nNo packages selected. Exiting." -ForegroundColor Yellow
-                    return
-                }
-
-                # Map back to IDs
-                $packagesToInstall = $selectedChoices | ForEach-Object { $packageMap[$_] }
-
-                Write-Host "`nSelected " -ForegroundColor Green -NoNewline
-                Write-Host "$($packagesToInstall.Count)" -ForegroundColor White -NoNewline
-                Write-Host " package(s) for installation" -ForegroundColor Green
-            }
-            catch {
-                Write-Warning "Failed to show interactive selection. Falling back to confirmation prompt."
-                $packagesToInstall = $foundPackages.Id
-            }
-        }
-        elseif (-not $Silent) {
-            # Fallback for when Spectre Console is not available
-            $packagesToInstall = $foundPackages.Id
-        }
-        else {
-             # Silent mode
-             $packagesToInstall = $foundPackages.Id
-        }
-
-        if (-not $Silent -and $packagesToInstall.Count -gt 0) {
-            Write-Host "`nFetching package details..." -ForegroundColor DarkGray
-            $configDir = Get-WingetBatchConfigDir
-
-            $jobsResult = Start-PackageDetailJobs -PackageIds $packagesToInstall -ConfigDir $configDir
-            $jobs = $jobsResult[0]
-
-            if ($jobs.Count -gt 0) {
-                Write-Host "Waiting for background jobs..." -ForegroundColor DarkGray
-                $jobs | Wait-Job | Out-Null
-
-                $allPackageDetails = @{}
-                foreach ($job in $jobs) {
-                    $jobResults = Receive-Job -Job $job
-                    foreach ($key in $jobResults.Keys) {
-                        $allPackageDetails[$key] = $jobResults[$key]
-                        Set-PackageDetailsCache -PackageId $key -Details $jobResults[$key]
-                    }
-                    Remove-Job -Job $job -Force
-                }
-
-                # Fill missing
-                foreach ($pkgId in $packagesToInstall) {
-                    if (-not $allPackageDetails.ContainsKey($pkgId)) {
-                        $allPackageDetails[$pkgId] = @{ Id = $pkgId }
-                    }
-                }
-
-                Show-WingetPackageDetails -PackageIds $packagesToInstall -DetailsMap $allPackageDetails -FallbackInfo $foundPackages -FallbackMap $pkgMap
-
-                # Ask for confirmation
-                Write-Host "Press " -NoNewline -ForegroundColor Yellow
-                Write-Host "Enter" -NoNewline -ForegroundColor White
-                Write-Host " to install, or " -NoNewline -ForegroundColor Yellow
-                Write-Host "Ctrl+C" -NoNewline -ForegroundColor Red
-                Write-Host " to cancel..." -ForegroundColor Yellow
-                try {
-                    $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
-                }
-                catch {
-                    # Ignore
-                }
-            }
-        }
-
-        Write-Host "`n" + ("=" * 60) -ForegroundColor Cyan
-        Write-Host "Starting Installation Process" -ForegroundColor Cyan
-        Write-Host ("=" * 60) -ForegroundColor Cyan
-
-        $successCount = 0
-        $failCount = 0
-
-        # Deduplicate IDs to ensure we don't install the same package twice
-        $uniquePackagesToInstall = $packagesToInstall | Select-Object -Unique
-
-        if ($uniquePackagesToInstall.Count -gt 0) {
-            # Build summary list first (raw data)
-            $summaryList = [System.Collections.Generic.List[PSCustomObject]]::new()
-
-            foreach ($packageId in $uniquePackagesToInstall) {
-                $pkgInfo = $pkgMap[$packageId]
-
-                # Try to get publisher from details if available
-                $publisher = $null
-                if ($null -ne $allPackageDetails -and $allPackageDetails.ContainsKey($packageId)) {
-                    $details = $allPackageDetails[$packageId]
-                    if ($details.PublisherName) { $publisher = $details.PublisherName }
-                    elseif ($details.Publisher) { $publisher = $details.Publisher }
-                }
-
-                if (-not $publisher) { $publisher = "" }
-
-                if ($pkgInfo) {
-                    $summaryList.Add([PSCustomObject]@{
-                        Name = $pkgInfo.Name
-                        Id = $pkgInfo.Id
-                        Version = $pkgInfo.Version
-                        Source = $pkgInfo.Source
-                        SearchTerm = $pkgInfo.SearchTerm
-                        Publisher = $publisher
-                    })
-                } else {
-                    $summaryList.Add([PSCustomObject]@{
-                        Name = $packageId
-                        Id = $packageId
-                        Version = "Unknown"
-                        Source = "Unknown"
-                        SearchTerm = "Manual"
-                        Publisher = $publisher
-                    })
-                }
-            }
-
-            # Use Spectre Console table if available for better formatting
-            if (Get-Module -Name PwshSpectreConsole) {
-                Write-Host ""
-                Write-Host "Package Installation Summary ($($summaryList.Count) packages)" -ForegroundColor Cyan
-
-                $spectreList = [System.Collections.Generic.List[PSCustomObject]]::new()
-
-                # Check if we have multiple unique search terms in the summary
-                $uniqueSearchTerms = $summaryList | Select-Object -ExpandProperty SearchTerm -Unique
-                $showSearchTerm = ($uniqueSearchTerms | Measure-Object).Count -gt 1
-
-                # Check if we have any publishers to show
-                $showPublisher = ($summaryList | Where-Object { -not [string]::IsNullOrWhiteSpace($_.Publisher) } | Measure-Object).Count -gt 0
-
-                foreach ($item in $summaryList) {
-                    $verColor = if ($item.Version -ne "Unknown") { "green" } else { "grey" }
-                    $srcColor = if ($item.Source -match 'msstore') { "magenta" } else { "cyan" }
-
-                    $obj = [ordered]@{
-                        Name = "ðŸ“¦ " + (ConvertTo-SpectreEscaped $item.Name)
-                        Id = ConvertTo-SpectreEscaped $item.Id
-                        Version = "[$verColor]$($item.Version)[/]"
-                        Source = "[$srcColor]$($item.Source)[/]"
-                    }
-
-                    if ($showPublisher) {
-                        $obj['Publisher'] = if ($item.Publisher) { (ConvertTo-SpectreEscaped $item.Publisher) } else { "" }
-                    }
-
-                    if ($showSearchTerm) {
-                        $obj['Search Term'] = "[grey]$(ConvertTo-SpectreEscaped $item.SearchTerm)[/]"
-                    }
-
-                    $spectreList.Add([PSCustomObject]$obj)
-                }
-
-                $spectreList | Format-SpectreTable | Out-Host
-            }
-            else {
-                Write-Host "`nPackage Installation Summary ($($summaryList.Count) packages):" -ForegroundColor Cyan
-
-                # Simple modification for fallback table too
-                $showPublisher = ($summaryList | Where-Object { -not [string]::IsNullOrWhiteSpace($_.Publisher) } | Measure-Object).Count -gt 0
-
-                $fallbackList = $summaryList | Select-Object @{N='Name';E={"ðŸ“¦ " + $_.Name}}, Id, Version, Source, Publisher, SearchTerm
-
-                $props = [System.Collections.Generic.List[string]]::new()
-                $props.AddRange([string[]]@('Name', 'Id', 'Version', 'Source'))
-
-                if ($showPublisher) {
-                    $props.Add('Publisher')
-                }
-
-                if (($summaryList | Select-Object -ExpandProperty SearchTerm -Unique | Measure-Object).Count -gt 1) {
-                    $props.Add('SearchTerm')
-                }
-
-                $fallbackList | Format-Table -Property $props -AutoSize | Out-Host
-            }
-        }
-
-        foreach ($packageId in $uniquePackagesToInstall) {
-            # Find info for better display (use lookup map)
-            $pkgInfo = $pkgMap[$packageId]
-
-            $pkgName = if ($pkgInfo) { $pkgInfo.Name } else { $packageId }
-            $pkgVersion = if ($pkgInfo -and $pkgInfo.Version -ne "Unknown") { "v$($pkgInfo.Version)" } else { "" }
-            $pkgSource = if ($pkgInfo -and $pkgInfo.Source -ne "Unknown") { $pkgInfo.Source } else { "" }
-
-            Write-Host "`n>>> Installing: " -ForegroundColor Magenta -NoNewline
-            Write-Host "$pkgName ($packageId)" -ForegroundColor White -NoNewline
-
-            if ($pkgVersion) {
-                Write-Host " $pkgVersion" -ForegroundColor Green -NoNewline
-            }
-            if ($pkgSource) {
-                $sColor = if ($pkgSource -match 'msstore') { "Magenta" } else { "Cyan" }
-                Write-Host " from $pkgSource" -ForegroundColor $sColor
-            } else { Write-Host "" }
-
-            winget install --id $packageId --accept-package-agreements --accept-source-agreements --silent | Out-Null
-
-            if ($LASTEXITCODE -eq 0) {
-                Write-Host "âœ“ Successfully installed " -ForegroundColor Green -NoNewline
-                Write-Host $packageId -ForegroundColor White
-                $successCount++
-            }
-            else {
-                Write-Host "âœ— Failed to install " -ForegroundColor Red -NoNewline
-                Write-Host $packageId -ForegroundColor White -NoNewline
-                Write-Host " (Exit code: $LASTEXITCODE)" -ForegroundColor Red
-                $failCount++
-            }
-        }
-
-        Write-Host "`n" + ("=" * 60) -ForegroundColor Green
-        Write-Host "Installation Complete" -ForegroundColor Green
-        Write-Host ("=" * 60) -ForegroundColor Green
-        Write-Host "Success: " -ForegroundColor Green -NoNewline
-        Write-Host $successCount -ForegroundColor White -NoNewline
-        Write-Host " | Failed: " -ForegroundColor Red -NoNewline
-        Write-Host $failCount -ForegroundColor White
-    }
+    if ([string]::IsNullOrEmpty($Text)) { return $Text }
+    if ($Text.IndexOf('[') -eq -1 -and $Text.IndexOf(']') -eq -1) { return $Text }
+    return $Text.Replace('[', '[[').Replace(']', ']]')
 }
 
-function Start-WingetBatchJob {
+# EndRegion
+
+# Region: Private/Get-GitHubApiRequestCount.ps1
+function Get-GitHubApiRequestCount {
     <#
     .SYNOPSIS
-        Internal helper to start a job using Start-ThreadJob if available, otherwise Start-Job.
+        Get current GitHub API request count for this hour.
+
+    .DESCRIPTION
+        Returns the number of GitHub API requests made in the current hour.
     #>
+
+    [CmdletBinding()]
+    param()
+
+    $rateLimitFile = Join-Path (Get-WingetBatchConfigDir) "github_ratelimit.json"
+
+    if (Test-Path $rateLimitFile) {
+        try {
+            $rateLimitData = Get-Content $rateLimitFile -Raw | ConvertFrom-Json
+            $lastReset = [DateTime]$rateLimitData.LastReset
+            $now = Get-Date
+
+            # If more than 1 hour has passed, return 0
+            if (($now - $lastReset).TotalHours -ge 1) {
+                return 0
+            }
+
+            return [int]$rateLimitData.RequestCount
+        }
+        catch {
+            return 0
+        }
+    }
+
+    return 0
+}
+
+# EndRegion
+
+# Region: Private/Get-PackageDetailsCache.ps1
+function Get-PackageDetailsCache {
+    <#
+    .SYNOPSIS
+        Retrieve cached package details.
+
+    .DESCRIPTION
+        Internal function to get cached package details from JSON file.
+        Cache expires after 30 days.
+    #>
+
     [CmdletBinding()]
     param(
-        [ScriptBlock]$ScriptBlock,
-        [Object[]]$ArgumentList
+        [Parameter(Mandatory=$true)]
+        [string]$PackageId
     )
 
-    if (Get-Command Start-ThreadJob -ErrorAction SilentlyContinue) {
-        return Start-ThreadJob -ScriptBlock $ScriptBlock -ArgumentList $ArgumentList
+    $cacheFile = Join-Path (Get-WingetBatchConfigDir) "package_cache.json"
+
+    if (-not (Test-Path $cacheFile)) {
+        return $null
     }
-    else {
-        return Start-Job -ScriptBlock $ScriptBlock -ArgumentList $ArgumentList
+
+    try {
+        $cache = Get-Content $cacheFile -Raw | ConvertFrom-Json
+        $packageCache = $cache.PSObject.Properties[$PackageId]
+
+        if ($packageCache) {
+            $cachedDate = [DateTime]$packageCache.CachedDate
+            $daysSinceCached = ((Get-Date) - $cachedDate).TotalDays
+
+            if ($daysSinceCached -lt 30) {
+                return $packageCache.Details
+            }
+        }
+    }
+    catch {
+        # Ignore cache read errors
+    }
+
+    return $null
+}
+
+# EndRegion
+
+# Region: Private/Get-WingetBatchConfigDir.ps1
+function Get-WingetBatchConfigDir {
+    <#
+    .SYNOPSIS
+        Get the configuration directory path.
+
+    .DESCRIPTION
+        Internal function to get the path to the .wingetbatch configuration directory.
+    #>
+    if ($env:USERPROFILE) {
+        $homeDir = $env:USERPROFILE
+    } else {
+        $homeDir = $HOME
+    }
+    return Join-Path $homeDir ".wingetbatch"
+}
+
+# EndRegion
+
+# Region: Private/Get-WingetBatchGitHubToken.ps1
+function Get-WingetBatchGitHubToken {
+    <#
+    .SYNOPSIS
+        Retrieve the stored GitHub token.
+
+    .DESCRIPTION
+        Internal function to get the stored GitHub token for API authentication.
+        Handles both secure CliXml and legacy plaintext formats with automatic migration.
+
+    .OUTPUTS
+        String - The GitHub token if found, otherwise $null
+    #>
+
+    [CmdletBinding()]
+    param()
+
+    $configDir = Get-WingetBatchConfigDir
+    $tokenFile = Join-Path $configDir "github_token.clixml"
+    $legacyFile = Join-Path $configDir "github_token.txt"
+
+    # 1. Try to load from secure storage
+    if (Test-Path $tokenFile) {
+        try {
+            $SecureToken = Import-Clixml -Path $tokenFile -ErrorAction Stop
+            if ($SecureToken -is [System.Security.SecureString]) {
+                return [System.Net.NetworkCredential]::new("", $SecureToken).Password
+            }
+        }
+        catch {
+            # If clixml is corrupted or not a SecureString, we'll try legacy as fallback
+        }
+    }
+
+    # 2. Migration: Try legacy plaintext storage
+    if (Test-Path $legacyFile) {
+        try {
+            $Token = (Get-Content $legacyFile -Raw).Trim()
+            if (-not [string]::IsNullOrWhiteSpace($Token)) {
+                # Silently migrate to secure format
+                Set-WingetBatchGitHubToken -Token $Token | Out-Null
+                return $Token
+            }
+        }
+        catch {
+            return $null
+        }
+    }
+
+    return $null
+}
+
+# EndRegion
+
+# Region: Private/Parse-WingetShowOutput.ps1
+function Parse-WingetShowOutput {
+    <#
+    .SYNOPSIS
+        Internal helper to parse 'winget show' output into a structured hashtable.
+    #>
+    param(
+        [string]$Output,
+        [string]$PackageId
+    )
+
+    $info = @{
+        Id = $PackageId
+        Version = $null
+        Publisher = $null
+        PublisherName = $null
+        PublisherUrl = $null
+        PublisherGitHub = $null
+        Author = $null
+        Homepage = $null
+        Description = $null
+        Category = $null
+        Tags = @()
+        License = $null
+        LicenseUrl = $null
+        Copyright = $null
+        CopyrightUrl = $null
+        PrivacyUrl = $null
+        PackageUrl = $null
+        ReleaseNotes = $null
+        ReleaseNotesUrl = $null
+        Installer = $null
+        Pricing = $null
+        StoreLicense = $null
+        FreeTrial = $null
+        AgeRating = $null
+        Moniker = $null
+    }
+
+    # Optimized parsing: Replace sequential regex matching with O(1) string operations and switch
+    # This significantly reduces CPU usage when parsing many packages in parallel
+    foreach ($line in $Output -split "`n") {
+        $colonIndex = $line.IndexOf(':')
+
+        if ($colonIndex -gt 0) {
+            # Extract key and value efficiently
+            $key = $line.Substring(0, $colonIndex).Trim()
+            $value = $line.Substring($colonIndex + 1).Trim()
+
+            switch ($key) {
+                'Version' { $info.Version = $value }
+                'Publisher' {
+                    $info.PublisherName = $value
+                    $info.Publisher = $value
+                }
+                'Publisher Url' {
+                    $info.PublisherUrl = $value
+                    # Check if it's a GitHub URL
+                    if ($value -match 'github\.com/([^/]+)') {
+                        $info.PublisherGitHub = $value
+                    }
+                }
+                'Author' { $info.Author = $value }
+                'Homepage' { $info.Homepage = $value }
+                'Description' { $info.Description = $value }
+                'Category' { $info.Category = $value }
+                'Tags' { $info.Tags = $value -split ',\s*' }
+                'License' { $info.License = $value }
+                'License Url' { $info.LicenseUrl = $value }
+                'Copyright' { $info.Copyright = $value }
+                'Copyright Url' { $info.CopyrightUrl = $value }
+                'Privacy Url' { $info.PrivacyUrl = $value }
+                'Package Url' { $info.PackageUrl = $value }
+                'Release Notes' { $info.ReleaseNotes = $value }
+                'Release Notes Url' { $info.ReleaseNotesUrl = $value }
+                'Installer Type' { $info.Installer = $value }
+                'Pricing' { $info.Pricing = $value }
+                'Store License' { $info.StoreLicense = $value }
+                'Free Trial' { $info.FreeTrial = $value }
+                'Age Rating' { $info.AgeRating = $value }
+                'Moniker' { $info.Moniker = $value }
+            }
+        }
+    }
+
+    return $info
+}
+
+# EndRegion
+
+# Region: Private/Set-PackageDetailsCache.ps1
+function Set-PackageDetailsCache {
+    <#
+    .SYNOPSIS
+        Store package details in cache.
+
+    .DESCRIPTION
+        Internal function to cache package details to JSON file with 30-day TTL.
+    #>
+
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$PackageId,
+
+        [Parameter(Mandatory=$true)]
+        [hashtable]$Details
+    )
+
+    $configDir = Get-WingetBatchConfigDir
+    $cacheFile = Join-Path $configDir "package_cache.json"
+
+    # Create config directory if it doesn't exist
+    if (-not (Test-Path $configDir)) {
+        New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+    }
+
+    # Load existing cache or create new
+    $cache = @{}
+    if (Test-Path $cacheFile) {
+        try {
+            $cacheJson = Get-Content $cacheFile -Raw | ConvertFrom-Json
+            # Convert PSCustomObject to hashtable
+            $cacheJson.PSObject.Properties | ForEach-Object {
+                $cache[$_.Name] = $_.Value
+            }
+        }
+        catch {
+            # Start fresh if cache is corrupt
+        }
+    }
+
+    # Add/update package entry
+    $cache[$PackageId] = @{
+        CachedDate = (Get-Date).ToString('o')
+        Details = $Details
+    }
+
+    # Save cache
+    try {
+        $jsonContent = $cache | ConvertTo-Json -Depth 10 -Compress:$false
+        [System.IO.File]::WriteAllText($cacheFile, $jsonContent, [System.Text.Encoding]::UTF8)
+    }
+    catch {
+        Write-Verbose "Failed to write package cache: $_"
     }
 }
 
+# EndRegion
+
+# Region: Private/Show-WingetPackageDetails.ps1
+function Show-WingetPackageDetails {
+    param(
+        [string[]]$PackageIds,
+        [hashtable]$DetailsMap,
+        [array]$FallbackInfo = @(),
+        [hashtable]$FallbackMap = @{}
+    )
+
+    Write-Host ("=" * 80) -ForegroundColor Cyan
+    Write-Host "📦 SELECTED PACKAGES - DETAILED INFORMATION" -ForegroundColor Cyan
+    Write-Host ("=" * 80) -ForegroundColor Cyan
+    Write-Host ""
+
+    foreach ($pkgId in $PackageIds) {
+        $details = $DetailsMap[$pkgId]
+        # Try to find fallback info from the original search results if available
+        $pkgInfo = if ($FallbackMap.Count -gt 0) { $FallbackMap[$pkgId] } else { $null }
+
+        if (-not $pkgInfo) {
+            $pkgInfo = $FallbackInfo | Where-Object { $_.Name -eq $pkgId -or $_.Id -eq $pkgId } | Select-Object -First 1
+        }
+
+        # Determine package name for header
+        $pkgName = if ($details.Name) { $details.Name } elseif ($pkgInfo.Name) { $pkgInfo.Name } else { $null }
+        $headerText = if ($pkgName -and $pkgName -ne $pkgId) { "$pkgName ($pkgId)" } else { $pkgId }
+
+        Write-Host "▶ " -ForegroundColor Yellow -NoNewline
+        Write-Host " $headerText " -ForegroundColor White -BackgroundColor DarkBlue
+        Write-Host ""
+
+        # Description (The "blurb")
+        if ($details.Description) {
+            Write-Host "  ℹ️  Description: " -ForegroundColor DarkGray -NoNewline
+            Write-Host $details.Description -ForegroundColor Gray
+            Write-Host ""
+        }
+
+        # --- Basic Info ---
+        # Version
+        if ($details.Version -or ($pkgInfo -and $pkgInfo.Version)) {
+            Write-Host "  🔖 Version:     " -ForegroundColor DarkGray -NoNewline
+            $ver = if ($details.Version) { $details.Version } else { $pkgInfo.Version }
+            Write-Host $ver -ForegroundColor Green
+        }
+
+        # Source
+        if ($pkgInfo -and $pkgInfo.Source -and $pkgInfo.Source -ne "Unknown") {
+            Write-Host "  💾 Source:      " -ForegroundColor DarkGray -NoNewline
+            $sColor = if ($pkgInfo.Source -match 'msstore') { "Magenta" } else { "Cyan" }
+            Write-Host $pkgInfo.Source -ForegroundColor $sColor
+        }
+
+        # Category
+        if ($details.Category) {
+            Write-Host "  📂 Category:    " -ForegroundColor DarkGray -NoNewline
+            Write-Host $details.Category -ForegroundColor Cyan
+        }
+
+        # Source
+        if ($pkgInfo -and $pkgInfo.Source) {
+            Write-Host "  💾 Source:      " -ForegroundColor DarkGray -NoNewline
+            $sColor = "Cyan"
+            if ($pkgInfo.Source -match 'msstore') { $sColor = "Magenta" }
+            Write-Host $pkgInfo.Source -ForegroundColor $sColor
+        }
+
+        # Pricing & Free Trial
+        if ($details.Pricing) {
+            Write-Host "  💰 Pricing:     " -ForegroundColor DarkGray -NoNewline
+            Write-Host $details.Pricing -ForegroundColor Green -NoNewline
+
+            if ($details.FreeTrial) {
+                Write-Host " (Free Trial Available)" -ForegroundColor Green
+            } else {
+                Write-Host ""
+            }
+        }
+
+        # Age Rating
+        if ($details.AgeRating) {
+            Write-Host "  🔞 Age Rating:  " -ForegroundColor DarkGray -NoNewline
+            Write-Host $details.AgeRating -ForegroundColor White
+        }
+
+        Write-Host ""
+
+        # --- Publisher Info ---
+        # Publisher
+        if ($details.PublisherName -or $details.Publisher) {
+            Write-Host "  🏢 Publisher:   " -ForegroundColor DarkGray -NoNewline
+            $pub = if ($details.PublisherName) { $details.PublisherName } else { $details.Publisher }
+            Write-Host $pub -ForegroundColor White
+        }
+
+        # Author
+        if ($details.Author) {
+            Write-Host "  👤 Author:      " -ForegroundColor DarkGray -NoNewline
+            Write-Host $details.Author -ForegroundColor White
+        }
+
+        # Copyright
+        if ($details.Copyright) {
+            Write-Host "  ©️  Copyright:   " -ForegroundColor DarkGray -NoNewline
+            Write-Host $details.Copyright -ForegroundColor Gray
+        }
+
+        if ($details.PublisherName -or $details.Publisher -or $details.Author -or $details.Copyright) {
+             Write-Host ""
+        }
+
+        # --- Tech Info ---
+        # Installer Type & Moniker
+        if ($details.Installer) {
+            Write-Host "  💿 Installer:   " -ForegroundColor DarkGray -NoNewline
+            Write-Host $details.Installer -ForegroundColor Cyan -NoNewline
+            if ($details.Moniker) {
+                Write-Host " (command: " -ForegroundColor DarkGray -NoNewline
+                Write-Host $details.Moniker -ForegroundColor Yellow -NoNewline
+                Write-Host ")" -ForegroundColor DarkGray
+            }
+            Write-Host ""
+        }
+
+        # Tags
+        if ($details.Tags -and $details.Tags.Count -gt 0) {
+            Write-Host "  🏷️  Tags:        " -ForegroundColor DarkGray -NoNewline
+            Write-Host ($details.Tags -join ", ") -ForegroundColor Yellow
+            Write-Host ""
+        }
+
+        # --- Links ---
+        $links = [System.Collections.Generic.List[PSCustomObject]]::new()
+        if ($details.Homepage) { $links.Add([PSCustomObject]@{ Label="Homepage"; Url=$details.Homepage; Color="Blue" }) }
+        if ($details.PublisherGitHub) { $links.Add([PSCustomObject]@{ Label="Source"; Url=$details.PublisherGitHub; Color="Magenta" }) }
+        elseif ($details.PublisherUrl) { $links.Add([PSCustomObject]@{ Label="Publisher"; Url=$details.PublisherUrl; Color="Blue" }) }
+
+        if ($details.ReleaseNotesUrl) { $links.Add([PSCustomObject]@{ Label="Release Notes"; Url=$details.ReleaseNotesUrl; Color="Blue" }) }
+        if ($details.LicenseUrl) { $links.Add([PSCustomObject]@{ Label="License"; Url=$details.LicenseUrl; Color="Blue" }) }
+        if ($details.PrivacyUrl) { $links.Add([PSCustomObject]@{ Label="Privacy"; Url=$details.PrivacyUrl; Color="Blue" }) }
+        if ($details.PackageUrl) { $links.Add([PSCustomObject]@{ Label="Package"; Url=$details.PackageUrl; Color="Blue" }) }
+
+        if ($links.Count -gt 0) {
+            Write-Host "  🔗 Links:" -ForegroundColor Cyan
+            foreach ($link in $links) {
+                # Determine icon
+                $icon = switch ($link.Label) {
+                    "Homepage"      { "🏠" }
+                    "Source"        { "💾" }
+                    "Publisher"     { "🏢" }
+                    "Release Notes" { "📝" }
+                    "License"       { "⚖️" }
+                    "Privacy"       { "🔒" }
+                    "Package"       { "📦" }
+                    Default         { "• " }
+                }
+
+                # Align manually (max label length + 2)
+                $padLen = 15 - $link.Label.Length
+                if ($padLen -lt 0) { $padLen = 0 }
+                $padding = " " * $padLen
+                Write-Host "     $icon $($link.Label):$padding" -ForegroundColor DarkGray -NoNewline
+                Write-Host $link.Url -ForegroundColor $link.Color
+            }
+            Write-Host ""
+        }
+
+        # License (Text)
+        if ($details.License) {
+            Write-Host "  ⚖️  License:     " -ForegroundColor DarkGray -NoNewline
+            Write-Host $details.License -ForegroundColor White
+            Write-Host ""
+        }
+
+        # Installation Command
+        Write-Host "  💻 Command:     " -ForegroundColor DarkGray -NoNewline
+        Write-Host "winget install --id `"$pkgId`" -e" -ForegroundColor Cyan
+        Write-Host ""
+    }
+
+    Write-Host ("=" * 80) -ForegroundColor Cyan
+    Write-Host ""
+}
+
+# EndRegion
+
+# Region: Private/Start-PackageDetailJobs.ps1
 function Start-PackageDetailJobs {
     param(
         [string[]]$PackageIds,
@@ -685,189 +624,415 @@ function Start-PackageDetailJobs {
     return $jobs, $jobPackageMap
 }
 
-function Show-WingetPackageDetails {
+# EndRegion
+
+# Region: Private/Start-WingetBatchJob.ps1
+function Start-WingetBatchJob {
+    <#
+    .SYNOPSIS
+        Internal helper to start a job using Start-ThreadJob if available, otherwise Start-Job.
+    #>
+    [CmdletBinding()]
     param(
-        [string[]]$PackageIds,
-        [hashtable]$DetailsMap,
-        [array]$FallbackInfo = @(),
-        [hashtable]$FallbackMap = @{}
+        [ScriptBlock]$ScriptBlock,
+        [Object[]]$ArgumentList
     )
 
-    Write-Host ("=" * 80) -ForegroundColor Cyan
-    Write-Host "ðŸ“¦ SELECTED PACKAGES - DETAILED INFORMATION" -ForegroundColor Cyan
-    Write-Host ("=" * 80) -ForegroundColor Cyan
-    Write-Host ""
-
-    foreach ($pkgId in $PackageIds) {
-        $details = $DetailsMap[$pkgId]
-        # Try to find fallback info from the original search results if available
-        $pkgInfo = if ($FallbackMap.Count -gt 0) { $FallbackMap[$pkgId] } else { $null }
-
-        if (-not $pkgInfo) {
-            $pkgInfo = $FallbackInfo | Where-Object { $_.Name -eq $pkgId -or $_.Id -eq $pkgId } | Select-Object -First 1
-        }
-
-        # Determine package name for header
-        $pkgName = if ($details.Name) { $details.Name } elseif ($pkgInfo.Name) { $pkgInfo.Name } else { $null }
-        $headerText = if ($pkgName -and $pkgName -ne $pkgId) { "$pkgName ($pkgId)" } else { $pkgId }
-
-        Write-Host "â–¶ " -ForegroundColor Yellow -NoNewline
-        Write-Host " $headerText " -ForegroundColor White -BackgroundColor DarkBlue
-        Write-Host ""
-
-        # Description (The "blurb")
-        if ($details.Description) {
-            Write-Host "  â„¹ï¸  Description: " -ForegroundColor DarkGray -NoNewline
-            Write-Host $details.Description -ForegroundColor Gray
-            Write-Host ""
-        }
-
-        # --- Basic Info ---
-        # Version
-        if ($details.Version -or ($pkgInfo -and $pkgInfo.Version)) {
-            Write-Host "  ðŸ”– Version:     " -ForegroundColor DarkGray -NoNewline
-            $ver = if ($details.Version) { $details.Version } else { $pkgInfo.Version }
-            Write-Host $ver -ForegroundColor White
-        }
-
-        # Source
-        if ($pkgInfo -and $pkgInfo.Source -and $pkgInfo.Source -ne "Unknown") {
-            Write-Host "  💾 Source:      " -ForegroundColor DarkGray -NoNewline
-            $sColor = if ($pkgInfo.Source -match 'msstore') { "Magenta" } else { "Cyan" }
-            Write-Host $pkgInfo.Source -ForegroundColor $sColor
-        }
-
-        # Category
-        if ($details.Category) {
-            Write-Host "  ðŸ“‚ Category:    " -ForegroundColor DarkGray -NoNewline
-            Write-Host $details.Category -ForegroundColor Yellow
-        }
-
-        # Source
-        if ($pkgInfo -and $pkgInfo.Source) {
-            Write-Host "  💾 Source:      " -ForegroundColor DarkGray -NoNewline
-            $sColor = "Cyan"
-            if ($pkgInfo.Source -match 'msstore') { $sColor = "Magenta" }
-            Write-Host $pkgInfo.Source -ForegroundColor $sColor
-        }
-
-        # Pricing & Free Trial
-        if ($details.Pricing) {
-            Write-Host "  ðŸ’° Pricing:     " -ForegroundColor DarkGray -NoNewline
-            Write-Host $details.Pricing -ForegroundColor Green -NoNewline
-
-            if ($details.FreeTrial) {
-                Write-Host " (Free Trial Available)" -ForegroundColor Green
-            } else {
-                Write-Host ""
-            }
-        }
-
-        # Age Rating
-        if ($details.AgeRating) {
-            Write-Host "  ðŸ”ž Age Rating:  " -ForegroundColor DarkGray -NoNewline
-            Write-Host $details.AgeRating -ForegroundColor White
-        }
-
-        Write-Host ""
-
-        # --- Publisher Info ---
-        # Publisher
-        if ($details.PublisherName -or $details.Publisher) {
-            Write-Host "  ðŸ¢ Publisher:   " -ForegroundColor DarkGray -NoNewline
-            $pub = if ($details.PublisherName) { $details.PublisherName } else { $details.Publisher }
-            Write-Host $pub -ForegroundColor White
-        }
-
-        # Author
-        if ($details.Author) {
-            Write-Host "  ðŸ‘¤ Author:      " -ForegroundColor DarkGray -NoNewline
-            Write-Host $details.Author -ForegroundColor White
-        }
-
-        # Copyright
-        if ($details.Copyright) {
-            Write-Host "  Â©ï¸  Copyright:   " -ForegroundColor DarkGray -NoNewline
-            Write-Host $details.Copyright -ForegroundColor Gray
-        }
-
-        if ($details.PublisherName -or $details.Publisher -or $details.Author -or $details.Copyright) {
-             Write-Host ""
-        }
-
-        # --- Tech Info ---
-        # Installer Type & Moniker
-        if ($details.Installer) {
-            Write-Host "  ðŸ’¿ Installer:   " -ForegroundColor DarkGray -NoNewline
-            Write-Host $details.Installer -ForegroundColor Cyan -NoNewline
-            if ($details.Moniker) {
-                Write-Host " (command: " -ForegroundColor DarkGray -NoNewline
-                Write-Host $details.Moniker -ForegroundColor Yellow -NoNewline
-                Write-Host ")" -ForegroundColor DarkGray
-            }
-            Write-Host ""
-        }
-
-        # Tags
-        if ($details.Tags -and $details.Tags.Count -gt 0) {
-            Write-Host "  ðŸ·ï¸  Tags:        " -ForegroundColor DarkGray -NoNewline
-            Write-Host ($details.Tags -join ", ") -ForegroundColor Yellow
-            Write-Host ""
-        }
-
-        # --- Links ---
-        $links = [System.Collections.Generic.List[PSCustomObject]]::new()
-        if ($details.Homepage) { $links.Add([PSCustomObject]@{ Label="Homepage"; Url=$details.Homepage; Color="Blue" }) }
-        if ($details.PublisherGitHub) { $links.Add([PSCustomObject]@{ Label="Source"; Url=$details.PublisherGitHub; Color="Magenta" }) }
-        elseif ($details.PublisherUrl) { $links.Add([PSCustomObject]@{ Label="Publisher"; Url=$details.PublisherUrl; Color="Blue" }) }
-
-        if ($details.ReleaseNotesUrl) { $links.Add([PSCustomObject]@{ Label="Release Notes"; Url=$details.ReleaseNotesUrl; Color="Blue" }) }
-        if ($details.LicenseUrl) { $links.Add([PSCustomObject]@{ Label="License"; Url=$details.LicenseUrl; Color="Blue" }) }
-        if ($details.PrivacyUrl) { $links.Add([PSCustomObject]@{ Label="Privacy"; Url=$details.PrivacyUrl; Color="Blue" }) }
-        if ($details.PackageUrl) { $links.Add([PSCustomObject]@{ Label="Package"; Url=$details.PackageUrl; Color="Blue" }) }
-
-        if ($links.Count -gt 0) {
-            Write-Host "  ðŸ”— Links:" -ForegroundColor Cyan
-            foreach ($link in $links) {
-                # Determine icon
-                $icon = switch ($link.Label) {
-                    "Homepage"      { "ðŸ " }
-                    "Source"        { "ðŸ’¾" }
-                    "Publisher"     { "ðŸ¢" }
-                    "Release Notes" { "ðŸ“" }
-                    "License"       { "âš–ï¸" }
-                    "Privacy"       { "ðŸ”’" }
-                    "Package"       { "ðŸ“¦" }
-                    Default         { "â€¢ " }
-                }
-
-                # Align manually (max label length + 2)
-                $padLen = 15 - $link.Label.Length
-                if ($padLen -lt 0) { $padLen = 0 }
-                $padding = " " * $padLen
-                Write-Host "     $icon $($link.Label):$padding" -ForegroundColor DarkGray -NoNewline
-                Write-Host $link.Url -ForegroundColor $link.Color
-            }
-            Write-Host ""
-        }
-
-        # License (Text)
-        if ($details.License) {
-            Write-Host "  âš–ï¸  License:     " -ForegroundColor DarkGray -NoNewline
-            Write-Host $details.License -ForegroundColor White
-            Write-Host ""
-        }
-
-        # Installation Command
-        Write-Host "  ðŸ’» Command:     " -ForegroundColor DarkGray -NoNewline
-        Write-Host "winget install --id `"$pkgId`" -e" -ForegroundColor Cyan
-        Write-Host ""
+    if (Get-Command Start-ThreadJob -ErrorAction SilentlyContinue) {
+        return Start-ThreadJob -ScriptBlock $ScriptBlock -ArgumentList $ArgumentList
     }
-
-    Write-Host ("=" * 80) -ForegroundColor Cyan
-    Write-Host ""
+    else {
+        return Start-Job -ScriptBlock $ScriptBlock -ArgumentList $ArgumentList
+    }
 }
 
+# EndRegion
+
+# Region: Private/Start-WingetUpdateCheck.ps1
+function Start-WingetUpdateCheck {
+    <#
+    .SYNOPSIS
+        Internal function that runs the update check and displays notifications.
+
+    .DESCRIPTION
+        This function is called automatically from your PowerShell profile.
+        It checks if updates are available and displays a notification.
+    #>
+
+    [CmdletBinding()]
+    param()
+
+    $configDir = Get-WingetBatchConfigDir
+    $configFile = Join-Path $configDir "config.json"
+    $cacheFile = Join-Path $configDir "update_cache.json"
+
+    # Check if notifications are enabled
+    if (-not (Test-Path $configFile)) {
+        return
+    }
+
+    $config = Get-Content $configFile | ConvertFrom-Json
+
+    if (-not $config.UpdateNotificationsEnabled) {
+        return
+    }
+
+    # Check if we should run based on interval
+    $shouldCheck = $false
+
+    if ($config.CheckOnStartup -and -not $config.LastCheck) {
+        $shouldCheck = $true
+    }
+    elseif ($config.LastCheck) {
+        $lastCheck = [DateTime]::Parse($config.LastCheck)
+        $hoursSinceCheck = ((Get-Date) - $lastCheck).TotalHours
+
+        if ($config.CheckInterval -gt 0 -and $hoursSinceCheck -ge $config.CheckInterval) {
+            $shouldCheck = $true
+        }
+        elseif ($config.CheckOnStartup) {
+            $shouldCheck = $true
+        }
+    }
+    else {
+        $shouldCheck = $true
+    }
+
+    if (-not $shouldCheck) {
+        # Load cached results if available
+        if (Test-Path $cacheFile) {
+            $cache = Get-Content $cacheFile | ConvertFrom-Json
+            if ($cache.UpdateCount -gt 0) {
+                Write-Host ""
+                Write-Host "📦 " -NoNewline -ForegroundColor Cyan
+                Write-Host "$($cache.UpdateCount) winget package update(s) available" -ForegroundColor Yellow
+                Write-Host "   Run " -NoNewline -ForegroundColor DarkGray
+                Write-Host "Get-WingetUpdates" -NoNewline -ForegroundColor White
+                Write-Host " to view and install them" -ForegroundColor DarkGray
+            }
+        }
+        return
+    }
+
+    # Run check in background job
+    $job = Start-WingetBatchJob -ScriptBlock {
+        param($configDir, $cacheFile)
+
+        try {
+            # Get list of packages with updates available
+            $upgradeOutput = winget upgrade --disable-interactivity 2>&1 | Out-String
+            $upgradeLines = $upgradeOutput -split "`n"
+            $updatesAvailable = [System.Collections.Generic.List[Object]]::new()
+
+            $headerFound = $false
+            foreach ($line in $upgradeLines) {
+                if ($line -match '^-+') {
+                    $headerFound = $true
+                    continue
+                }
+
+                if ($headerFound -and $line.Trim() -ne '' -and $line -notmatch 'upgrades available') {
+                    # Extract package info
+                    if ($line -match '([A-Za-z0-9\.\-_]+\.[A-Za-z0-9\.\-_]+)') {
+                        $packageId = $matches[1].Trim()
+
+                        # Try to get version info
+                        if ($line -match '<\s*(.+?)\s*>') {
+                            $installedVer = $matches[1].Trim()
+                        }
+                        else {
+                            $installedVer = "Unknown"
+                        }
+
+                        $updatesAvailable.Add(@{
+                            Id = $packageId
+                            CurrentVersion = $installedVer
+                        })
+                    }
+                }
+            }
+
+            # Save cache
+            $cache = @{
+                UpdateCount = $updatesAvailable.Count
+                Updates = $updatesAvailable
+                LastChecked = (Get-Date).ToString('o')
+            }
+
+            $cache | ConvertTo-Json | Out-File -FilePath $cacheFile -Encoding UTF8 -Force
+
+            return $updatesAvailable.Count
+
+        }
+        catch {
+            return -1
+        }
+    } -ArgumentList $configDir, $cacheFile
+
+    # Update last check time
+    $config.LastCheck = (Get-Date).ToString('o')
+    $config | ConvertTo-Json | Out-File -FilePath $configFile -Encoding UTF8 -Force
+
+    # Wait briefly for job (non-blocking)
+    Wait-Job -Job $job -Timeout 10 | Out-Null
+
+    if ($job.State -eq 'Completed') {
+        $updateCount = Receive-Job -Job $job
+
+        if ($updateCount -gt 0) {
+            Write-Host ""
+            Write-Host "📦 " -NoNewline -ForegroundColor Cyan
+            Write-Host "$updateCount winget package update(s) available" -ForegroundColor Yellow
+            Write-Host "   Run " -NoNewline -ForegroundColor DarkGray
+            Write-Host "Get-WingetUpdates" -NoNewline -ForegroundColor White
+            Write-Host " to view and install them" -ForegroundColor DarkGray
+        }
+    }
+
+    Remove-Job -Job $job -Force
+}
+
+# EndRegion
+
+# Region: Private/Update-GitHubApiRequestCount.ps1
+function Update-GitHubApiRequestCount {
+    <#
+    .SYNOPSIS
+        Track GitHub API requests per hour.
+
+    .DESCRIPTION
+        Internal function to track and display GitHub API request usage.
+    #>
+
+    [CmdletBinding()]
+    param(
+        [Parameter()]
+        [int]$RequestCount = 1
+    )
+
+    $configDir = Get-WingetBatchConfigDir
+    $rateLimitFile = Join-Path $configDir "github_ratelimit.json"
+
+    # Create config directory if it doesn't exist
+    if (-not (Test-Path $configDir)) {
+        New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+    }
+
+    $now = Get-Date
+
+    # Load or create rate limit tracking data
+    if (Test-Path $rateLimitFile) {
+        try {
+            $jsonData = Get-Content $rateLimitFile -Raw | ConvertFrom-Json
+            $lastReset = [DateTime]$jsonData.LastReset
+
+            # Reset counter if more than 1 hour has passed
+            if (($now - $lastReset).TotalHours -ge 1) {
+                $rateLimitData = @{
+                    RequestCount = $RequestCount
+                    LastReset = $now.ToString('o')
+                }
+            }
+            else {
+                # Accumulate requests - ensure we're working with integers
+                $currentCount = [int]$jsonData.RequestCount
+                $rateLimitData = @{
+                    RequestCount = $currentCount + $RequestCount
+                    LastReset = $jsonData.LastReset
+                }
+            }
+        }
+        catch {
+            # If file is corrupt, create new
+            $rateLimitData = @{
+                RequestCount = $RequestCount
+                LastReset = $now.ToString('o')
+            }
+        }
+    }
+    else {
+        $rateLimitData = @{
+            RequestCount = $RequestCount
+            LastReset = $now.ToString('o')
+        }
+    }
+
+    # Save updated data - ensure JSON is written properly
+    $jsonContent = $rateLimitData | ConvertTo-Json -Compress:$false
+    [System.IO.File]::WriteAllText($rateLimitFile, $jsonContent, [System.Text.Encoding]::UTF8)
+
+    return [PSCustomObject]$rateLimitData
+}
+
+# EndRegion
+
+# Region: Public/Disable-WingetUpdateNotifications.ps1
+function Disable-WingetUpdateNotifications {
+    <#
+    .SYNOPSIS
+        Disable automatic winget update notifications.
+
+    .DESCRIPTION
+        Removes the update check from your PowerShell profile and disables notifications.
+
+    .EXAMPLE
+        Disable-WingetUpdateNotifications
+        Disables update notifications.
+    #>
+
+    [CmdletBinding()]
+    param()
+
+    $configDir = Get-WingetBatchConfigDir
+    $configFile = Join-Path $configDir "config.json"
+
+    # Update configuration
+    if (Test-Path $configFile) {
+        $config = Get-Content $configFile | ConvertFrom-Json
+        $config.UpdateNotificationsEnabled = $false
+        $config | ConvertTo-Json | Out-File -FilePath $configFile -Encoding UTF8 -Force
+    }
+
+    # Remove from profile
+    $profilePath = $PROFILE.CurrentUserAllHosts
+    if (Test-Path $profilePath) {
+        $profileContent = Get-Content $profilePath -Raw
+
+        # Remove the WingetBatch initialization block
+        $pattern = '(?s)# WingetBatch - Update Notifications.*?Start-WingetUpdateCheck\s*\}'
+        $newContent = $profileContent -replace $pattern, ''
+
+        $newContent | Out-File -FilePath $profilePath -Encoding UTF8 -Force
+    }
+
+    Write-Host "✓ Update notifications disabled" -ForegroundColor Green
+    Write-Host "  Restart your terminal for changes to take effect." -ForegroundColor DarkGray
+}
+
+# EndRegion
+
+# Region: Public/Enable-WingetUpdateNotifications.ps1
+function Enable-WingetUpdateNotifications {
+    <#
+    .SYNOPSIS
+        Enable automatic winget update notifications in your PowerShell profile.
+
+    .DESCRIPTION
+        Adds a background check to your PowerShell profile that monitors for winget package updates.
+        The check runs when you open a terminal and can optionally run on an interval.
+
+    .PARAMETER Interval
+        How often to check for updates (in hours). Default is 3 hours.
+        Set to 0 to only check when opening a new terminal.
+
+    .PARAMETER CheckOnStartup
+        Check for updates every time you open a terminal. Default is $true.
+
+    .EXAMPLE
+        Enable-WingetUpdateNotifications
+        Enables update notifications with default settings (check on startup and every 3 hours).
+
+    .EXAMPLE
+        Enable-WingetUpdateNotifications -Interval 6
+        Check every 6 hours instead of 3.
+
+    .EXAMPLE
+        Enable-WingetUpdateNotifications -Interval 0 -CheckOnStartup $true
+        Only check when opening a terminal, not on an interval.
+    #>
+
+    [CmdletBinding()]
+    param(
+        [Parameter()]
+        [int]$Interval = 3,
+
+        [Parameter()]
+        [bool]$CheckOnStartup = $true
+    )
+
+    $configDir = Get-WingetBatchConfigDir
+    $configFile = Join-Path $configDir "config.json"
+
+    # Create config directory if it doesn't exist
+    if (-not (Test-Path $configDir)) {
+        New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+    }
+
+    # Save configuration
+    $config = @{
+        UpdateNotificationsEnabled = $true
+        CheckInterval = $Interval
+        CheckOnStartup = $CheckOnStartup
+        LastCheck = $null
+    }
+
+    $config | ConvertTo-Json | Out-File -FilePath $configFile -Encoding UTF8 -Force
+
+    # Add to PowerShell profile
+    $profilePath = $PROFILE.CurrentUserAllHosts
+    if (-not (Test-Path $profilePath)) {
+        New-Item -ItemType File -Path $profilePath -Force | Out-Null
+    }
+
+    $profileContent = Get-Content $profilePath -Raw -ErrorAction SilentlyContinue
+
+    $initCode = @'
+
+# WingetBatch - Update Notifications
+if (Get-Module -ListAvailable -Name WingetBatch) {
+    Import-Module WingetBatch -ErrorAction SilentlyContinue
+    Start-WingetUpdateCheck
+}
+'@
+
+    if ($profileContent -notmatch 'Start-WingetUpdateCheck') {
+        Add-Content -Path $profilePath -Value $initCode
+        Write-Host "✓ Update notifications enabled!" -ForegroundColor Green
+        Write-Host "  Configuration saved to: $configFile" -ForegroundColor DarkGray
+        Write-Host "  Profile updated: $profilePath" -ForegroundColor DarkGray
+        Write-Host ""
+        Write-Host "Restart your terminal or run: " -NoNewline -ForegroundColor Cyan
+        Write-Host ". `$PROFILE" -ForegroundColor Yellow
+    }
+    else {
+        Write-Host "✓ Configuration updated!" -ForegroundColor Green
+        Write-Host "  Update notifications were already enabled in your profile." -ForegroundColor DarkGray
+    }
+}
+
+# EndRegion
+
+# Region: Public/Export-WingetBatchConfig.ps1
+function Export-WingetBatchConfig {
+    <#
+    .SYNOPSIS
+        Export WingetBatch configuration and caches.
+    
+    .DESCRIPTION
+        Compresses the user's ~/.wingetbatch directory into a zip archive.
+        This includes the GitHub token, rate limits, caches, and general configuration.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$Path
+    )
+    $configDir = Get-WingetBatchConfigDir
+    if (Test-Path $configDir) {
+        # Ensure path has .zip extension
+        if (-not $Path.EndsWith(".zip", [System.StringComparison]::OrdinalIgnoreCase)) {
+            $Path = "$Path.zip"
+        }
+        Compress-Archive -Path "$configDir\*" -DestinationPath $Path -Force
+        Write-Host "Exported WingetBatch configuration to $Path" -ForegroundColor Green
+    } else {
+        Write-Warning "No WingetBatch configuration found to export."
+    }
+}
+
+# EndRegion
+
+# Region: Public/Get-WingetNewPackages.ps1
 function Get-WingetNewPackages {
     <#
     .SYNOPSIS
@@ -930,7 +1095,10 @@ function Get-WingetNewPackages {
         [string]$GitHubToken,
 
         [Parameter()]
-        [string]$ExcludeTerm
+        [string]$ExcludeTerm,
+
+        [Parameter()]
+        [switch]$IWantToLiterallyInstallAllFuckingResults
     )
 
     # Ensure PwshSpectreConsole is available
@@ -1254,7 +1422,7 @@ function Get-WingetNewPackages {
         Write-Host "   (~$packagesPerJob packages per job)" -ForegroundColor DarkGray
 
         # Interactive selection using Spectre Console
-        if (Get-Module -Name PwshSpectreConsole) {
+        if ($IWantToLiterallyInstallAllFuckingResults -or (Get-Module -Name PwshSpectreConsole)) {
             Write-Host ""
 
             try {
@@ -1263,11 +1431,16 @@ function Get-WingetNewPackages {
                     "$($_.Name) (v$($_.Version))"
                 }
 
-                # Show multi-selection prompt (while jobs run in background)
-                $selectedChoices = Read-SpectreMultiSelection -Title "[cyan]Select packages to install (Space to toggle, Enter to confirm)[/]" `
-                    -Choices $choices `
-                    -PageSize 20 `
-                    -Color "Green"
+                if ($IWantToLiterallyInstallAllFuckingResults) {
+                    Write-Host "Aggressive Install Mode Activated! Selecting ALL packages..." -ForegroundColor Magenta
+                    $selectedChoices = $choices
+                } else {
+                    # Show multi-selection prompt (while jobs run in background)
+                    $selectedChoices = Read-SpectreMultiSelection -Title "[cyan]Select packages to install (Space to toggle, Enter to confirm)[/]" `
+                        -Choices $choices `
+                        -PageSize 20 `
+                        -Color "Green"
+                }
 
                 if ($selectedChoices.Count -gt 0) {
                     Write-Host "`nSelected " -ForegroundColor Green -NoNewline
@@ -1387,7 +1560,10 @@ function Get-WingetNewPackages {
 
                     # Ask user what to do next
                     $userChoice = $null
-                    if (Get-Module -Name PwshSpectreConsole) {
+                    if ($IWantToLiterallyInstallAllFuckingResults) {
+                        $userChoice = "Install selected packages"
+                    }
+                    elseif (Get-Module -Name PwshSpectreConsole) {
                         $userChoice = Read-SpectreSelection `
                             -Title "[yellow]What would you like to do?[/]" `
                             -Choices @("Install selected packages", "Go back and change selection", "Cancel") `
@@ -1639,762 +1815,9 @@ function Get-WingetNewPackages {
     }
 }
 
-function New-WingetBatchGitHubToken {
-    <#
-    .SYNOPSIS
-        Interactive helper to create and save a GitHub Personal Access Token.
+# EndRegion
 
-    .DESCRIPTION
-        Opens GitHub token creation page and guides you through the process.
-        Automatically saves the token once you paste it.
-
-    .EXAMPLE
-        New-WingetBatchGitHubToken
-        Opens GitHub and helps you create a token.
-
-    .LINK
-        https://github.com/settings/tokens
-    #>
-
-    [CmdletBinding()]
-    param()
-
-    Write-Host ""
-    Write-Host "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”" -ForegroundColor Cyan
-    Write-Host "ðŸ”‘ GitHub Token Setup Wizard" -ForegroundColor Green
-    Write-Host "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”" -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "I'll help you create a GitHub token to avoid API rate limits." -ForegroundColor White
-    Write-Host ""
-    Write-Host "Benefits:" -ForegroundColor Cyan
-    Write-Host "  â€¢ " -NoNewline -ForegroundColor DarkGray
-    Write-Host "60 requests/hour" -NoNewline -ForegroundColor Red
-    Write-Host " â†’ " -NoNewline -ForegroundColor DarkGray
-    Write-Host "5,000 requests/hour" -ForegroundColor Green
-    Write-Host "  â€¢ No special permissions needed" -ForegroundColor DarkGray
-    Write-Host "  â€¢ Free forever" -ForegroundColor DarkGray
-    Write-Host ""
-    Write-Host "Press Enter to open GitHub in your browser..." -ForegroundColor Yellow
-    $null = Read-Host
-
-    # Open GitHub token creation page
-    $tokenUrl = "https://github.com/settings/tokens/new?description=WingetBatch&scopes="
-    Start-Process $tokenUrl
-
-    Write-Host ""
-    Write-Host "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”" -ForegroundColor Cyan
-    Write-Host "ðŸ“‹ Follow these steps on GitHub:" -ForegroundColor Green
-    Write-Host "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”" -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "1. " -NoNewline -ForegroundColor Yellow
-    Write-Host "The token is already named 'WingetBatch'" -ForegroundColor White
-    Write-Host ""
-    Write-Host "2. " -NoNewline -ForegroundColor Yellow
-    Write-Host "Set expiration (or choose 'No expiration' for convenience)" -ForegroundColor White
-    Write-Host ""
-    Write-Host "3. " -NoNewline -ForegroundColor Yellow
-    Write-Host "DON'T check any permission boxes - none needed!" -ForegroundColor White
-    Write-Host ""
-    Write-Host "4. " -NoNewline -ForegroundColor Yellow
-    Write-Host "Click " -NoNewline -ForegroundColor White
-    Write-Host "'Generate token' " -NoNewline -ForegroundColor Green
-    Write-Host "at the bottom" -ForegroundColor White
-    Write-Host ""
-    Write-Host "5. " -NoNewline -ForegroundColor Yellow
-    Write-Host "COPY the token (starts with 'ghp_')" -ForegroundColor White
-    Write-Host ""
-    Write-Host "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”" -ForegroundColor Cyan
-    Write-Host ""
-
-    # Prompt for token
-    $secureInput = Read-Host "Paste your token here" -AsSecureString
-    $token = [System.Net.NetworkCredential]::new("", $secureInput).Password
-
-    if ([string]::IsNullOrWhiteSpace($token)) {
-        Write-Host ""
-        Write-Host "âŒ No token provided. Setup cancelled." -ForegroundColor Red
-        Write-Host "   Run this command again when you have your token." -ForegroundColor DarkGray
-        return
-    }
-
-    # Validate token format
-    if ($token -notmatch '^ghp_[a-zA-Z0-9]{36}$' -and $token -notmatch '^github_pat_[a-zA-Z0-9_]+$') {
-        Write-Host ""
-        Write-Host "âš ï¸  Warning: Token format doesn't look right." -ForegroundColor Yellow
-        Write-Host "   Expected format: ghp_xxxxxxxxxxxx or github_pat_xxxxxxxxxxxx" -ForegroundColor DarkGray
-        Write-Host ""
-        $continue = Read-Host "Continue anyway? (y/n)"
-        if ($continue -ne 'y') {
-            Write-Host "Setup cancelled." -ForegroundColor Yellow
-            return
-        }
-    }
-
-    # Test the token
-    Write-Host ""
-    Write-Host "Testing token..." -ForegroundColor Cyan
-    try {
-        $testUrl = "https://api.github.com/user"
-        $response = Invoke-RestMethod -Uri $testUrl -Headers @{
-            'Authorization' = "Bearer $token"
-            'User-Agent' = 'PowerShell-WingetBatch'
-        } -ErrorAction Stop
-
-        Write-Host "âœ“ Token is valid!" -ForegroundColor Green
-        Write-Host "  Authenticated as: " -NoNewline -ForegroundColor DarkGray
-        Write-Host $response.login -ForegroundColor White
-    }
-    catch {
-        Write-Host "âŒ Token test failed!" -ForegroundColor Red
-        Write-Host "   Error: $($_.Exception.Message)" -ForegroundColor DarkGray
-        Write-Host ""
-        $continue = Read-Host "Save token anyway? (y/n)"
-        if ($continue -ne 'y') {
-            Write-Host "Setup cancelled." -ForegroundColor Yellow
-            return
-        }
-    }
-
-    # Save token
-    Set-WingetBatchGitHubToken -Token $token
-
-    Write-Host ""
-    Write-Host "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”" -ForegroundColor Green
-    Write-Host "âœ“ Setup Complete!" -ForegroundColor Green
-    Write-Host "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”" -ForegroundColor Green
-    Write-Host ""
-    Write-Host "You can now use all WingetBatch commands without rate limits!" -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "Try: " -NoNewline -ForegroundColor DarkGray
-    Write-Host "Get-WingetNewPackages -Days 30" -ForegroundColor Yellow
-    Write-Host ""
-}
-
-function Set-WingetBatchGitHubToken {
-    <#
-    .SYNOPSIS
-        Set or update the GitHub Personal Access Token for API authentication.
-
-    .DESCRIPTION
-        Stores a GitHub token securely to avoid API rate limits when checking for new packages.
-        Without a token, you're limited to 60 requests/hour. With a token, you get 5,000 requests/hour.
-        The token is stored securely using PowerShell's Export-Clixml with SecureString.
-
-        For an interactive wizard, use New-WingetBatchGitHubToken instead.
-
-    .PARAMETER Token
-        Your GitHub Personal Access Token. Create one at https://github.com/settings/tokens
-        No special permissions are required.
-
-    .PARAMETER Remove
-        Remove the stored GitHub token.
-
-    .EXAMPLE
-        Set-WingetBatchGitHubToken -Token "ghp_xxxxxxxxxxxx"
-        Stores your GitHub token for future use.
-
-    .EXAMPLE
-        Set-WingetBatchGitHubToken -Remove
-        Removes the stored GitHub token.
-
-    .EXAMPLE
-        New-WingetBatchGitHubToken
-        Use the interactive wizard instead.
-
-    .LINK
-        https://github.com/settings/tokens
-    #>
-
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory=$true, ParameterSetName='Set')]
-        [string]$Token,
-
-        [Parameter(Mandatory=$true, ParameterSetName='Remove')]
-        [switch]$Remove
-    )
-
-    $configDir = Get-WingetBatchConfigDir
-    $tokenFile = Join-Path $configDir "github_token.clixml"
-    $legacyFile = Join-Path $configDir "github_token.txt"
-
-    if ($Remove) {
-        $removed = $false
-        if (Test-Path $tokenFile) {
-            Remove-Item $tokenFile -Force
-            $removed = $true
-        }
-        if (Test-Path $legacyFile) {
-            Remove-Item $legacyFile -Force
-            $removed = $true
-        }
-
-        if ($removed) {
-            Write-Host "âœ“ GitHub token removed successfully" -ForegroundColor Green
-        }
-        else {
-            Write-Host "No GitHub token found to remove" -ForegroundColor Yellow
-        }
-        return
-    }
-
-    # Create config directory if it doesn't exist
-    if (-not (Test-Path $configDir)) {
-        New-Item -ItemType Directory -Path $configDir -Force | Out-Null
-    }
-
-    # Store token securely
-    try {
-        $SecureToken = $Token | ConvertTo-SecureString -AsPlainText -Force
-        $SecureToken | Export-Clixml -Path $tokenFile
-
-        # Remove legacy plaintext file if it exists
-        if (Test-Path $legacyFile) {
-            Remove-Item $legacyFile -Force
-        }
-
-        Write-Host "âœ“ GitHub token saved securely!" -ForegroundColor Green
-        Write-Host "  Location: $tokenFile" -ForegroundColor DarkGray
-        Write-Host "  The token will now be used automatically for API requests." -ForegroundColor Cyan
-        Write-Host ""
-        Write-Host "  â„¹ Security Note:" -ForegroundColor Yellow
-        Write-Host "  â€¢ Token stored securely using PowerShell encryption (bound to your user account)" -ForegroundColor DarkGray
-        Write-Host "  â€¢ Only increases API rate limits - cannot modify repositories or access private data" -ForegroundColor DarkGray
-        Write-Host "  â€¢ Revoke anytime at: https://github.com/settings/tokens" -ForegroundColor DarkGray
-    }
-    catch {
-        Write-Host "âŒ Failed to save token securely: $($_.Exception.Message)" -ForegroundColor Red
-        throw
-    }
-}
-
-function Get-PackageDetailsCache {
-    <#
-    .SYNOPSIS
-        Retrieve cached package details.
-
-    .DESCRIPTION
-        Internal function to get cached package details from JSON file.
-        Cache expires after 30 days.
-    #>
-
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory=$true)]
-        [string]$PackageId
-    )
-
-    $cacheFile = Join-Path (Get-WingetBatchConfigDir) "package_cache.json"
-
-    if (-not (Test-Path $cacheFile)) {
-        return $null
-    }
-
-    try {
-        $cache = Get-Content $cacheFile -Raw | ConvertFrom-Json
-        $packageCache = $cache.PSObject.Properties[$PackageId]
-
-        if ($packageCache) {
-            $cachedDate = [DateTime]$packageCache.CachedDate
-            $daysSinceCached = ((Get-Date) - $cachedDate).TotalDays
-
-            if ($daysSinceCached -lt 30) {
-                return $packageCache.Details
-            }
-        }
-    }
-    catch {
-        # Ignore cache read errors
-    }
-
-    return $null
-}
-
-function Set-PackageDetailsCache {
-    <#
-    .SYNOPSIS
-        Store package details in cache.
-
-    .DESCRIPTION
-        Internal function to cache package details to JSON file with 30-day TTL.
-    #>
-
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory=$true)]
-        [string]$PackageId,
-
-        [Parameter(Mandatory=$true)]
-        [hashtable]$Details
-    )
-
-    $configDir = Get-WingetBatchConfigDir
-    $cacheFile = Join-Path $configDir "package_cache.json"
-
-    # Create config directory if it doesn't exist
-    if (-not (Test-Path $configDir)) {
-        New-Item -ItemType Directory -Path $configDir -Force | Out-Null
-    }
-
-    # Load existing cache or create new
-    $cache = @{}
-    if (Test-Path $cacheFile) {
-        try {
-            $cacheJson = Get-Content $cacheFile -Raw | ConvertFrom-Json
-            # Convert PSCustomObject to hashtable
-            $cacheJson.PSObject.Properties | ForEach-Object {
-                $cache[$_.Name] = $_.Value
-            }
-        }
-        catch {
-            # Start fresh if cache is corrupt
-        }
-    }
-
-    # Add/update package entry
-    $cache[$PackageId] = @{
-        CachedDate = (Get-Date).ToString('o')
-        Details = $Details
-    }
-
-    # Save cache
-    try {
-        $jsonContent = $cache | ConvertTo-Json -Depth 10 -Compress:$false
-        [System.IO.File]::WriteAllText($cacheFile, $jsonContent, [System.Text.Encoding]::UTF8)
-    }
-    catch {
-        Write-Verbose "Failed to write package cache: $_"
-    }
-}
-
-function Get-WingetBatchGitHubToken {
-    <#
-    .SYNOPSIS
-        Retrieve the stored GitHub token.
-
-    .DESCRIPTION
-        Internal function to get the stored GitHub token for API authentication.
-        Handles both secure CliXml and legacy plaintext formats with automatic migration.
-
-    .OUTPUTS
-        String - The GitHub token if found, otherwise $null
-    #>
-
-    [CmdletBinding()]
-    param()
-
-    $configDir = Get-WingetBatchConfigDir
-    $tokenFile = Join-Path $configDir "github_token.clixml"
-    $legacyFile = Join-Path $configDir "github_token.txt"
-
-    # 1. Try to load from secure storage
-    if (Test-Path $tokenFile) {
-        try {
-            $SecureToken = Import-Clixml -Path $tokenFile -ErrorAction Stop
-            if ($SecureToken -is [System.Security.SecureString]) {
-                return [System.Net.NetworkCredential]::new("", $SecureToken).Password
-            }
-        }
-        catch {
-            # If clixml is corrupted or not a SecureString, we'll try legacy as fallback
-        }
-    }
-
-    # 2. Migration: Try legacy plaintext storage
-    if (Test-Path $legacyFile) {
-        try {
-            $Token = (Get-Content $legacyFile -Raw).Trim()
-            if (-not [string]::IsNullOrWhiteSpace($Token)) {
-                # Silently migrate to secure format
-                Set-WingetBatchGitHubToken -Token $Token | Out-Null
-                return $Token
-            }
-        }
-        catch {
-            return $null
-        }
-    }
-
-    return $null
-}
-
-function Update-GitHubApiRequestCount {
-    <#
-    .SYNOPSIS
-        Track GitHub API requests per hour.
-
-    .DESCRIPTION
-        Internal function to track and display GitHub API request usage.
-    #>
-
-    [CmdletBinding()]
-    param(
-        [Parameter()]
-        [int]$RequestCount = 1
-    )
-
-    $configDir = Get-WingetBatchConfigDir
-    $rateLimitFile = Join-Path $configDir "github_ratelimit.json"
-
-    # Create config directory if it doesn't exist
-    if (-not (Test-Path $configDir)) {
-        New-Item -ItemType Directory -Path $configDir -Force | Out-Null
-    }
-
-    $now = Get-Date
-
-    # Load or create rate limit tracking data
-    if (Test-Path $rateLimitFile) {
-        try {
-            $jsonData = Get-Content $rateLimitFile -Raw | ConvertFrom-Json
-            $lastReset = [DateTime]$jsonData.LastReset
-
-            # Reset counter if more than 1 hour has passed
-            if (($now - $lastReset).TotalHours -ge 1) {
-                $rateLimitData = @{
-                    RequestCount = $RequestCount
-                    LastReset = $now.ToString('o')
-                }
-            }
-            else {
-                # Accumulate requests - ensure we're working with integers
-                $currentCount = [int]$jsonData.RequestCount
-                $rateLimitData = @{
-                    RequestCount = $currentCount + $RequestCount
-                    LastReset = $jsonData.LastReset
-                }
-            }
-        }
-        catch {
-            # If file is corrupt, create new
-            $rateLimitData = @{
-                RequestCount = $RequestCount
-                LastReset = $now.ToString('o')
-            }
-        }
-    }
-    else {
-        $rateLimitData = @{
-            RequestCount = $RequestCount
-            LastReset = $now.ToString('o')
-        }
-    }
-
-    # Save updated data - ensure JSON is written properly
-    $jsonContent = $rateLimitData | ConvertTo-Json -Compress:$false
-    [System.IO.File]::WriteAllText($rateLimitFile, $jsonContent, [System.Text.Encoding]::UTF8)
-
-    return [PSCustomObject]$rateLimitData
-}
-
-function Get-GitHubApiRequestCount {
-    <#
-    .SYNOPSIS
-        Get current GitHub API request count for this hour.
-
-    .DESCRIPTION
-        Returns the number of GitHub API requests made in the current hour.
-    #>
-
-    [CmdletBinding()]
-    param()
-
-    $rateLimitFile = Join-Path (Get-WingetBatchConfigDir) "github_ratelimit.json"
-
-    if (Test-Path $rateLimitFile) {
-        try {
-            $rateLimitData = Get-Content $rateLimitFile -Raw | ConvertFrom-Json
-            $lastReset = [DateTime]$rateLimitData.LastReset
-            $now = Get-Date
-
-            # If more than 1 hour has passed, return 0
-            if (($now - $lastReset).TotalHours -ge 1) {
-                return 0
-            }
-
-            return [int]$rateLimitData.RequestCount
-        }
-        catch {
-            return 0
-        }
-    }
-
-    return 0
-}
-
-function Enable-WingetUpdateNotifications {
-    <#
-    .SYNOPSIS
-        Enable automatic winget update notifications in your PowerShell profile.
-
-    .DESCRIPTION
-        Adds a background check to your PowerShell profile that monitors for winget package updates.
-        The check runs when you open a terminal and can optionally run on an interval.
-
-    .PARAMETER Interval
-        How often to check for updates (in hours). Default is 3 hours.
-        Set to 0 to only check when opening a new terminal.
-
-    .PARAMETER CheckOnStartup
-        Check for updates every time you open a terminal. Default is $true.
-
-    .EXAMPLE
-        Enable-WingetUpdateNotifications
-        Enables update notifications with default settings (check on startup and every 3 hours).
-
-    .EXAMPLE
-        Enable-WingetUpdateNotifications -Interval 6
-        Check every 6 hours instead of 3.
-
-    .EXAMPLE
-        Enable-WingetUpdateNotifications -Interval 0 -CheckOnStartup $true
-        Only check when opening a terminal, not on an interval.
-    #>
-
-    [CmdletBinding()]
-    param(
-        [Parameter()]
-        [int]$Interval = 3,
-
-        [Parameter()]
-        [bool]$CheckOnStartup = $true
-    )
-
-    $configDir = Get-WingetBatchConfigDir
-    $configFile = Join-Path $configDir "config.json"
-
-    # Create config directory if it doesn't exist
-    if (-not (Test-Path $configDir)) {
-        New-Item -ItemType Directory -Path $configDir -Force | Out-Null
-    }
-
-    # Save configuration
-    $config = @{
-        UpdateNotificationsEnabled = $true
-        CheckInterval = $Interval
-        CheckOnStartup = $CheckOnStartup
-        LastCheck = $null
-    }
-
-    $config | ConvertTo-Json | Out-File -FilePath $configFile -Encoding UTF8 -Force
-
-    # Add to PowerShell profile
-    $profilePath = $PROFILE.CurrentUserAllHosts
-    if (-not (Test-Path $profilePath)) {
-        New-Item -ItemType File -Path $profilePath -Force | Out-Null
-    }
-
-    $profileContent = Get-Content $profilePath -Raw -ErrorAction SilentlyContinue
-
-    $initCode = @'
-
-# WingetBatch - Update Notifications
-if (Get-Module -ListAvailable -Name WingetBatch) {
-    Import-Module WingetBatch -ErrorAction SilentlyContinue
-    Start-WingetUpdateCheck
-}
-'@
-
-    if ($profileContent -notmatch 'Start-WingetUpdateCheck') {
-        Add-Content -Path $profilePath -Value $initCode
-        Write-Host "âœ“ Update notifications enabled!" -ForegroundColor Green
-        Write-Host "  Configuration saved to: $configFile" -ForegroundColor DarkGray
-        Write-Host "  Profile updated: $profilePath" -ForegroundColor DarkGray
-        Write-Host ""
-        Write-Host "Restart your terminal or run: " -NoNewline -ForegroundColor Cyan
-        Write-Host ". `$PROFILE" -ForegroundColor Yellow
-    }
-    else {
-        Write-Host "âœ“ Configuration updated!" -ForegroundColor Green
-        Write-Host "  Update notifications were already enabled in your profile." -ForegroundColor DarkGray
-    }
-}
-
-function Disable-WingetUpdateNotifications {
-    <#
-    .SYNOPSIS
-        Disable automatic winget update notifications.
-
-    .DESCRIPTION
-        Removes the update check from your PowerShell profile and disables notifications.
-
-    .EXAMPLE
-        Disable-WingetUpdateNotifications
-        Disables update notifications.
-    #>
-
-    [CmdletBinding()]
-    param()
-
-    $configDir = Get-WingetBatchConfigDir
-    $configFile = Join-Path $configDir "config.json"
-
-    # Update configuration
-    if (Test-Path $configFile) {
-        $config = Get-Content $configFile | ConvertFrom-Json
-        $config.UpdateNotificationsEnabled = $false
-        $config | ConvertTo-Json | Out-File -FilePath $configFile -Encoding UTF8 -Force
-    }
-
-    # Remove from profile
-    $profilePath = $PROFILE.CurrentUserAllHosts
-    if (Test-Path $profilePath) {
-        $profileContent = Get-Content $profilePath -Raw
-
-        # Remove the WingetBatch initialization block
-        $pattern = '(?s)# WingetBatch - Update Notifications.*?Start-WingetUpdateCheck\s*\}'
-        $newContent = $profileContent -replace $pattern, ''
-
-        $newContent | Out-File -FilePath $profilePath -Encoding UTF8 -Force
-    }
-
-    Write-Host "âœ“ Update notifications disabled" -ForegroundColor Green
-    Write-Host "  Restart your terminal for changes to take effect." -ForegroundColor DarkGray
-}
-
-function Start-WingetUpdateCheck {
-    <#
-    .SYNOPSIS
-        Internal function that runs the update check and displays notifications.
-
-    .DESCRIPTION
-        This function is called automatically from your PowerShell profile.
-        It checks if updates are available and displays a notification.
-    #>
-
-    [CmdletBinding()]
-    param()
-
-    $configDir = Get-WingetBatchConfigDir
-    $configFile = Join-Path $configDir "config.json"
-    $cacheFile = Join-Path $configDir "update_cache.json"
-
-    # Check if notifications are enabled
-    if (-not (Test-Path $configFile)) {
-        return
-    }
-
-    $config = Get-Content $configFile | ConvertFrom-Json
-
-    if (-not $config.UpdateNotificationsEnabled) {
-        return
-    }
-
-    # Check if we should run based on interval
-    $shouldCheck = $false
-
-    if ($config.CheckOnStartup -and -not $config.LastCheck) {
-        $shouldCheck = $true
-    }
-    elseif ($config.LastCheck) {
-        $lastCheck = [DateTime]::Parse($config.LastCheck)
-        $hoursSinceCheck = ((Get-Date) - $lastCheck).TotalHours
-
-        if ($config.CheckInterval -gt 0 -and $hoursSinceCheck -ge $config.CheckInterval) {
-            $shouldCheck = $true
-        }
-        elseif ($config.CheckOnStartup) {
-            $shouldCheck = $true
-        }
-    }
-    else {
-        $shouldCheck = $true
-    }
-
-    if (-not $shouldCheck) {
-        # Load cached results if available
-        if (Test-Path $cacheFile) {
-            $cache = Get-Content $cacheFile | ConvertFrom-Json
-            if ($cache.UpdateCount -gt 0) {
-                Write-Host ""
-                Write-Host "ðŸ“¦ " -NoNewline -ForegroundColor Cyan
-                Write-Host "$($cache.UpdateCount) winget package update(s) available" -ForegroundColor Yellow
-                Write-Host "   Run " -NoNewline -ForegroundColor DarkGray
-                Write-Host "Get-WingetUpdates" -NoNewline -ForegroundColor White
-                Write-Host " to view and install them" -ForegroundColor DarkGray
-            }
-        }
-        return
-    }
-
-    # Run check in background job
-    $job = Start-WingetBatchJob -ScriptBlock {
-        param($configDir, $cacheFile)
-
-        try {
-            # Get list of packages with updates available
-            $upgradeOutput = winget upgrade --disable-interactivity 2>&1 | Out-String
-            $upgradeLines = $upgradeOutput -split "`n"
-            $updatesAvailable = [System.Collections.Generic.List[Object]]::new()
-
-            $headerFound = $false
-            foreach ($line in $upgradeLines) {
-                if ($line -match '^-+') {
-                    $headerFound = $true
-                    continue
-                }
-
-                if ($headerFound -and $line.Trim() -ne '' -and $line -notmatch 'upgrades available') {
-                    # Extract package info
-                    if ($line -match '([A-Za-z0-9\.\-_]+\.[A-Za-z0-9\.\-_]+)') {
-                        $packageId = $matches[1].Trim()
-
-                        # Try to get version info
-                        if ($line -match '<\s*(.+?)\s*>') {
-                            $installedVer = $matches[1].Trim()
-                        }
-                        else {
-                            $installedVer = "Unknown"
-                        }
-
-                        $updatesAvailable.Add(@{
-                            Id = $packageId
-                            CurrentVersion = $installedVer
-                        })
-                    }
-                }
-            }
-
-            # Save cache
-            $cache = @{
-                UpdateCount = $updatesAvailable.Count
-                Updates = $updatesAvailable
-                LastChecked = (Get-Date).ToString('o')
-            }
-
-            $cache | ConvertTo-Json | Out-File -FilePath $cacheFile -Encoding UTF8 -Force
-
-            return $updatesAvailable.Count
-
-        }
-        catch {
-            return -1
-        }
-    } -ArgumentList $configDir, $cacheFile
-
-    # Update last check time
-    $config.LastCheck = (Get-Date).ToString('o')
-    $config | ConvertTo-Json | Out-File -FilePath $configFile -Encoding UTF8 -Force
-
-    # Wait briefly for job (non-blocking)
-    Wait-Job -Job $job -Timeout 10 | Out-Null
-
-    if ($job.State -eq 'Completed') {
-        $updateCount = Receive-Job -Job $job
-
-        if ($updateCount -gt 0) {
-            Write-Host ""
-            Write-Host "ðŸ“¦ " -NoNewline -ForegroundColor Cyan
-            Write-Host "$updateCount winget package update(s) available" -ForegroundColor Yellow
-            Write-Host "   Run " -NoNewline -ForegroundColor DarkGray
-            Write-Host "Get-WingetUpdates" -NoNewline -ForegroundColor White
-            Write-Host " to view and install them" -ForegroundColor DarkGray
-        }
-    }
-
-    Remove-Job -Job $job -Force
-}
-
+# Region: Public/Get-WingetUpdates.ps1
 function Get-WingetUpdates {
     <#
     .SYNOPSIS
@@ -2480,7 +1903,7 @@ function Get-WingetUpdates {
     }
 
     if ($updatesAvailable.Count -eq 0) {
-        Write-Host "âœ“ All packages are up to date!" -ForegroundColor Green
+        Write-Host "✓ All packages are up to date!" -ForegroundColor Green
         return
     }
 
@@ -2529,12 +1952,12 @@ function Get-WingetUpdates {
                 winget upgrade --id $packageId --accept-package-agreements --accept-source-agreements
 
                 if ($LASTEXITCODE -eq 0) {
-                    Write-Host "âœ“ Successfully updated " -ForegroundColor Green -NoNewline
+                    Write-Host "✓ Successfully updated " -ForegroundColor Green -NoNewline
                     Write-Host $packageId -ForegroundColor White
                     $successCount++
                 }
                 else {
-                    Write-Host "âœ— Failed to update " -ForegroundColor Red -NoNewline
+                    Write-Host "✗ Failed to update " -ForegroundColor Red -NoNewline
                     Write-Host $packageId -ForegroundColor White
                     $failCount++
                 }
@@ -2558,7 +1981,7 @@ function Get-WingetUpdates {
             Write-Warning "Interactive selection error: $_"
             Write-Host "Packages with updates available:" -ForegroundColor Cyan
             $updatesAvailable | ForEach-Object {
-                Write-Host "  â€¢ $($_.Id)" -ForegroundColor White
+                Write-Host "  • $($_.Id)" -ForegroundColor White
             }
             Write-Host ""
             Write-Host "Use 'winget upgrade <PackageName>' to update manually." -ForegroundColor Yellow
@@ -2569,7 +1992,7 @@ function Get-WingetUpdates {
         # Fallback without interactive selection
         Write-Host "Packages with updates available:" -ForegroundColor Cyan
         $updatesAvailable | ForEach-Object {
-            Write-Host "  â€¢ $($_.Id)" -ForegroundColor White
+            Write-Host "  • $($_.Id)" -ForegroundColor White
         }
         Write-Host ""
         Write-Host "To update a package: " -ForegroundColor Cyan -NoNewline
@@ -2579,6 +2002,746 @@ function Get-WingetUpdates {
     }
 }
 
+# EndRegion
+
+# Region: Public/Import-WingetBatchConfig.ps1
+function Import-WingetBatchConfig {
+    <#
+    .SYNOPSIS
+        Import WingetBatch configuration and caches from a zip archive.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$Path
+    )
+    if (-not (Test-Path $Path)) {
+        Write-Error "Backup file not found at $Path"
+        return
+    }
+    $configDir = Get-WingetBatchConfigDir
+    if (-not (Test-Path $configDir)) {
+        New-Item -ItemType Directory -Path $configDir | Out-Null
+    }
+    Expand-Archive -Path $Path -DestinationPath $configDir -Force
+    Write-Host "Imported WingetBatch configuration from $Path" -ForegroundColor Green
+}
+
+# EndRegion
+
+# Region: Public/Install-WingetAll.ps1
+function Install-WingetAll {
+    <#
+    .SYNOPSIS
+        Search for winget packages and install all results.
+
+    .DESCRIPTION
+        Searches for packages matching the provided search term and automatically
+        installs all packages found in the search results.
+
+    .PARAMETER SearchTerm
+        The search term to find packages. Required.
+
+    .PARAMETER Silent
+        Skip the confirmation prompt and install immediately.
+
+    .PARAMETER WhatIf
+        Show what packages would be installed without actually installing them.
+
+    .EXAMPLE
+        Install-WingetAll "python"
+        Searches for "python" and installs all matching packages after confirmation.
+
+    .EXAMPLE
+        Install-WingetAll "nodejs" -Silent
+        Installs all nodejs packages without confirmation prompt.
+
+    .EXAMPLE
+        Install-WingetAll "python" -WhatIf
+        Shows what would be installed without actually installing.
+
+    .LINK
+        https://github.com/microsoft/winget-cli
+    #>
+
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true, Position=0, ValueFromPipeline=$true)]
+        [Alias('SearchTerm')]
+        [string[]]$SearchTerms,
+
+        [Parameter()]
+        [switch]$Silent,
+
+        [Parameter()]
+        [switch]$WhatIf
+    )
+
+    begin {
+        # Check if PwshSpectreConsole is available
+        if (-not (Get-Module -ListAvailable -Name PwshSpectreConsole)) {
+            Write-Warning "PwshSpectreConsole module not found. Installing..."
+            try {
+                Install-Module -Name PwshSpectreConsole -Scope CurrentUser -Force -SkipPublisherCheck
+                Import-Module PwshSpectreConsole
+            }
+            catch {
+                Write-Error "Failed to install PwshSpectreConsole. Interactive selection will not be available."
+                Write-Error $_
+            }
+        }
+        else {
+            Import-Module PwshSpectreConsole -ErrorAction SilentlyContinue
+        }
+
+        Write-Host "Searching for packages matching: " -ForegroundColor Cyan -NoNewline
+        Write-Host ($SearchTerms -join ", ") -ForegroundColor Yellow
+    }
+
+    process {
+        # Parse multiple search terms: handle both arrays (PowerShell comma list) and comma-separated strings
+        $searchQueries = $SearchTerms | ForEach-Object { $_ -split ',' } | Where-Object { $_ -ne '' }
+        $allPackages = [System.Collections.Generic.List[Object]]::new()
+
+        foreach ($query in $searchQueries) {
+            $query = $query.Trim()
+            if ([string]::IsNullOrWhiteSpace($query)) { continue }
+
+            Write-Host "Searching for: " -ForegroundColor Cyan -NoNewline
+            Write-Host $query -ForegroundColor Yellow
+
+            # Normalize query (collapse multiple spaces)
+            $searchWords = $query -split '\s+' | Where-Object { $_ -ne '' }
+            $normalizedQuery = $searchWords -join ' '
+
+            # Combine all search results from each word
+            $querySearchResults = [System.Collections.Generic.List[string]]::new()
+
+            try {
+                $wordResults = winget search $query --accept-source-agreements 2>&1
+
+                if ($LASTEXITCODE -eq 0 -and $null -ne $wordResults) {
+                    $querySearchResults.AddRange([string[]]$wordResults)
+                }
+            }
+            catch {
+                Write-Warning "Failed to search for query: $query"
+            }
+
+            if ($querySearchResults.Count -eq 0) {
+                continue
+            }
+
+            # Parse the search results to extract package IDs and Names
+            $lines = $querySearchResults
+            $queryPackages = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+            $headerFound = $false
+            $nameColEnd = -1
+            $idColStart = -1
+            $idColEnd = -1
+            $versionColStart = -1
+            $sourceColStart = -1
+            $matchColStart = -1
+
+            foreach ($line in $lines) {
+                # Find the header line to determine column positions
+                if ($line -match '^Name\s+Id\s+') {
+                    $nameColEnd = $line.IndexOf('Id') - 1
+                    $idColStart = $line.IndexOf('Id')
+
+                    # Reset
+                    $versionColStart = -1
+                    $sourceColStart = -1
+                    $matchColStart = -1
+
+                    # Find Version
+                    if ($line -match 'Version') {
+                        $idColEnd = $line.IndexOf('Version') - 1
+                        $versionColStart = $line.IndexOf('Version')
+                    } else {
+                        $idColEnd = $line.Length
+                    }
+
+                    # Find Match
+                    if ($line -match 'Match') {
+                        $matchColStart = $line.IndexOf('Match')
+                    }
+
+                    # Find Source
+                    if ($line -match 'Source') {
+                        $sourceColStart = $line.IndexOf('Source')
+                    }
+                    continue
+                }
+
+                # Skip until we find the header separator line (dashes)
+                if ($line -match '^-+') {
+                    $headerFound = $true
+                    continue
+                }
+
+                if ($headerFound -and $line.Trim() -ne '' -and $idColStart -gt 0 -and $line.Length -gt $idColStart) {
+                    # Extract the entire line for filtering and the ID
+                    $endPos = if ($idColEnd -lt $line.Length) { $idColEnd } else { $line.Length }
+                    $packageId = $line.Substring($idColStart, $endPos - $idColStart).Trim()
+
+                    # Extract Name
+                    $packageName = if ($nameColEnd -gt 0 -and $line.Length -gt $nameColEnd) {
+                        $line.Substring(0, $nameColEnd).Trim()
+                    } else {
+                        $packageId # Fallback
+                    }
+
+                    # Extract Version
+                    $packageVersion = "Unknown"
+                    if ($versionColStart -gt -1 -and $line.Length -gt $versionColStart) {
+                        $vEnd = $line.Length
+                        # If Match is present
+                        if ($matchColStart -gt $versionColStart) {
+                            $vEnd = $matchColStart
+                        }
+                        # If Source is present (and no Match or Match is after Source)
+                        elseif ($sourceColStart -gt $versionColStart) {
+                            $vEnd = $sourceColStart
+                        }
+
+                        if ($vEnd -gt $line.Length) { $vEnd = $line.Length }
+                        $packageVersion = $line.Substring($versionColStart, $vEnd - $versionColStart).Trim()
+                    }
+
+                    # Extract Source
+                    $packageSource = "Unknown"
+                    if ($sourceColStart -gt -1 -and $line.Length -gt $sourceColStart) {
+                        $packageSource = $line.Substring($sourceColStart).Trim()
+                    }
+
+                    # Only add if it looks like a valid package ID
+                    if ($packageId -and $packageId -match '^[A-Za-z0-9\.\-_]+$' -and $packageId -notmatch '^\d+\.\d+') {
+                        # If multiple search words, filter to only packages matching ALL words (case-insensitive)
+                        if ($searchWords.Count -gt 1) {
+                            $matchesAll = $true
+                            foreach ($word in $searchWords) {
+                                if ($line.IndexOf($word, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+                                    $matchesAll = $false
+                                    break
+                                }
+                            }
+                            if ($matchesAll) {
+                                $queryPackages.Add([PSCustomObject]@{
+                                    Id = $packageId
+                                    Name = $packageName
+                                    Version = $packageVersion
+                                    Source = $packageSource
+                                    SearchTerm = $query
+                                })
+                            }
+                        }
+                        else {
+                            $queryPackages.Add([PSCustomObject]@{
+                                Id = $packageId
+                                Name = $packageName
+                                Version = $packageVersion
+                                Source = $packageSource
+                                SearchTerm = $query
+                            })
+                        }
+                    }
+                }
+            }
+
+            # Deduplicate packages within this query based on Id (preserving order)
+            $seenIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+            $uniqueQueryPackages = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+            foreach ($pkg in $queryPackages) {
+                if ($seenIds.Add($pkg.Id)) {
+                    $uniqueQueryPackages.Add($pkg)
+                }
+            }
+            $allPackages.AddRange([array]$uniqueQueryPackages)
+        }
+
+        # Keep all packages (including potential duplicates across queries) for display
+        $foundPackages = $allPackages
+
+        # Build a lookup map for faster access to package details
+        $pkgMap = @{}
+        if ($null -ne $foundPackages) {
+            foreach ($pkg in $foundPackages) {
+                # Use the first encounter of a package ID to match original behavior of Select-Object -First 1
+                # Check for null Id to prevent hashtable errors and cast to string for safety
+                if ($null -ne $pkg.Id -and -not $pkgMap.ContainsKey([string]$pkg.Id)) {
+                    $pkgMap[[string]$pkg.Id] = $pkg
+                }
+            }
+        }
+
+        if ($foundPackages.Count -eq 0) {
+            Write-Warning "No packages found matching '$($SearchTerms -join ", ")'"
+            return
+        }
+
+        Write-Host "`nFound " -ForegroundColor Green -NoNewline
+        Write-Host "$($foundPackages.Count)" -ForegroundColor White -NoNewline
+        Write-Host " package(s)" -ForegroundColor Green
+
+        if ($WhatIf) {
+            Write-Host "`n[WhatIf] Would display interactive selection for:" -ForegroundColor Yellow
+
+            $groups = @{}
+            foreach ($pkg in $foundPackages) {
+                if (-not $groups.ContainsKey($pkg.SearchTerm)) {
+                    $groups[$pkg.SearchTerm] = [System.Collections.Generic.List[PSCustomObject]]::new()
+                }
+                $groups[$pkg.SearchTerm].Add($pkg)
+            }
+
+            foreach ($term in $groups.Keys) {
+                Write-Host "$($term):" -ForegroundColor Yellow
+                foreach ($pkg in $groups[$term]) {
+                    Write-Host "  • " -ForegroundColor Cyan -NoNewline
+                    Write-Host "$($pkg.Name) ($($pkg.Id))" -ForegroundColor White -NoNewline
+                    if ($pkg.Version -ne "Unknown") {
+                        Write-Host " v$($pkg.Version)" -ForegroundColor Green -NoNewline
+                    }
+                    if ($pkg.Source) {
+                        $sColor = if ($pkg.Source -match 'msstore') { "Magenta" } else { "Cyan" }
+                        Write-Host " [$($pkg.Source)]" -ForegroundColor $sColor
+                    } else { Write-Host "" }
+                }
+            }
+            return
+        }
+
+        # Prepare choices for selection with SearchTerm grouping prefix
+        # Consolidating loops to improve performance (avoid double iteration and regex operations)
+        $packageChoices = [System.Collections.Generic.List[string]]::new()
+        $packageMap = @{}
+
+        foreach ($pkg in $foundPackages) {
+            $sourceColor = if ($pkg.Source -match 'msstore') { "magenta" } else { "cyan" }
+            $versionStr = if ($pkg.Version -ne "Unknown") { " [green]v$($pkg.Version)[/]" } else { "" }
+
+            $term = ConvertTo-SpectreEscaped $pkg.SearchTerm
+            $name = ConvertTo-SpectreEscaped $pkg.Name
+            $id = ConvertTo-SpectreEscaped $pkg.Id
+            $source = ConvertTo-SpectreEscaped $pkg.Source
+
+            $displayString = "[yellow][[$term]][/] $name ($id)$versionStr [$sourceColor]$source[/]"
+
+            $packageChoices.Add($displayString)
+            $packageMap[$displayString] = $pkg.Id
+        }
+
+        $packagesToInstall = @()
+
+        # Interactive selection using Spectre Console
+        if (-not $Silent -and (Get-Module -Name PwshSpectreConsole)) {
+            Write-Host ""
+
+            try {
+                # Create multi-selection prompt
+                $selectedChoices = Read-SpectreMultiSelection -Title "[cyan]Select packages to install[/]" `
+                    -Choices $packageChoices `
+                    -PageSize 20 `
+                    -Color "Green"
+
+                if ($selectedChoices.Count -eq 0) {
+                    Write-Host "`nNo packages selected. Exiting." -ForegroundColor Yellow
+                    return
+                }
+
+                # Map back to IDs
+                $packagesToInstall = $selectedChoices | ForEach-Object { $packageMap[$_] }
+
+                Write-Host "`nSelected " -ForegroundColor Green -NoNewline
+                Write-Host "$($packagesToInstall.Count)" -ForegroundColor White -NoNewline
+                Write-Host " package(s) for installation" -ForegroundColor Green
+            }
+            catch {
+                Write-Warning "Failed to show interactive selection. Falling back to confirmation prompt."
+                $packagesToInstall = $foundPackages.Id
+            }
+        }
+        elseif (-not $Silent) {
+            # Fallback for when Spectre Console is not available
+            $packagesToInstall = $foundPackages.Id
+        }
+        else {
+             # Silent mode
+             $packagesToInstall = $foundPackages.Id
+        }
+
+        if (-not $Silent -and $packagesToInstall.Count -gt 0) {
+            Write-Host "`nFetching package details..." -ForegroundColor DarkGray
+            $configDir = Get-WingetBatchConfigDir
+
+            $jobsResult = Start-PackageDetailJobs -PackageIds $packagesToInstall -ConfigDir $configDir
+            $jobs = $jobsResult[0]
+
+            if ($jobs.Count -gt 0) {
+                Write-Host "Waiting for background jobs..." -ForegroundColor DarkGray
+                $jobs | Wait-Job | Out-Null
+
+                $allPackageDetails = @{}
+                foreach ($job in $jobs) {
+                    $jobResults = Receive-Job -Job $job
+                    foreach ($key in $jobResults.Keys) {
+                        $allPackageDetails[$key] = $jobResults[$key]
+                        Set-PackageDetailsCache -PackageId $key -Details $jobResults[$key]
+                    }
+                    Remove-Job -Job $job -Force
+                }
+
+                # Fill missing
+                foreach ($pkgId in $packagesToInstall) {
+                    if (-not $allPackageDetails.ContainsKey($pkgId)) {
+                        $allPackageDetails[$pkgId] = @{ Id = $pkgId }
+                    }
+                }
+
+                Show-WingetPackageDetails -PackageIds $packagesToInstall -DetailsMap $allPackageDetails -FallbackInfo $foundPackages -FallbackMap $pkgMap
+
+                # Ask for confirmation
+                Write-Host "Press " -NoNewline -ForegroundColor Yellow
+                Write-Host "Enter" -NoNewline -ForegroundColor White
+                Write-Host " to install, or " -NoNewline -ForegroundColor Yellow
+                Write-Host "Ctrl+C" -NoNewline -ForegroundColor Red
+                Write-Host " to cancel..." -ForegroundColor Yellow
+                try {
+                    $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+                }
+                catch {
+                    # Ignore
+                }
+            }
+        }
+
+        Write-Host "`n" + ("=" * 60) -ForegroundColor Cyan
+        Write-Host "Starting Installation Process" -ForegroundColor Cyan
+        Write-Host ("=" * 60) -ForegroundColor Cyan
+
+        $successCount = 0
+        $failCount = 0
+
+        # Deduplicate IDs to ensure we don't install the same package twice
+        $uniquePackagesToInstall = $packagesToInstall | Select-Object -Unique
+
+        if ($uniquePackagesToInstall.Count -gt 0) {
+            # Build summary list first (raw data)
+            $summaryList = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+            foreach ($packageId in $uniquePackagesToInstall) {
+                $pkgInfo = $pkgMap[$packageId]
+
+                # Try to get publisher from details if available
+                $publisher = $null
+                if ($null -ne $allPackageDetails -and $allPackageDetails.ContainsKey($packageId)) {
+                    $details = $allPackageDetails[$packageId]
+                    if ($details.PublisherName) { $publisher = $details.PublisherName }
+                    elseif ($details.Publisher) { $publisher = $details.Publisher }
+                }
+
+                if (-not $publisher) { $publisher = "" }
+
+                if ($pkgInfo) {
+                    $summaryList.Add([PSCustomObject]@{
+                        Name = $pkgInfo.Name
+                        Id = $pkgInfo.Id
+                        Version = $pkgInfo.Version
+                        Source = $pkgInfo.Source
+                        SearchTerm = $pkgInfo.SearchTerm
+                        Publisher = $publisher
+                    })
+                } else {
+                    $summaryList.Add([PSCustomObject]@{
+                        Name = $packageId
+                        Id = $packageId
+                        Version = "Unknown"
+                        Source = "Unknown"
+                        SearchTerm = "Manual"
+                        Publisher = $publisher
+                    })
+                }
+            }
+
+            # Use Spectre Console table if available for better formatting
+            if (Get-Module -Name PwshSpectreConsole) {
+                Write-Host ""
+                Write-Host "Package Installation Summary ($($summaryList.Count) packages)" -ForegroundColor Cyan
+
+                $spectreList = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+                # Check if we have multiple unique search terms in the summary
+                $uniqueSearchTerms = $summaryList | Select-Object -ExpandProperty SearchTerm -Unique
+                $showSearchTerm = ($uniqueSearchTerms | Measure-Object).Count -gt 1
+
+                # Check if we have any publishers to show
+                $showPublisher = ($summaryList | Where-Object { -not [string]::IsNullOrWhiteSpace($_.Publisher) } | Measure-Object).Count -gt 0
+
+                foreach ($item in $summaryList) {
+                    $verColor = if ($item.Version -ne "Unknown") { "green" } else { "grey" }
+                    $srcColor = if ($item.Source -match 'msstore') { "magenta" } else { "cyan" }
+
+                    $obj = [ordered]@{
+                        Name = "📦 " + (ConvertTo-SpectreEscaped $item.Name)
+                        Id = ConvertTo-SpectreEscaped $item.Id
+                        Version = "[$verColor]$($item.Version)[/]"
+                        Source = "[$srcColor]$($item.Source)[/]"
+                    }
+
+                    if ($showPublisher) {
+                        $obj['Publisher'] = if ($item.Publisher) { (ConvertTo-SpectreEscaped $item.Publisher) } else { "" }
+                    }
+
+                    if ($showSearchTerm) {
+                        $obj['Search Term'] = "[grey]$(ConvertTo-SpectreEscaped $item.SearchTerm)[/]"
+                    }
+
+                    $spectreList.Add([PSCustomObject]$obj)
+                }
+
+                $spectreList | Format-SpectreTable | Out-Host
+            }
+            else {
+                Write-Host "`nPackage Installation Summary ($($summaryList.Count) packages):" -ForegroundColor Cyan
+
+                # Simple modification for fallback table too
+                $showPublisher = ($summaryList | Where-Object { -not [string]::IsNullOrWhiteSpace($_.Publisher) } | Measure-Object).Count -gt 0
+
+                $fallbackList = $summaryList | Select-Object @{N='Name';E={"📦 " + $_.Name}}, Id, Version, Source, Publisher, SearchTerm
+
+                $props = [System.Collections.Generic.List[string]]::new()
+                $props.AddRange([string[]]@('Name', 'Id', 'Version', 'Source'))
+
+                if ($showPublisher) {
+                    $props.Add('Publisher')
+                }
+
+                if (($summaryList | Select-Object -ExpandProperty SearchTerm -Unique | Measure-Object).Count -gt 1) {
+                    $props.Add('SearchTerm')
+                }
+
+                $fallbackList | Format-Table -Property $props -AutoSize | Out-Host
+            }
+        }
+
+        foreach ($packageId in $uniquePackagesToInstall) {
+            # Find info for better display (use lookup map)
+            $pkgInfo = $pkgMap[$packageId]
+
+            $pkgName = if ($pkgInfo) { $pkgInfo.Name } else { $packageId }
+            $pkgVersion = if ($pkgInfo -and $pkgInfo.Version -ne "Unknown") { "v$($pkgInfo.Version)" } else { "" }
+            $pkgSource = if ($pkgInfo -and $pkgInfo.Source -ne "Unknown") { $pkgInfo.Source } else { "" }
+
+            Write-Host "`n>>> Installing: " -ForegroundColor Magenta -NoNewline
+            Write-Host "$pkgName ($packageId)" -ForegroundColor White -NoNewline
+
+            if ($pkgVersion) {
+                Write-Host " $pkgVersion" -ForegroundColor Green -NoNewline
+            }
+            if ($pkgSource) {
+                $sColor = if ($pkgSource -match 'msstore') { "Magenta" } else { "Cyan" }
+                Write-Host " from $pkgSource" -ForegroundColor $sColor
+            } else { Write-Host "" }
+
+            winget install --id $packageId --accept-package-agreements --accept-source-agreements --silent | Out-Null
+
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "✓ Successfully installed " -ForegroundColor Green -NoNewline
+                Write-Host $packageId -ForegroundColor White
+                $successCount++
+            }
+            else {
+                Write-Host "✗ Failed to install " -ForegroundColor Red -NoNewline
+                Write-Host $packageId -ForegroundColor White -NoNewline
+                Write-Host " (Exit code: $LASTEXITCODE)" -ForegroundColor Red
+                $failCount++
+            }
+        }
+
+        Write-Host "`n" + ("=" * 60) -ForegroundColor Green
+        Write-Host "Installation Complete" -ForegroundColor Green
+        Write-Host ("=" * 60) -ForegroundColor Green
+        Write-Host "Success: " -ForegroundColor Green -NoNewline
+        Write-Host $successCount -ForegroundColor White -NoNewline
+        Write-Host " | Failed: " -ForegroundColor Red -NoNewline
+        Write-Host $failCount -ForegroundColor White
+    }
+}
+
+# EndRegion
+
+# Region: Public/Invoke-WingetBatchCleanup.ps1
+function Invoke-WingetBatchCleanup {
+    <#
+    .SYNOPSIS
+        Clean up WingetBatch caches and orphaned jobs.
+    #>
+    [CmdletBinding()]
+    param()
+    $configDir = Get-WingetBatchConfigDir
+    $cacheFile = Join-Path $configDir "package_cache.json"
+    $updateCacheFile = Join-Path $configDir "update_cache.json"
+    
+    $bytesFreed = 0
+    if (Test-Path $cacheFile) {
+        $bytesFreed += (Get-Item $cacheFile).Length
+        Remove-Item $cacheFile -Force
+    }
+    if (Test-Path $updateCacheFile) {
+        $bytesFreed += (Get-Item $updateCacheFile).Length
+        Remove-Item $updateCacheFile -Force
+    }
+    
+    # Clean orphaned jobs from current session
+    $jobs = Get-Job -ErrorAction SilentlyContinue | Where-Object { $_.State -in @('Completed', 'Failed', 'Stopped') }
+    if ($jobs) {
+        $jobs | Remove-Job -Force
+    }
+    
+    $mbFreed = [math]::Round($bytesFreed / 1MB, 2)
+    Write-Host "Cleanup complete. Freed $mbFreed MB of cache." -ForegroundColor Green
+}
+
+# EndRegion
+
+# Region: Public/New-WingetBatchGitHubToken.ps1
+function New-WingetBatchGitHubToken {
+    <#
+    .SYNOPSIS
+        Interactive helper to create and save a GitHub Personal Access Token.
+
+    .DESCRIPTION
+        Opens GitHub token creation page and guides you through the process.
+        Automatically saves the token once you paste it.
+
+    .EXAMPLE
+        New-WingetBatchGitHubToken
+        Opens GitHub and helps you create a token.
+
+    .LINK
+        https://github.com/settings/tokens
+    #>
+
+    [CmdletBinding()]
+    param()
+
+    Write-Host ""
+    Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
+    Write-Host "🔑 GitHub Token Setup Wizard" -ForegroundColor Green
+    Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "I'll help you create a GitHub token to avoid API rate limits." -ForegroundColor White
+    Write-Host ""
+    Write-Host "Benefits:" -ForegroundColor Cyan
+    Write-Host "  • " -NoNewline -ForegroundColor DarkGray
+    Write-Host "60 requests/hour" -NoNewline -ForegroundColor Red
+    Write-Host " → " -NoNewline -ForegroundColor DarkGray
+    Write-Host "5,000 requests/hour" -ForegroundColor Green
+    Write-Host "  • No special permissions needed" -ForegroundColor DarkGray
+    Write-Host "  • Free forever" -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host "Press Enter to open GitHub in your browser..." -ForegroundColor Yellow
+    $null = Read-Host
+
+    # Open GitHub token creation page
+    $tokenUrl = "https://github.com/settings/tokens/new?description=WingetBatch&scopes="
+    Start-Process $tokenUrl
+
+    Write-Host ""
+    Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
+    Write-Host "📋 Follow these steps on GitHub:" -ForegroundColor Green
+    Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "1. " -NoNewline -ForegroundColor Yellow
+    Write-Host "The token is already named 'WingetBatch'" -ForegroundColor White
+    Write-Host ""
+    Write-Host "2. " -NoNewline -ForegroundColor Yellow
+    Write-Host "Set expiration (or choose 'No expiration' for convenience)" -ForegroundColor White
+    Write-Host ""
+    Write-Host "3. " -NoNewline -ForegroundColor Yellow
+    Write-Host "DON'T check any permission boxes - none needed!" -ForegroundColor White
+    Write-Host ""
+    Write-Host "4. " -NoNewline -ForegroundColor Yellow
+    Write-Host "Click " -NoNewline -ForegroundColor White
+    Write-Host "'Generate token' " -NoNewline -ForegroundColor Green
+    Write-Host "at the bottom" -ForegroundColor White
+    Write-Host ""
+    Write-Host "5. " -NoNewline -ForegroundColor Yellow
+    Write-Host "COPY the token (starts with 'ghp_')" -ForegroundColor White
+    Write-Host ""
+    Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
+    Write-Host ""
+
+    # Prompt for token
+    $secureInput = Read-Host "Paste your token here" -AsSecureString
+    $token = [System.Net.NetworkCredential]::new("", $secureInput).Password
+
+    if ([string]::IsNullOrWhiteSpace($token)) {
+        Write-Host ""
+        Write-Host "❌ No token provided. Setup cancelled." -ForegroundColor Red
+        Write-Host "   Run this command again when you have your token." -ForegroundColor DarkGray
+        return
+    }
+
+    # Validate token format
+    if ($token -notmatch '^ghp_[a-zA-Z0-9]{36}$' -and $token -notmatch '^github_pat_[a-zA-Z0-9_]+$') {
+        Write-Host ""
+        Write-Host "⚠️  Warning: Token format doesn't look right." -ForegroundColor Yellow
+        Write-Host "   Expected format: ghp_xxxxxxxxxxxx or github_pat_xxxxxxxxxxxx" -ForegroundColor DarkGray
+        Write-Host ""
+        $continue = Read-Host "Continue anyway? (y/n)"
+        if ($continue -ne 'y') {
+            Write-Host "Setup cancelled." -ForegroundColor Yellow
+            return
+        }
+    }
+
+    # Test the token
+    Write-Host ""
+    Write-Host "Testing token..." -ForegroundColor Cyan
+    try {
+        $testUrl = "https://api.github.com/user"
+        $response = Invoke-RestMethod -Uri $testUrl -Headers @{
+            'Authorization' = "Bearer $token"
+            'User-Agent' = 'PowerShell-WingetBatch'
+        } -ErrorAction Stop
+
+        Write-Host "✓ Token is valid!" -ForegroundColor Green
+        Write-Host "  Authenticated as: " -NoNewline -ForegroundColor DarkGray
+        Write-Host $response.login -ForegroundColor White
+    }
+    catch {
+        Write-Host "❌ Token test failed!" -ForegroundColor Red
+        Write-Host "   Error: $($_.Exception.Message)" -ForegroundColor DarkGray
+        Write-Host ""
+        $continue = Read-Host "Save token anyway? (y/n)"
+        if ($continue -ne 'y') {
+            Write-Host "Setup cancelled." -ForegroundColor Yellow
+            return
+        }
+    }
+
+    # Save token
+    Set-WingetBatchGitHubToken -Token $token
+
+    Write-Host ""
+    Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Green
+    Write-Host "✓ Setup Complete!" -ForegroundColor Green
+    Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "You can now use all WingetBatch commands without rate limits!" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "Try: " -NoNewline -ForegroundColor DarkGray
+    Write-Host "Get-WingetNewPackages -Days 30" -ForegroundColor Yellow
+    Write-Host ""
+}
+
+# EndRegion
+
+# Region: Public/Remove-WingetRecent.ps1
 function Remove-WingetRecent {
     <#
     .SYNOPSIS
@@ -2766,7 +2929,7 @@ function Remove-WingetRecent {
                     $displayText
                 }
 
-                $selectedLines = Read-SpectreMultiSelection -Title "[red]âš  Select packages to UNINSTALL (Space to toggle, Enter to confirm)[/]" `
+                $selectedLines = Read-SpectreMultiSelection -Title "[red]⚠ Select packages to UNINSTALL (Space to toggle, Enter to confirm)[/]" `
                     -Choices $displayLines `
                     -PageSize 20 `
                     -Color "Red"
@@ -2780,14 +2943,14 @@ function Remove-WingetRecent {
                 $selectedPackages = $selectedLines | ForEach-Object { $displayToId[$_] }
 
                 Write-Host ""
-                Write-Host "âš  WARNING: " -ForegroundColor Red -NoNewline
+                Write-Host "⚠ WARNING: " -ForegroundColor Red -NoNewline
                 Write-Host "You are about to UNINSTALL " -ForegroundColor Yellow -NoNewline
                 Write-Host "$($selectedPackages.Count)" -ForegroundColor White -NoNewline
                 Write-Host " package(s):" -ForegroundColor Yellow
                 Write-Host ""
 
                 foreach ($pkgId in $selectedPackages) {
-                    Write-Host "   â€¢ " -ForegroundColor Red -NoNewline
+                    Write-Host "   • " -ForegroundColor Red -NoNewline
                     Write-Host $pkgId -ForegroundColor White
                 }
 
@@ -2818,12 +2981,12 @@ function Remove-WingetRecent {
                     winget uninstall --id $packageId --accept-source-agreements
 
                     if ($LASTEXITCODE -eq 0) {
-                        Write-Host "âœ“ Successfully uninstalled " -ForegroundColor Green -NoNewline
+                        Write-Host "✓ Successfully uninstalled " -ForegroundColor Green -NoNewline
                         Write-Host $packageId -ForegroundColor White
                         $successCount++
                     }
                     else {
-                        Write-Host "âœ— Failed to uninstall " -ForegroundColor Red -NoNewline
+                        Write-Host "✗ Failed to uninstall " -ForegroundColor Red -NoNewline
                         Write-Host $packageId -ForegroundColor White
                         $failCount++
                     }
@@ -2842,7 +3005,7 @@ function Remove-WingetRecent {
                 Write-Warning "Interactive selection error: $_"
                 Write-Host "Installed packages:" -ForegroundColor Cyan
                 $installedPackages | ForEach-Object {
-                    Write-Host "  â€¢ $($_.Id)" -ForegroundColor White
+                    Write-Host "  • $($_.Id)" -ForegroundColor White
                 }
                 Write-Host ""
                 Write-Host "Use 'winget uninstall <PackageName>' to uninstall manually." -ForegroundColor Yellow
@@ -2852,7 +3015,7 @@ function Remove-WingetRecent {
         else {
             Write-Host "Installed packages:" -ForegroundColor Cyan
             $installedPackages | ForEach-Object {
-                Write-Host "  â€¢ $($_.Id)" -ForegroundColor White
+                Write-Host "  • $($_.Id)" -ForegroundColor White
             }
             Write-Host ""
             Write-Host "To uninstall a package: " -ForegroundColor Cyan -NoNewline
@@ -2865,134 +3028,121 @@ function Remove-WingetRecent {
     }
 }
 
-function Parse-WingetShowOutput {
+# EndRegion
+
+# Region: Public/Set-WingetBatchGitHubToken.ps1
+function Set-WingetBatchGitHubToken {
     <#
     .SYNOPSIS
-        Internal helper to parse 'winget show' output into a structured hashtable.
+        Set or update the GitHub Personal Access Token for API authentication.
+
+    .DESCRIPTION
+        Stores a GitHub token securely to avoid API rate limits when checking for new packages.
+        Without a token, you're limited to 60 requests/hour. With a token, you get 5,000 requests/hour.
+        The token is stored securely using PowerShell's Export-Clixml with SecureString.
+
+        For an interactive wizard, use New-WingetBatchGitHubToken instead.
+
+    .PARAMETER Token
+        Your GitHub Personal Access Token. Create one at https://github.com/settings/tokens
+        No special permissions are required.
+
+    .PARAMETER Remove
+        Remove the stored GitHub token.
+
+    .EXAMPLE
+        Set-WingetBatchGitHubToken -Token "ghp_xxxxxxxxxxxx"
+        Stores your GitHub token for future use.
+
+    .EXAMPLE
+        Set-WingetBatchGitHubToken -Remove
+        Removes the stored GitHub token.
+
+    .EXAMPLE
+        New-WingetBatchGitHubToken
+        Use the interactive wizard instead.
+
+    .LINK
+        https://github.com/settings/tokens
     #>
+
+    [CmdletBinding()]
     param(
-        [string]$Output,
-        [string]$PackageId
+        [Parameter(Mandatory=$true, ParameterSetName='Set')]
+        [string]$Token,
+
+        [Parameter(Mandatory=$true, ParameterSetName='Remove')]
+        [switch]$Remove
     )
 
-    $info = @{
-        Id = $PackageId
-        Version = $null
-        Publisher = $null
-        PublisherName = $null
-        PublisherUrl = $null
-        PublisherGitHub = $null
-        Author = $null
-        Homepage = $null
-        Description = $null
-        Category = $null
-        Tags = @()
-        License = $null
-        LicenseUrl = $null
-        Copyright = $null
-        CopyrightUrl = $null
-        PrivacyUrl = $null
-        PackageUrl = $null
-        ReleaseNotes = $null
-        ReleaseNotesUrl = $null
-        Installer = $null
-        Pricing = $null
-        StoreLicense = $null
-        FreeTrial = $null
-        AgeRating = $null
-        Moniker = $null
-    }
+    $configDir = Get-WingetBatchConfigDir
+    $tokenFile = Join-Path $configDir "github_token.clixml"
+    $legacyFile = Join-Path $configDir "github_token.txt"
 
-    # Optimized parsing: Replace sequential regex matching with O(1) string operations and switch
-    # This significantly reduces CPU usage when parsing many packages in parallel
-    foreach ($line in $Output -split "`n") {
-        $colonIndex = $line.IndexOf(':')
-
-        if ($colonIndex -gt 0) {
-            # Extract key and value efficiently
-            $key = $line.Substring(0, $colonIndex).Trim()
-            $value = $line.Substring($colonIndex + 1).Trim()
-
-            switch ($key) {
-                'Version' { $info.Version = $value }
-                'Publisher' {
-                    $info.PublisherName = $value
-                    $info.Publisher = $value
-                }
-                'Publisher Url' {
-                    $info.PublisherUrl = $value
-                    # Check if it's a GitHub URL
-                    if ($value -match 'github\.com/([^/]+)') {
-                        $info.PublisherGitHub = $value
-                    }
-                }
-                'Author' { $info.Author = $value }
-                'Homepage' { $info.Homepage = $value }
-                'Description' { $info.Description = $value }
-                'Category' { $info.Category = $value }
-                'Tags' { $info.Tags = $value -split ',\s*' }
-                'License' { $info.License = $value }
-                'License Url' { $info.LicenseUrl = $value }
-                'Copyright' { $info.Copyright = $value }
-                'Copyright Url' { $info.CopyrightUrl = $value }
-                'Privacy Url' { $info.PrivacyUrl = $value }
-                'Package Url' { $info.PackageUrl = $value }
-                'Release Notes' { $info.ReleaseNotes = $value }
-                'Release Notes Url' { $info.ReleaseNotesUrl = $value }
-                'Installer Type' { $info.Installer = $value }
-                'Pricing' { $info.Pricing = $value }
-                'Store License' { $info.StoreLicense = $value }
-                'Free Trial' { $info.FreeTrial = $value }
-                'Age Rating' { $info.AgeRating = $value }
-                'Moniker' { $info.Moniker = $value }
-            }
+    if ($Remove) {
+        $removed = $false
+        if (Test-Path $tokenFile) {
+            Remove-Item $tokenFile -Force
+            $removed = $true
         }
+        if (Test-Path $legacyFile) {
+            Remove-Item $legacyFile -Force
+            $removed = $true
+        }
+
+        if ($removed) {
+            Write-Host "✓ GitHub token removed successfully" -ForegroundColor Green
+        }
+        else {
+            Write-Host "No GitHub token found to remove" -ForegroundColor Yellow
+        }
+        return
     }
 
-    return $info
-}
-
-function Get-WingetBatchConfigDir {
-    <#
-    .SYNOPSIS
-        Get the configuration directory path.
-
-    .DESCRIPTION
-        Internal function to get the path to the .wingetbatch configuration directory.
-    #>
-    if ($env:USERPROFILE) {
-        $homeDir = $env:USERPROFILE
-    } else {
-        $homeDir = $HOME
+    # Create config directory if it doesn't exist
+    if (-not (Test-Path $configDir)) {
+        New-Item -ItemType Directory -Path $configDir -Force | Out-Null
     }
-    return Join-Path $homeDir ".wingetbatch"
+
+    # Store token securely
+    try {
+        $SecureToken = $Token | ConvertTo-SecureString -AsPlainText -Force
+        $SecureToken | Export-Clixml -Path $tokenFile
+
+        # Remove legacy plaintext file if it exists
+        if (Test-Path $legacyFile) {
+            Remove-Item $legacyFile -Force
+        }
+
+        Write-Host "✓ GitHub token saved securely!" -ForegroundColor Green
+        Write-Host "  Location: $tokenFile" -ForegroundColor DarkGray
+        Write-Host "  The token will now be used automatically for API requests." -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "  ℹ Security Note:" -ForegroundColor Yellow
+        Write-Host "  • Token stored securely using PowerShell encryption (bound to your user account)" -ForegroundColor DarkGray
+        Write-Host "  • Only increases API rate limits - cannot modify repositories or access private data" -ForegroundColor DarkGray
+        Write-Host "  • Revoke anytime at: https://github.com/settings/tokens" -ForegroundColor DarkGray
+    }
+    catch {
+        Write-Host "❌ Failed to save token securely: $($_.Exception.Message)" -ForegroundColor Red
+        throw
+    }
 }
 
-function ConvertTo-SpectreEscaped {
+# EndRegion
+
+# Region: Public/Update-WingetBatch.ps1
+function Update-WingetBatch {
     <#
     .SYNOPSIS
-        Escape special characters for Spectre Console markup.
-
-    .DESCRIPTION
-        Internal function to escape brackets so they are rendered literally in Spectre Console.
-        [ becomes [[
-        ] becomes ]]
+        Updates the WingetBatch module from the PowerShell Gallery.
     #>
-    param(
-        [string]$Text
-    )
-
-    if ([string]::IsNullOrEmpty($Text)) { return $Text }
-    if ($Text.IndexOf('[') -eq -1 -and $Text.IndexOf(']') -eq -1) { return $Text }
-    return $Text.Replace('[', '[[').Replace(']', ']]')
+    [CmdletBinding()]
+    param()
+    Write-Host "Checking for updates to WingetBatch module..." -ForegroundColor Cyan
+    Update-Module -Name WingetBatch -Force -AcceptLicense -ErrorAction Stop
+    Write-Host "WingetBatch module updated successfully!" -ForegroundColor Green
 }
 
-# Export module members (public functions only)
-# Internal functions: Get-WingetBatchConfigDir, Get-WingetBatchGitHubToken, Start-WingetUpdateCheck, Update-GitHubApiRequestCount
+# EndRegion
 
-    Set-WingetBatchGitHubToken, New-WingetBatchGitHubToken, `
-    Enable-WingetUpdateNotifications, Disable-WingetUpdateNotifications, `
-    Get-WingetUpdates, Remove-WingetRecent
-
-
-Install-WingetAll @Args

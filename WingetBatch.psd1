@@ -3,7 +3,7 @@
     RootModule = 'WingetBatch.psm1'
 
     # Version number of this module.
-    ModuleVersion = '2.0.0'
+    ModuleVersion = '2.1.0'
 
     # ID used to uniquely identify this module
     GUID = 'b9e8f5d2-4c3f-4a6b-8d9e-2f7a8b5c6e4f'
@@ -32,7 +32,11 @@
         'Disable-WingetUpdateNotifications',
         'Set-WingetBatchGitHubToken',
         'New-WingetBatchGitHubToken',
-        'Remove-WingetRecent'
+        'Remove-WingetRecent',
+        'Export-WingetBatchConfig',
+        'Import-WingetBatchConfig',
+        'Invoke-WingetBatchCleanup',
+        'Update-WingetBatch'
     )
 
     # Cmdlets to export from this module
