@@ -1842,7 +1842,10 @@ function Get-WingetUpdates {
     [CmdletBinding()]
     param(
         [Parameter()]
-        [switch]$Force
+        [switch]$Force,
+
+        [Parameter()]
+        [switch]$IWantToLiterallyUpdateAllFuckingResults
     )
 
     # Ensure PwshSpectreConsole is available
@@ -1903,7 +1906,7 @@ function Get-WingetUpdates {
     }
 
     if ($updatesAvailable.Count -eq 0) {
-        Write-Host "✓ All packages are up to date!" -ForegroundColor Green
+        Write-Host "âœ“ All packages are up to date!" -ForegroundColor Green
         return
     }
 
@@ -1914,7 +1917,10 @@ function Get-WingetUpdates {
     Write-Host ""
 
     # Interactive selection using Spectre Console
-    if (Get-Module -Name PwshSpectreConsole) {
+    if ($IWantToLiterallyUpdateAllFuckingResults) {
+        $selectedPackages = $updatesAvailable | ForEach-Object { $_.Id }
+    }
+    elseif (Get-Module -Name PwshSpectreConsole) {
         try {
             # Create a lookup table: DisplayLine -> Id
             $displayToId = @{}
@@ -1935,53 +1941,12 @@ function Get-WingetUpdates {
 
             # Convert selected display lines back to package IDs
             $selectedPackages = $selectedLines | ForEach-Object { $displayToId[$_] }
-
-            Write-Host ""
-            Write-Host "Updating " -ForegroundColor Cyan -NoNewline
-            Write-Host "$($selectedPackages.Count)" -ForegroundColor White -NoNewline
-            Write-Host " package(s)..." -ForegroundColor Cyan
-            Write-Host ""
-
-            $successCount = 0
-            $failCount = 0
-
-            foreach ($packageId in $selectedPackages) {
-                Write-Host ">>> Updating: " -ForegroundColor Magenta -NoNewline
-                Write-Host $packageId -ForegroundColor White
-
-                winget upgrade --id $packageId --accept-package-agreements --accept-source-agreements
-
-                if ($LASTEXITCODE -eq 0) {
-                    Write-Host "✓ Successfully updated " -ForegroundColor Green -NoNewline
-                    Write-Host $packageId -ForegroundColor White
-                    $successCount++
-                }
-                else {
-                    Write-Host "✗ Failed to update " -ForegroundColor Red -NoNewline
-                    Write-Host $packageId -ForegroundColor White
-                    $failCount++
-                }
-                Write-Host ""
-            }
-
-            Write-Host ("=" * 60) -ForegroundColor Green
-            Write-Host "Update Complete" -ForegroundColor Green
-            Write-Host ("=" * 60) -ForegroundColor Green
-            Write-Host "Success: " -ForegroundColor Green -NoNewline
-            Write-Host $successCount -ForegroundColor White -NoNewline
-            Write-Host " | Failed: " -ForegroundColor Red -NoNewline
-            Write-Host $failCount -ForegroundColor White
-
-            # Clear cache after updates
-            if (Test-Path $cacheFile) {
-                Remove-Item $cacheFile -Force
-            }
         }
         catch {
             Write-Warning "Interactive selection error: $_"
             Write-Host "Packages with updates available:" -ForegroundColor Cyan
             $updatesAvailable | ForEach-Object {
-                Write-Host "  • $($_.Id)" -ForegroundColor White
+                Write-Host "  â€¢ $($_.Id)" -ForegroundColor White
             }
             Write-Host ""
             Write-Host "Use 'winget upgrade <PackageName>' to update manually." -ForegroundColor Yellow
@@ -1992,13 +1957,55 @@ function Get-WingetUpdates {
         # Fallback without interactive selection
         Write-Host "Packages with updates available:" -ForegroundColor Cyan
         $updatesAvailable | ForEach-Object {
-            Write-Host "  • $($_.Id)" -ForegroundColor White
+            Write-Host "  â€¢ $($_.Id)" -ForegroundColor White
         }
         Write-Host ""
         Write-Host "To update a package: " -ForegroundColor Cyan -NoNewline
         Write-Host "winget upgrade <PackageName>" -ForegroundColor Yellow
         Write-Host "To update all: " -ForegroundColor Cyan -NoNewline
         Write-Host "winget upgrade --all" -ForegroundColor Yellow
+        return
+    }
+
+    Write-Host ""
+    Write-Host "Updating " -ForegroundColor Cyan -NoNewline
+    Write-Host "$($selectedPackages.Count)" -ForegroundColor White -NoNewline
+    Write-Host " package(s)..." -ForegroundColor Cyan
+    Write-Host ""
+
+    $successCount = 0
+    $failCount = 0
+
+    foreach ($packageId in $selectedPackages) {
+        Write-Host ">>> Updating: " -ForegroundColor Magenta -NoNewline
+        Write-Host $packageId -ForegroundColor White
+
+        winget upgrade --id $packageId --accept-package-agreements --accept-source-agreements
+
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "âœ“ Successfully updated " -ForegroundColor Green -NoNewline
+            Write-Host $packageId -ForegroundColor White
+            $successCount++
+        }
+        else {
+            Write-Host "âœ— Failed to update " -ForegroundColor Red -NoNewline
+            Write-Host $packageId -ForegroundColor White
+            $failCount++
+        }
+        Write-Host ""
+    }
+
+    Write-Host ("=" * 60) -ForegroundColor Green
+    Write-Host "Update Complete" -ForegroundColor Green
+    Write-Host ("=" * 60) -ForegroundColor Green
+    Write-Host "Success: " -ForegroundColor Green -NoNewline
+    Write-Host $successCount -ForegroundColor White -NoNewline
+    Write-Host " | Failed: " -ForegroundColor Red -NoNewline
+    Write-Host $failCount -ForegroundColor White
+
+    # Clear cache after updates
+    if (Test-Path $cacheFile) {
+        Remove-Item $cacheFile -Force
     }
 }
 
