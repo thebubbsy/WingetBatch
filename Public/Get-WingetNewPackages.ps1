@@ -1,4 +1,4 @@
-function Get-WingetNewPackages {
+﻿function Get-WingetNewPackages {
     <#
     .SYNOPSIS
         Get recently added NEW packages from the winget repository.
@@ -167,14 +167,14 @@ function Get-WingetNewPackages {
 
         # Show final API usage
         Write-Host ""
-        Write-Host "📊 GitHub API: " -ForegroundColor Cyan -NoNewline
+        Write-Host "[API] GitHub API: " -ForegroundColor Cyan -NoNewline
         Write-Host "$apiRequestsMade" -ForegroundColor White -NoNewline
         Write-Host " requests made | " -ForegroundColor DarkGray -NoNewline
         Write-Host "$totalUsage" -ForegroundColor $(if ($totalUsage -gt ($limit * 0.8)) { "Red" } elseif ($totalUsage -gt ($limit * 0.5)) { "Yellow" } else { "Green" }) -NoNewline
         Write-Host "/$limit" -ForegroundColor DarkGray -NoNewline
         Write-Host " used this hour" -ForegroundColor DarkGray
         Write-Host ""
-        Write-Host "Fetched total of " -ForegroundColor Green -NoNewline
+                            Write-Host "  - " -ForegroundColor Green -NoNewline
         Write-Host "$($allCommits.Count)" -ForegroundColor White -NoNewline
         Write-Host " commits" -ForegroundColor Green
 
@@ -276,7 +276,7 @@ function Get-WingetNewPackages {
             return
         }
 
-        Write-Host "`nFound " -ForegroundColor Green -NoNewline
+                            Write-Host "  - " -ForegroundColor Green -NoNewline
         Write-Host "$($newPackages.Count)" -ForegroundColor White -NoNewline
         Write-Host " new package(s)" -NoNewline -ForegroundColor Green
         if ($ExcludeTerm) {
@@ -294,7 +294,7 @@ function Get-WingetNewPackages {
 
         # Fetch detailed package info in parallel BEFORE showing selection UI
         Write-Host ""
-        Write-Host "⏳ Fetching detailed package information in background..." -ForegroundColor DarkGray
+        Write-Host "[WAIT] Fetching detailed package information in background..." -ForegroundColor DarkGray
 
         $configDir = Get-WingetBatchConfigDir
         $maxConcurrentJobs = 10
@@ -349,7 +349,7 @@ function Get-WingetNewPackages {
         $jobPackageMap = @{}
 
         if ($cachedResults.Count -gt 0) {
-            Write-Host "✓ Found $($cachedResults.Count) packages in cache" -ForegroundColor Green
+            Write-Host "[OK] Found $($cachedResults.Count) packages in cache" -ForegroundColor Green
         }
 
         for ($i = 0; $i -lt $actualJobCount; $i++) {
@@ -408,7 +408,7 @@ function Get-WingetNewPackages {
                 }
 
                 if ($selectedChoices.Count -gt 0) {
-                    Write-Host "`nSelected " -ForegroundColor Green -NoNewline
+                            Write-Host "  - " -ForegroundColor Green -NoNewline
                     Write-Host "$($selectedChoices.Count)" -ForegroundColor White -NoNewline
                     Write-Host " package(s) for installation" -ForegroundColor Green
                     Write-Host ""
@@ -448,12 +448,12 @@ function Get-WingetNewPackages {
                     $runningRelevantJobs = @($relevantJobs | Where-Object { $_.State -eq 'Running' })
 
                     if ($runningRelevantJobs.Count -gt 0) {
-                        Write-Host "⏳ Waiting for $($runningRelevantJobs.Count) background jobs with selected packages..." -ForegroundColor DarkGray
+                        Write-Host "[WAIT] Waiting for $($runningRelevantJobs.Count) background jobs with selected packages..." -ForegroundColor DarkGray
                         $timeout = 30
                         $runningRelevantJobs | Wait-Job -Timeout $timeout | Out-Null
                     }
                     else {
-                        Write-Host "✓ Selected package details already fetched!" -ForegroundColor Green
+                        Write-Host "[OK] Selected package details already fetched!" -ForegroundColor Green
                     }
 
                     # Stop irrelevant jobs immediately (user doesn't need them)
@@ -552,12 +552,12 @@ function Get-WingetNewPackages {
                     if ($userChoice -eq "Go back and change selection") {
                         Write-Host "`nReturning to package selection..." -ForegroundColor Cyan
                         Write-Host ""
-                        Write-Host "⚠ NOTE: All selections will be cleared when returning to the menu." -ForegroundColor Yellow
+                        Write-Host "[!] NOTE: All selections will be cleared when returning to the menu." -ForegroundColor Yellow
                         Write-Host "   You will need to re-select your packages." -ForegroundColor Yellow
                         Write-Host ""
                         Write-Host "Previously selected packages:" -ForegroundColor Cyan
                         foreach ($pkg in $packagesToInstall) {
-                            Write-Host "  • " -ForegroundColor Green -NoNewline
+                            Write-Host "  - " -ForegroundColor Green -NoNewline
                             Write-Host $pkg -ForegroundColor White
                         }
                         Write-Host ""
@@ -594,13 +594,13 @@ function Get-WingetNewPackages {
                                 }
                             }
 
-                            Write-Host "`nSelected " -ForegroundColor Green -NoNewline
+                            Write-Host "  - " -ForegroundColor Green -NoNewline
                             Write-Host "$($packagesToInstallIds.Count)" -ForegroundColor White -NoNewline
                             Write-Host " package(s)" -ForegroundColor Green
                             Write-Host ""
 
                             # Fetch details for newly selected packages (from cache or jobs)
-                            Write-Host "⏳ Fetching package details..." -ForegroundColor DarkGray
+                            Write-Host "[WAIT] Fetching package details..." -ForegroundColor DarkGray
 
                             # Load cache once before the loop to avoid repeated I/O
                             $cacheFile = Join-Path $configDir "package_cache.json"
@@ -708,12 +708,12 @@ function Get-WingetNewPackages {
                         winget install --id $packageId --accept-package-agreements --accept-source-agreements --silent | Out-Null
 
                         if ($LASTEXITCODE -eq 0) {
-                            Write-Host "✓ Successfully installed " -ForegroundColor Green -NoNewline
+                            Write-Host "[OK] Successfully installed " -ForegroundColor Green -NoNewline
                             Write-Host $packageId -ForegroundColor White
                             $successCount++
                         }
                         else {
-                            Write-Host "✗ Failed to install " -ForegroundColor Red -NoNewline
+                            Write-Host "[FAIL] Failed to install " -ForegroundColor Red -NoNewline
                             Write-Host $packageId -ForegroundColor White -NoNewline
                             Write-Host " (Exit code: $LASTEXITCODE)" -ForegroundColor Red
                             $failCount++
@@ -723,7 +723,7 @@ function Get-WingetNewPackages {
                     Write-Host "`n" + ("=" * 60) -ForegroundColor Green
                     Write-Host "Installation Complete" -ForegroundColor Green
                     Write-Host ("=" * 60) -ForegroundColor Green
-                    Write-Host "Success: " -ForegroundColor Green -NoNewline
+                            Write-Host "  - " -ForegroundColor Green -NoNewline
                     Write-Host $successCount -ForegroundColor White -NoNewline
                     Write-Host " | Failed: " -ForegroundColor Red -NoNewline
                     Write-Host $failCount -ForegroundColor White
@@ -763,9 +763,9 @@ function Get-WingetNewPackages {
     catch {
         Write-Error "Failed to fetch new packages from GitHub: $_"
         if ($_.Exception.Response.StatusCode -eq 403 -or $_ -match 'rate limit') {
-            Write-Host "`n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Yellow
-            Write-Host "⚠ GitHub API Rate Limit Exceeded" -ForegroundColor Yellow
-            Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Yellow
+            Write-Host "`nâ”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”" -ForegroundColor Yellow
+            Write-Host "[!] GitHub API Rate Limit Exceeded" -ForegroundColor Yellow
+            Write-Host "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”" -ForegroundColor Yellow
             Write-Host ""
             Write-Host "Unauthenticated requests are limited to 60 per hour." -ForegroundColor White
             Write-Host ""
@@ -775,7 +775,9 @@ function Get-WingetNewPackages {
             Write-Host "     (Interactive wizard to create and save a token)" -ForegroundColor DarkGray
             Write-Host ""
             Write-Host "Or wait an hour and try again with a shorter time period." -ForegroundColor DarkGray
-            Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Yellow
+            Write-Host "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”" -ForegroundColor Yellow
         }
     }
 }
+
+

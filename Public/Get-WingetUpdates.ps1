@@ -1,4 +1,4 @@
-function Get-WingetUpdates {
+﻿function Get-WingetUpdates {
     <#
     .SYNOPSIS
         Check for and install available winget package updates.
@@ -86,12 +86,12 @@ function Get-WingetUpdates {
     }
 
     if ($updatesAvailable.Count -eq 0) {
-        Write-Host "✓ All packages are up to date!" -ForegroundColor Green
+        Write-Host "[OK] All packages are up to date!" -ForegroundColor Green
         return
     }
 
     Write-Host ""
-    Write-Host "Found " -ForegroundColor Green -NoNewline
+                            Write-Host "  - " -ForegroundColor Green -NoNewline
     Write-Host "$($updatesAvailable.Count)" -ForegroundColor White -NoNewline
     Write-Host " update(s) available" -ForegroundColor Green
     Write-Host ""
@@ -126,7 +126,7 @@ function Get-WingetUpdates {
             Write-Warning "Interactive selection error: $_"
             Write-Host "Packages with updates available:" -ForegroundColor Cyan
             $updatesAvailable | ForEach-Object {
-                Write-Host "  • $($_.Id)" -ForegroundColor White
+                Write-Host "  â€¢ $($_.Id)" -ForegroundColor White
             }
             Write-Host ""
             Write-Host "Use 'winget upgrade <PackageName>' to update manually." -ForegroundColor Yellow
@@ -137,7 +137,7 @@ function Get-WingetUpdates {
         # Fallback without interactive selection
         Write-Host "Packages with updates available:" -ForegroundColor Cyan
         $updatesAvailable | ForEach-Object {
-            Write-Host "  • $($_.Id)" -ForegroundColor White
+            Write-Host "  â€¢ $($_.Id)" -ForegroundColor White
         }
         Write-Host ""
         Write-Host "To update a package: " -ForegroundColor Cyan -NoNewline
@@ -163,12 +163,12 @@ function Get-WingetUpdates {
         winget upgrade --id $packageId --accept-package-agreements --accept-source-agreements
 
         if ($LASTEXITCODE -eq 0) {
-            Write-Host "✓ Successfully updated " -ForegroundColor Green -NoNewline
+            Write-Host "[OK] Successfully updated " -ForegroundColor Green -NoNewline
             Write-Host $packageId -ForegroundColor White
             $successCount++
         }
         else {
-            Write-Host "✗ Failed to update " -ForegroundColor Red -NoNewline
+            Write-Host "[FAIL] Failed to update " -ForegroundColor Red -NoNewline
             Write-Host $packageId -ForegroundColor White
             $failCount++
         }
@@ -178,7 +178,7 @@ function Get-WingetUpdates {
     Write-Host ("=" * 60) -ForegroundColor Green
     Write-Host "Update Complete" -ForegroundColor Green
     Write-Host ("=" * 60) -ForegroundColor Green
-    Write-Host "Success: " -ForegroundColor Green -NoNewline
+                            Write-Host "  - " -ForegroundColor Green -NoNewline
     Write-Host $successCount -ForegroundColor White -NoNewline
     Write-Host " | Failed: " -ForegroundColor Red -NoNewline
     Write-Host $failCount -ForegroundColor White
@@ -188,3 +188,5 @@ function Get-WingetUpdates {
         Remove-Item $cacheFile -Force
     }
 }
+
+
