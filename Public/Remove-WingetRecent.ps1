@@ -283,3 +283,4 @@
         Write-Error "Failed to get installed packages: $_"
     }
 }
+

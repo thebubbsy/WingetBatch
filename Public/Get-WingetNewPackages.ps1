@@ -63,7 +63,10 @@
         [string]$ExcludeTerm,
 
         [Parameter()]
-        [switch]$IWantToLiterallyInstallAllFuckingResults
+        [switch]$IWantToLiterallyInstallAllFuckingResults,
+
+        [Parameter()]
+        [switch]$ExportHtml
     )
 
     # Ensure PwshSpectreConsole is available
@@ -385,6 +388,26 @@
 
         Write-Host "   Started $actualJobCount background jobs processing $totalPackagesToFetch packages..." -ForegroundColor DarkGray
         Write-Host "   (~$packagesPerJob packages per job)" -ForegroundColor DarkGray
+
+        if ($ExportHtml) {
+            Write-Host "
+[HTML] Exporting HTML report..." -ForegroundColor Cyan
+            $timestamp = (Get-Date).ToString("yyyyMMdd_HHmmss")
+            $defaultPath = "C:\temp\WingetBatch_New Packages_$timestamp.html".Replace(' ', '_')
+            $exportPath = Read-Host "Enter path for HTML report [Default: $defaultPath]"
+            if (-not $exportPath) { $exportPath = $defaultPath }
+            if (-not $exportPath.EndsWith(".html")) { $exportPath += ".html" }
+            
+            try {
+                Export-WingetHtmlReport -Data $newPackages -ReportTitle "New Packages" -OutFile $exportPath
+                if (Test-Path $exportPath) {
+                    Write-Host "[OK] Report successfully saved to $exportPath" -ForegroundColor Green
+                    Invoke-Item $exportPath
+                }
+            } catch {
+                Write-Host "[FAIL] Failed to generate HTML report: $_" -ForegroundColor Red
+            }
+        }
 
         # Interactive selection using Spectre Console
         if ($IWantToLiterallyInstallAllFuckingResults -or (Get-Module -Name PwshSpectreConsole)) {
@@ -779,5 +802,6 @@
         }
     }
 }
+
 
 
