@@ -1,4 +1,4 @@
-function Export-WingetBatchConfig {
+﻿function Export-WingetBatchConfig {
     <#
     .SYNOPSIS
         Export WingetBatch configuration and caches.
@@ -24,3 +24,4 @@ function Export-WingetBatchConfig {
         Write-Warning "No WingetBatch configuration found to export."
     }
 }
+
