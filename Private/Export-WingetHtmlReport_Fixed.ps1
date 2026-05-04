@@ -34,9 +34,30 @@
         return
     }
 
-$savePath = Split-Path $OutFile
-$filename = Split-Path $OutFile -Leaf
-if (-not $savePath) { $savePath = "." }
+    # Prompt user for save location
+    Write-Host ""
+    Write-Host "HTML Export requested." -ForegroundColor Cyan
+    $defaultPath = [System.Environment]::GetFolderPath('UserProfile') + "\Downloads"
+    $savePath = Split-Path $OutFile; $filename = Split-Path $OutFile -Leaf; $fullPath = $OutFile
+    
+    if ([string]::IsNullOrWhiteSpace($savePath)) {
+        $savePath = $defaultPath
+    }
+
+    # Ensure directory exists
+    if (-not (Test-Path $savePath)) {
+        try {
+            New-Item -ItemType Directory -Path $savePath -Force | Out-Null
+        }
+        catch {
+            Write-Warning "Could not create directory '$savePath'. Saving to current directory instead."
+            $savePath = $PWD.Path
+        }
+    }
+
+    # Generate filename
+    $timestamp = (Get-Date).ToString("yyyyMMdd_HHmmss")
+    $filename = "WinBatch_${ReportType}_${timestamp}.html"
     $fullPath = Join-Path $savePath $filename
 
     Write-Host "Generating HTML report..." -ForegroundColor DarkGray
