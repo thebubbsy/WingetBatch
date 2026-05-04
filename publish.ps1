@@ -1,0 +1,1 @@
+$apiKey = [Environment]::GetEnvironmentVariable("PSGALLERY_API_KEY", "User"); if ($apiKey) { Publish-Module -Path "C:\Users\user\.gemini\antigravity\scratch\WingetBatch" -NuGetApiKey $apiKey -Force -Verbose } else { Write-Error "API key not found" }

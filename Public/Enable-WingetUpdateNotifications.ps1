@@ -85,3 +85,4 @@ if (Get-Module -ListAvailable -Name WingetBatch) {
         Write-Host "  Update notifications were already enabled in your profile." -ForegroundColor DarkGray
     }
 }
+

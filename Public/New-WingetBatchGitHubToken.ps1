@@ -128,3 +128,4 @@
     Write-Host "Get-WingetNewPackages -Days 30" -ForegroundColor Yellow
     Write-Host ""
 }
+

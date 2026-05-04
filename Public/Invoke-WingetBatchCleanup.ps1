@@ -1,4 +1,4 @@
-function Invoke-WingetBatchCleanup {
+﻿function Invoke-WingetBatchCleanup {
     <#
     .SYNOPSIS
         Clean up WingetBatch caches and orphaned jobs.
@@ -28,3 +28,4 @@ function Invoke-WingetBatchCleanup {
     $mbFreed = [math]::Round($bytesFreed / 1MB, 2)
     Write-Host "Cleanup complete. Freed $mbFreed MB of cache." -ForegroundColor Green
 }
+

@@ -1,4 +1,4 @@
-function Import-WingetBatchConfig {
+﻿function Import-WingetBatchConfig {
     <#
     .SYNOPSIS
         Import WingetBatch configuration and caches from a zip archive.
@@ -19,3 +19,4 @@ function Import-WingetBatchConfig {
     Expand-Archive -Path $Path -DestinationPath $configDir -Force
     Write-Host "Imported WingetBatch configuration from $Path" -ForegroundColor Green
 }
+

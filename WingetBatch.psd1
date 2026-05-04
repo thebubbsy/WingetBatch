@@ -1,9 +1,9 @@
-@{
+﻿@{
     # Script module or binary module file associated with this manifest.
     RootModule = 'WingetBatch.psm1'
 
     # Version number of this module.
-    ModuleVersion = '2.1.2'
+    ModuleVersion = '2.2.0'
 
     # ID used to uniquely identify this module
     GUID = 'b9e8f5d2-4c3f-4a6b-8d9e-2f7a8b5c6e4f'
@@ -109,4 +109,5 @@ Requires: PowerShell 5.1+, winget CLI, PwshSpectreConsole (auto-installs if miss
         }
     }
 }
+
 

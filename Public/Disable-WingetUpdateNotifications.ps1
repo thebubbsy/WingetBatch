@@ -39,3 +39,4 @@
     Write-Host "✓ Update notifications disabled" -ForegroundColor Green
     Write-Host "  Restart your terminal for changes to take effect." -ForegroundColor DarkGray
 }
+

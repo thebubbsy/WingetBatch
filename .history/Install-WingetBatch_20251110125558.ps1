@@ -1,0 +1,372 @@
+# WingetBatch Installation Script
+# One-liner installer for fresh Windows 11 installs
+# Downloads and installs Winget, all required dependencies, and the WingetBatch module
+
+param(
+    [switch]$SkipWinget,
+    [switch]$SkipModules,
+    [switch]$Force
+)
+
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+
+try {
+    # Ensure TLS 1.2 for Invoke-WebRequest/Invoke-RestMethod
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12
+}
+catch {
+    Write-Verbose "Unable to update TLS settings: $($_.Exception.Message)"
+}
+
+function Invoke-DownloadFile {
+    param(
+        [Parameter(Mandatory)] [string]$Uri,
+        [Parameter(Mandatory)] [string]$OutFile
+    )
+
+    $invokeParams = @{
+        Uri         = $Uri
+        OutFile     = $OutFile
+        ErrorAction = 'Stop'
+    }
+
+    if ($PSVersionTable.PSEdition -eq 'Desktop') {
+        # UseBasicParsing avoids IE dependency on Windows PowerShell 5.1
+        $invokeParams.UseBasicParsing = $true
+    }
+
+    Invoke-WebRequest @invokeParams
+}
+
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "WingetBatch Installation Script" -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+
+# Function to check admin rights
+function Test-AdminRights {
+    $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($currentUser)
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Get-ModuleBasePath {
+    $docPath = [Environment]::GetFolderPath('MyDocuments')
+
+    if (-not $docPath) {
+        $docPath = [Environment]::GetFolderPath('Personal')
+    }
+
+    if (-not $docPath) {
+        $docPath = Join-Path $env:USERPROFILE 'Documents'
+    }
+
+    if ($PSVersionTable.PSVersion.Major -ge 6) {
+        return [System.IO.Path]::Combine($docPath, 'PowerShell', 'Modules')
+    }
+
+    return [System.IO.Path]::Combine($docPath, 'WindowsPowerShell', 'Modules')
+}
+
+if (-not (Test-AdminRights)) {
+    Write-Host "`n⚠ This script requires administrator privileges." -ForegroundColor Yellow
+    Write-Host "Please run PowerShell as Administrator and try again.`n" -ForegroundColor Yellow
+    exit 1
+}
+
+# Install Winget if not already installed
+if (-not $SkipWinget) {
+    Write-Host "`n[1/4] Checking Winget installation..." -ForegroundColor Cyan
+
+    $wingetPath = Get-Command winget -ErrorAction SilentlyContinue
+
+    if ($wingetPath -and -not $Force) {
+        Write-Host "✓ Winget is already installed at: $($wingetPath.Source)" -ForegroundColor Green
+    }
+    else {
+        Write-Host "Installing Winget from Microsoft Store..." -ForegroundColor Yellow
+
+        # Try Method 1: Direct GitHub download
+        try {
+            Write-Host "Attempting to install Winget from GitHub..." -ForegroundColor Gray
+
+            $releaseParams = @{
+                Uri         = "https://api.github.com/repos/microsoft/winget-cli/releases/latest"
+                ErrorAction = 'Stop'
+                Headers     = @{ 'User-Agent' = 'WingetBatchInstaller' }
+            }
+
+            if ($PSVersionTable.PSEdition -eq 'Desktop') {
+                $releaseParams.UseBasicParsing = $true
+            }
+
+            $releases = Invoke-RestMethod @releaseParams
+            $assets = $releases.assets
+
+            $appInstallerAsset = $assets | Where-Object { $_.name -like 'Microsoft.DesktopAppInstaller_*_x64.msixbundle' } | Select-Object -First 1
+
+            if (-not $appInstallerAsset) {
+                # Fallback to generic name if exact pattern not found
+                $appInstallerAsset = $assets | Where-Object { $_.name -match 'Microsoft\.DesktopAppInstaller_.*\.msixbundle$' } | Select-Object -First 1
+            }
+
+            if ($appInstallerAsset) {
+                $tempDir = Join-Path $env:TEMP "winget-install"
+                if (-not (Test-Path $tempDir)) {
+                    New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+                }
+
+                $appInstallerPath = Join-Path $tempDir $appInstallerAsset.name
+                Write-Host "Downloading App Installer: $($appInstallerAsset.name)" -ForegroundColor Gray
+                Invoke-DownloadFile -Uri $appInstallerAsset.browser_download_url -OutFile $appInstallerPath
+
+                $dependencyFiles = @()
+
+                # Identify dependency packages (VCLibs, UI.Xaml, WindowsAppRuntime) exposed as separate assets
+                $dependencyAssets = $assets | Where-Object {
+                    $_.name -match 'Microsoft\.UI\.Xaml.*x64.*\.msixbundle$' -or
+                    $_.name -match 'Microsoft\.VCLibs.*x64.*\.appx$' -or
+                    $_.name -match 'Microsoft\.WindowsAppRuntime.*(x64|neutral).*(\.msixbundle|\.msix)$'
+                }
+
+                foreach ($dependency in $dependencyAssets) {
+                    $dependencyPath = Join-Path $tempDir $dependency.name
+                    Write-Host "Downloading dependency: $($dependency.name)" -ForegroundColor Gray
+                    Invoke-DownloadFile -Uri $dependency.browser_download_url -OutFile $dependencyPath
+                    $dependencyFiles += $dependencyPath
+                }
+
+                # Some releases package dependencies inside DesktopAppInstaller_Dependencies.zip
+                $dependenciesZip = $assets | Where-Object { $_.name -eq 'DesktopAppInstaller_Dependencies.zip' } | Select-Object -First 1
+                if ($dependenciesZip) {
+                    $zipPath = Join-Path $tempDir $dependenciesZip.name
+                    Write-Host "Downloading dependency bundle: $($dependenciesZip.name)" -ForegroundColor Gray
+                    Invoke-DownloadFile -Uri $dependenciesZip.browser_download_url -OutFile $zipPath
+
+                    $dependenciesExtractPath = Join-Path $tempDir "dependencies"
+                    if (Test-Path $dependenciesExtractPath) {
+                        Remove-Item -Path $dependenciesExtractPath -Recurse -Force -ErrorAction SilentlyContinue
+                    }
+
+                    try {
+                        Import-Module Microsoft.PowerShell.Archive -ErrorAction SilentlyContinue
+                        Expand-Archive -LiteralPath $zipPath -DestinationPath $dependenciesExtractPath -Force
+                    }
+                    catch {
+                        try {
+                            Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
+                            [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $dependenciesExtractPath)
+                        }
+                        catch {
+                            Write-Host "⚠ Failed to extract dependency bundle: $($_.Exception.Message)" -ForegroundColor Yellow
+                        }
+                    }
+
+                    if (Test-Path $dependenciesExtractPath) {
+                        $extractedDeps = Get-ChildItem -Path $dependenciesExtractPath -Recurse -Include *.msixbundle, *.msix, *.appx -ErrorAction SilentlyContinue
+                        foreach ($dep in $extractedDeps) {
+                            Write-Host "Discovered dependency: $($dep.Name)" -ForegroundColor Gray
+                            $dependencyFiles += $dep.FullName
+                        }
+                    }
+                }
+
+                if ($dependencyFiles.Count -gt 0) {
+                    # Install frameworks first to satisfy requirements
+                    $dependencyFiles = $dependencyFiles | Sort-Object {
+                        if ($_ -match 'WindowsAppRuntime') { 0 }
+                        elseif ($_ -match 'VCLibs') { 1 }
+                        elseif ($_ -match 'UI') { 2 }
+                        else { 3 }
+                    }, { $_ }
+                }
+
+                Write-Host "Installing dependencies and App Installer..." -ForegroundColor Gray
+                try {
+                    if ($dependencyFiles.Count -gt 0) {
+                        foreach ($dependencyFile in $dependencyFiles) {
+                            try {
+                                Add-AppxPackage -Path $dependencyFile -ForceApplicationShutdown -ErrorAction Stop
+                            }
+                            catch {
+                                Write-Host "⚠ Failed to install dependency $([System.IO.Path]::GetFileName($dependencyFile)) : $($_.Exception.Message)" -ForegroundColor Yellow
+                            }
+                        }
+                    }
+
+                    Add-AppxPackage -Path $appInstallerPath -ForceApplicationShutdown -ErrorAction Stop
+
+                    Write-Host "✓ Winget package installed" -ForegroundColor Green
+                }
+                catch {
+                    Write-Host "⚠ Winget installation error: $($_.Exception.Message)" -ForegroundColor Yellow
+                }
+
+                # Clean up downloaded files
+                Get-ChildItem -Path $tempDir -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+                Remove-Item $tempDir -Force -ErrorAction SilentlyContinue
+
+                Start-Sleep -Seconds 2
+
+                $wingetCommand = Get-Command winget -ErrorAction SilentlyContinue
+                if (-not $wingetCommand) {
+                    $fallbackWingetPath = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Microsoft\WindowsApps\winget.exe'
+                    if (Test-Path $fallbackWingetPath) {
+                        $wingetCommand = Get-Command $fallbackWingetPath -ErrorAction SilentlyContinue
+                    }
+                }
+
+                if ($wingetCommand) {
+                    Write-Host "✓ Winget installed successfully" -ForegroundColor Green
+                }
+                else {
+                    Write-Host "⚠ Winget installation completed but may not be in PATH yet." -ForegroundColor Yellow
+                    Write-Host "  Please close and reopen PowerShell, or manually install from Microsoft Store:" -ForegroundColor Yellow
+                    Write-Host "  https://apps.microsoft.com/detail/9NBLGGH4NNS1" -ForegroundColor Cyan
+                }
+            }
+            else {
+                throw "Could not find App Installer package in GitHub releases"
+            }
+        }
+        catch {
+            Write-Host "✗ Error installing Winget from GitHub: $($_.Exception.Message)" -ForegroundColor Red
+            Write-Host "`n⚠ MANUAL INSTALLATION REQUIRED" -ForegroundColor Yellow
+            Write-Host "Please install Windows Package Manager manually:" -ForegroundColor Yellow
+            Write-Host "  Option 1: Microsoft Store (recommended)" -ForegroundColor Cyan
+            Write-Host "    https://apps.microsoft.com/detail/9NBLGGH4NNS1" -ForegroundColor Cyan
+            Write-Host "  Option 2: GitHub Releases" -ForegroundColor Cyan
+            Write-Host "    https://github.com/microsoft/winget-cli/releases" -ForegroundColor Cyan
+            Write-Host "  Option 3: Windows 11 already has it (check 'winget' in Start Menu)" -ForegroundColor Cyan
+            Write-Host "`nAfter installing, run this script again with -SkipWinget switch." -ForegroundColor Yellow
+        }
+    }
+}
+
+# Install required PowerShell modules
+if (-not $SkipModules) {
+    Write-Host "`n[2/4] Installing required PowerShell modules..." -ForegroundColor Cyan
+
+    try {
+        $nugetProvider = Get-PackageProvider -Name NuGet -ErrorAction SilentlyContinue
+        if (-not $nugetProvider) {
+            Write-Host "  Installing NuGet package provider..." -ForegroundColor Gray
+            Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -ErrorAction Stop | Out-Null
+        }
+    }
+    catch {
+        Write-Host "  ⚠ Failed to install NuGet provider automatically: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+
+    try {
+        $psGallery = Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue
+        if ($psGallery -and $psGallery.InstallationPolicy -ne 'Trusted') {
+            Set-PSRepository -Name PSGallery -InstallationPolicy Trusted -ErrorAction SilentlyContinue
+        }
+    }
+    catch {
+        Write-Host "  ⚠ Unable to update PSGallery repository trust: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+
+    $modules = @(
+        'PwshSpectreConsole',
+        'PSWindowsUpdate',
+        'ExchangeOnlineManagement'
+    )
+
+    foreach ($module in $modules) {
+        Write-Host "`n  Installing: $module" -ForegroundColor Gray
+
+        $installed = Get-Module -ListAvailable -Name $module -ErrorAction SilentlyContinue
+
+        if ($installed -and -not $Force) {
+            Write-Host "  ✓ $module already installed (v$($installed.Version | Select-Object -First 1))" -ForegroundColor Green
+        }
+        else {
+            try {
+                Install-Module -Name $module -Force -AllowClobber -ErrorAction Stop -Scope CurrentUser
+                Write-Host "  ✓ $module installed successfully" -ForegroundColor Green
+            }
+            catch {
+                Write-Host "  ✗ Failed to install $module : $($_.Exception.Message)" -ForegroundColor Red
+            }
+        }
+    }
+}
+
+# Download and install WingetBatch module
+Write-Host "`n[3/4] Setting up WingetBatch module..." -ForegroundColor Cyan
+
+# Determine correct module path
+$moduleBase = Get-ModuleBasePath
+
+$moduleDir = Join-Path $moduleBase "WingetBatch"
+$modulePath = Join-Path $moduleDir "WingetBatch.psm1"
+
+if ((Test-Path $modulePath) -and -not $Force) {
+    Write-Host "✓ WingetBatch module already exists at: $moduleDir" -ForegroundColor Green
+}
+else {
+    Write-Host "Downloading WingetBatch from GitHub..." -ForegroundColor Gray
+
+    try {
+        $repoUrl = "https://raw.githubusercontent.com/thebubbsy/WingetBatch/main"
+        $files = @(
+            "WingetBatch.psm1",
+            "WingetBatch.psd1",
+            "README.md"
+        )
+
+        if (-not (Test-Path $moduleDir)) {
+            New-Item -ItemType Directory -Path $moduleDir -Force | Out-Null
+        }
+
+        foreach ($file in $files) {
+            $fileUrl = "$repoUrl/$file"
+            $filePath = Join-Path $moduleDir $file
+            Write-Host "  Downloading: $file" -ForegroundColor Gray
+            try {
+                Invoke-DownloadFile -Uri $fileUrl -OutFile $filePath
+            }
+            catch {
+                Write-Host "  ✗ Failed to download $file : $($_.Exception.Message)" -ForegroundColor Yellow
+            }
+        }
+
+        if (Test-Path $modulePath) {
+            Write-Host "✓ WingetBatch module downloaded successfully" -ForegroundColor Green
+        }
+        else {
+            Write-Host "✗ Failed to download WingetBatch module" -ForegroundColor Red
+        }
+    }
+    catch {
+        Write-Host "✗ Error downloading WingetBatch: $($_.Exception.Message)" -ForegroundColor Red
+    }
+}
+
+# Import and configure WingetBatch
+Write-Host "`n[4/4] Importing WingetBatch module..." -ForegroundColor Cyan
+
+try {
+    Remove-Module WingetBatch -ErrorAction SilentlyContinue
+    Import-Module $modulePath -Force -ErrorAction Stop
+    Write-Host "✓ WingetBatch module imported successfully" -ForegroundColor Green
+    Write-Host "`nAvailable commands:" -ForegroundColor Cyan
+    Get-Command -Module WingetBatch | Select-Object -ExpandProperty Name | ForEach-Object { Write-Host "  • $_" -ForegroundColor Green }
+}
+catch {
+    Write-Host "✗ Failed to import WingetBatch: $($_.Exception.Message)" -ForegroundColor Red
+}
+
+# Summary
+Write-Host "`n========================================" -ForegroundColor Cyan
+Write-Host "Installation Complete!" -ForegroundColor Green
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "`nYou can now use WingetBatch commands:" -ForegroundColor Cyan
+Write-Host "  • Install-WingetAll `"search term`"" -ForegroundColor Green
+Write-Host "  • Get-WingetUpdates" -ForegroundColor Green
+Write-Host "  • Get-WingetNewPackages -Days 7" -ForegroundColor Green
+Write-Host "  • Remove-WingetRecent -Days 30" -ForegroundColor Green
+Write-Host "  • Enable-WingetUpdateNotifications" -ForegroundColor Green
+Write-Host "`nFor help: Get-Help Install-WingetAll -Full`n" -ForegroundColor Cyan
