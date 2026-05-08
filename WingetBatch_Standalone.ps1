@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     WingetBatch Standalone Script
     
@@ -27,6 +27,301 @@ function ConvertTo-SpectreEscaped {
     if ($Text.IndexOf('[') -eq -1 -and $Text.IndexOf(']') -eq -1) { return $Text }
     return $Text.Replace('[', '[[').Replace(']', ']]')
 }
+
+# EndRegion
+
+# Region: Private/Export-WingetHtmlReport.ps1
+function Export-WingetHtmlReport {
+    <#
+    .SYNOPSIS
+        Exports an array of objects to a highly styled, interactive HTML report.
+
+    .DESCRIPTION
+        Takes an array of objects, prompts the user for a save location, and generates
+        a premium dark-mode HTML file containing all the data with sortable columns
+        and a live search filter. Automatically opens the file in the default browser.
+
+    .PARAMETER Data
+        The array of custom objects to export.
+
+    .PARAMETER ReportTitle
+        The title to display at the top of the report.
+
+    .PARAMETER ReportType
+        A short string used for the generated filename (e.g., 'NewPackages').
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)]
+        [array]$Data,
+
+        [Parameter(Mandatory=$true)]
+        [string]$ReportTitle,
+
+        [Parameter(Mandatory=$true)]
+        [string]$FilePath
+    )
+
+    if (-not $Data -or $Data.Count -eq 0) {
+        Write-Warning "No data available to export to HTML."
+        return
+    }
+
+    # Check directory
+    $savePath = Split-Path $FilePath
+    $filename = Split-Path $FilePath -Leaf
+    if (-not $savePath) { $savePath = "." }
+    $fullPath = Join-Path $savePath $filename
+
+    Write-Host "Generating HTML report..." -ForegroundColor DarkGray
+
+    # Extract column names from the first object
+    $firstItem = $Data[0]
+    $properties = if ($firstItem -is [PSCustomObject]) {
+        $firstItem.PSObject.Properties.Name
+    } elseif ($firstItem -is [Hashtable]) {
+        $firstItem.Keys | Sort-Object
+    } else {
+        $firstItem | Get-Member -MemberType Properties | Select-Object -ExpandProperty Name
+    }
+
+    # Build Table Headers
+    $thHtml = ""
+    foreach ($prop in $properties) {
+        $thHtml += "<th>$prop</th>`n"
+    }
+
+    # Build Table Rows
+    $trHtml = ""
+    foreach ($item in $Data) {
+        $trHtml += "<tr>`n"
+        foreach ($prop in $properties) {
+            $val = if ($item -is [Hashtable]) { $item[$prop] } else { $item.$prop }
+            # Escape HTML
+            $escapedVal = [System.Net.WebUtility]::HtmlEncode([string]$val)
+            $trHtml += "<td>$escapedVal</td>`n"
+        }
+        $trHtml += "</tr>`n"
+    }
+
+    # HTML Template
+    $htmlReport = @"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>$ReportTitle - WingetBatch</title>
+    <style>
+        :root {
+            --bg-base: #09090b;
+            --bg-card: rgba(24, 24, 27, 0.6);
+            --border: rgba(255, 255, 255, 0.1);
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --accent: #10b981;
+            --accent-hover: #059669;
+        }
+        body {
+            background-color: var(--bg-base);
+            color: var(--text-main);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 2rem;
+            min-height: 100vh;
+            background-image: 
+                radial-gradient(circle at 15% 50%, rgba(16, 185, 129, 0.05), transparent 25%),
+                radial-gradient(circle at 85% 30%, rgba(56, 189, 248, 0.05), transparent 25%);
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            margin-bottom: 2rem;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 1rem;
+        }
+        h1 {
+            margin: 0;
+            font-size: 2.5rem;
+            font-weight: 700;
+            letter-spacing: -0.025em;
+            background: linear-gradient(to right, #fff, #94a3b8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .meta {
+            color: var(--text-muted);
+            font-size: 0.875rem;
+        }
+        .controls {
+            margin-bottom: 1.5rem;
+            display: flex;
+            gap: 1rem;
+        }
+        input[type="text"] {
+            flex-grow: 1;
+            background: rgba(0,0,0,0.3);
+            border: 1px solid var(--border);
+            color: var(--text-main);
+            padding: 0.75rem 1rem;
+            border-radius: 0.5rem;
+            font-size: 1rem;
+            outline: none;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        input[type="text"]:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 1px var(--accent);
+        }
+        .table-container {
+            background: var(--bg-card);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--border);
+            border-radius: 1rem;
+            overflow: auto;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+        }
+        th {
+            background: rgba(255,255,255,0.02);
+            color: var(--text-muted);
+            font-weight: 600;
+            font-size: 0.875rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            padding: 1rem;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.2s;
+        }
+        th:hover {
+            background: rgba(255,255,255,0.05);
+            color: var(--text-main);
+        }
+        td {
+            padding: 1rem;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            font-size: 0.95rem;
+            word-break: break-word;
+        }
+        tr:last-child td {
+            border-bottom: none;
+        }
+        tr:hover td {
+            background: rgba(255,255,255,0.02);
+        }
+        /* Sort indicators */
+        th::after {
+            content: '';
+            display: inline-block;
+            margin-left: 0.5rem;
+            opacity: 0.3;
+        }
+        th.asc::after { content: '▲'; opacity: 1; color: var(--accent); }
+        th.desc::after { content: '▼'; opacity: 1; color: var(--accent); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div>
+                <h1>$ReportTitle</h1>
+                <div class="meta">Generated by WingetBatch • $((Get-Date).ToString("yyyy-MM-dd HH:mm:ss"))</div>
+            </div>
+            <div class="meta">$($Data.Count) records found</div>
+        </header>
+
+        <div class="controls">
+            <input type="text" id="searchInput" placeholder="Search across all fields..." onkeyup="filterTable()">
+        </div>
+
+        <div class="table-container">
+            <table id="dataTable">
+                <thead>
+                    <tr>
+                        $thHtml
+                    </tr>
+                </thead>
+                <tbody>
+                    $trHtml
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        // Client-side search filtering
+        function filterTable() {
+            const input = document.getElementById("searchInput");
+            const filter = input.value.toLowerCase();
+            const table = document.getElementById("dataTable");
+            const tr = table.getElementsByTagName("tr");
+
+            for (let i = 1; i < tr.length; i++) {
+                let textValue = tr[i].textContent || tr[i].innerText;
+                if (textValue.toLowerCase().indexOf(filter) > -1) {
+                    tr[i].style.display = "";
+                } else {
+                    tr[i].style.display = "none";
+                }
+            }
+        }
+
+        // Client-side column sorting
+        const getCellValue = (tr, idx) => tr.children[idx].innerText || tr.children[idx].textContent;
+        const comparer = (idx, asc) => (a, b) => ((v1, v2) => 
+            v1 !== '' && v2 !== '' && !isNaN(v1) && !isNaN(v2) ? v1 - v2 : v1.toString().localeCompare(v2)
+            )(getCellValue(asc ? a : b, idx), getCellValue(asc ? b : a, idx));
+
+        document.querySelectorAll('th').forEach(th => th.addEventListener('click', (() => {
+            const table = th.closest('table');
+            const tbody = table.querySelector('tbody');
+            const asc = th.classList.contains('asc');
+            
+            // Remove sort classes from all headers
+            table.querySelectorAll('th').forEach(el => {
+                el.classList.remove('asc', 'desc');
+            });
+            
+            // Add new sort class
+            th.classList.add(asc ? 'desc' : 'asc');
+            
+            Array.from(tbody.querySelectorAll('tr'))
+                .sort(comparer(Array.from(th.parentNode.children).indexOf(th), !asc))
+                .forEach(tr => tbody.appendChild(tr));
+        })));
+    </script>
+</body>
+</html>
+"@
+
+    try {
+        # Save and Open
+        Write-Host "[INFO] Generating HTML report: $FilePath" -ForegroundColor Cyan
+        $htmlReport | Out-File -FilePath $FilePath -Encoding UTF8 -Force
+        
+        if (Test-Path $FilePath) {
+            Write-Host "[OK] Report saved successfully." -ForegroundColor Green
+            Start-Process $FilePath
+        }
+    }
+    catch {
+        Write-Error "Failed to save HTML report: $_"
+    }
+}
+
+
 
 # EndRegion
 
@@ -909,6 +1204,7 @@ function Disable-WingetUpdateNotifications {
     Write-Host "  Restart your terminal for changes to take effect." -ForegroundColor DarkGray
 }
 
+
 # EndRegion
 
 # Region: Public/Enable-WingetUpdateNotifications.ps1
@@ -1000,6 +1296,7 @@ if (Get-Module -ListAvailable -Name WingetBatch) {
     }
 }
 
+
 # EndRegion
 
 # Region: Public/Export-WingetBatchConfig.ps1
@@ -1029,6 +1326,7 @@ function Export-WingetBatchConfig {
         Write-Warning "No WingetBatch configuration found to export."
     }
 }
+
 
 # EndRegion
 
@@ -1098,7 +1396,10 @@ function Get-WingetNewPackages {
         [string]$ExcludeTerm,
 
         [Parameter()]
-        [switch]$IWantToLiterallyInstallAllFuckingResults
+        [switch]$IWantToLiterallyInstallAllFuckingResults,
+
+        [Parameter()]
+        [switch]$ExportHtml
     )
 
     # Ensure PwshSpectreConsole is available
@@ -1202,14 +1503,14 @@ function Get-WingetNewPackages {
 
         # Show final API usage
         Write-Host ""
-        Write-Host "ðŸ“Š GitHub API: " -ForegroundColor Cyan -NoNewline
+        Write-Host "[API] GitHub API: " -ForegroundColor Cyan -NoNewline
         Write-Host "$apiRequestsMade" -ForegroundColor White -NoNewline
         Write-Host " requests made | " -ForegroundColor DarkGray -NoNewline
         Write-Host "$totalUsage" -ForegroundColor $(if ($totalUsage -gt ($limit * 0.8)) { "Red" } elseif ($totalUsage -gt ($limit * 0.5)) { "Yellow" } else { "Green" }) -NoNewline
         Write-Host "/$limit" -ForegroundColor DarkGray -NoNewline
         Write-Host " used this hour" -ForegroundColor DarkGray
         Write-Host ""
-        Write-Host "Fetched total of " -ForegroundColor Green -NoNewline
+                            Write-Host "  - " -ForegroundColor Green -NoNewline
         Write-Host "$($allCommits.Count)" -ForegroundColor White -NoNewline
         Write-Host " commits" -ForegroundColor Green
 
@@ -1311,7 +1612,7 @@ function Get-WingetNewPackages {
             return
         }
 
-        Write-Host "`nFound " -ForegroundColor Green -NoNewline
+                            Write-Host "  - " -ForegroundColor Green -NoNewline
         Write-Host "$($newPackages.Count)" -ForegroundColor White -NoNewline
         Write-Host " new package(s)" -NoNewline -ForegroundColor Green
         if ($ExcludeTerm) {
@@ -1329,7 +1630,7 @@ function Get-WingetNewPackages {
 
         # Fetch detailed package info in parallel BEFORE showing selection UI
         Write-Host ""
-        Write-Host "â³ Fetching detailed package information in background..." -ForegroundColor DarkGray
+        Write-Host "[WAIT] Fetching detailed package information in background..." -ForegroundColor DarkGray
 
         $configDir = Get-WingetBatchConfigDir
         $maxConcurrentJobs = 10
@@ -1384,7 +1685,7 @@ function Get-WingetNewPackages {
         $jobPackageMap = @{}
 
         if ($cachedResults.Count -gt 0) {
-            Write-Host "âœ“ Found $($cachedResults.Count) packages in cache" -ForegroundColor Green
+            Write-Host "[OK] Found $($cachedResults.Count) packages in cache" -ForegroundColor Green
         }
 
         for ($i = 0; $i -lt $actualJobCount; $i++) {
@@ -1421,6 +1722,26 @@ function Get-WingetNewPackages {
         Write-Host "   Started $actualJobCount background jobs processing $totalPackagesToFetch packages..." -ForegroundColor DarkGray
         Write-Host "   (~$packagesPerJob packages per job)" -ForegroundColor DarkGray
 
+        if ($ExportHtml) {
+            Write-Host "
+[HTML] Exporting HTML report..." -ForegroundColor Cyan
+            $timestamp = (Get-Date).ToString("yyyyMMdd_HHmmss")
+            $defaultPath = "C:\temp\WingetBatch_New Packages_$timestamp.html".Replace(' ', '_')
+            $exportPath = Read-Host "Enter path for HTML report [Default: $defaultPath]"
+            if (-not $exportPath) { $exportPath = $defaultPath }
+            if (-not $exportPath.EndsWith(".html")) { $exportPath += ".html" }
+            
+            try {
+                Export-WingetHtmlReport -Data $newPackages -ReportTitle "New Packages" -FilePath $exportPath
+                if (Test-Path $exportPath) {
+                    Write-Host "[OK] Report successfully saved to $exportPath" -ForegroundColor Green
+                    Invoke-Item $exportPath
+                }
+            } catch {
+                Write-Host "[FAIL] Failed to generate HTML report: $_" -ForegroundColor Red
+            }
+        }
+
         # Interactive selection using Spectre Console
         if ($IWantToLiterallyInstallAllFuckingResults -or (Get-Module -Name PwshSpectreConsole)) {
             Write-Host ""
@@ -1443,7 +1764,7 @@ function Get-WingetNewPackages {
                 }
 
                 if ($selectedChoices.Count -gt 0) {
-                    Write-Host "`nSelected " -ForegroundColor Green -NoNewline
+                            Write-Host "  - " -ForegroundColor Green -NoNewline
                     Write-Host "$($selectedChoices.Count)" -ForegroundColor White -NoNewline
                     Write-Host " package(s) for installation" -ForegroundColor Green
                     Write-Host ""
@@ -1483,12 +1804,12 @@ function Get-WingetNewPackages {
                     $runningRelevantJobs = @($relevantJobs | Where-Object { $_.State -eq 'Running' })
 
                     if ($runningRelevantJobs.Count -gt 0) {
-                        Write-Host "â³ Waiting for $($runningRelevantJobs.Count) background jobs with selected packages..." -ForegroundColor DarkGray
+                        Write-Host "[WAIT] Waiting for $($runningRelevantJobs.Count) background jobs with selected packages..." -ForegroundColor DarkGray
                         $timeout = 30
                         $runningRelevantJobs | Wait-Job -Timeout $timeout | Out-Null
                     }
                     else {
-                        Write-Host "âœ“ Selected package details already fetched!" -ForegroundColor Green
+                        Write-Host "[OK] Selected package details already fetched!" -ForegroundColor Green
                     }
 
                     # Stop irrelevant jobs immediately (user doesn't need them)
@@ -1587,12 +1908,12 @@ function Get-WingetNewPackages {
                     if ($userChoice -eq "Go back and change selection") {
                         Write-Host "`nReturning to package selection..." -ForegroundColor Cyan
                         Write-Host ""
-                        Write-Host "âš  NOTE: All selections will be cleared when returning to the menu." -ForegroundColor Yellow
+                        Write-Host "[!] NOTE: All selections will be cleared when returning to the menu." -ForegroundColor Yellow
                         Write-Host "   You will need to re-select your packages." -ForegroundColor Yellow
                         Write-Host ""
                         Write-Host "Previously selected packages:" -ForegroundColor Cyan
                         foreach ($pkg in $packagesToInstall) {
-                            Write-Host "  â€¢ " -ForegroundColor Green -NoNewline
+                            Write-Host "  - " -ForegroundColor Green -NoNewline
                             Write-Host $pkg -ForegroundColor White
                         }
                         Write-Host ""
@@ -1629,13 +1950,13 @@ function Get-WingetNewPackages {
                                 }
                             }
 
-                            Write-Host "`nSelected " -ForegroundColor Green -NoNewline
+                            Write-Host "  - " -ForegroundColor Green -NoNewline
                             Write-Host "$($packagesToInstallIds.Count)" -ForegroundColor White -NoNewline
                             Write-Host " package(s)" -ForegroundColor Green
                             Write-Host ""
 
                             # Fetch details for newly selected packages (from cache or jobs)
-                            Write-Host "â³ Fetching package details..." -ForegroundColor DarkGray
+                            Write-Host "[WAIT] Fetching package details..." -ForegroundColor DarkGray
 
                             # Load cache once before the loop to avoid repeated I/O
                             $cacheFile = Join-Path $configDir "package_cache.json"
@@ -1743,12 +2064,12 @@ function Get-WingetNewPackages {
                         winget install --id $packageId --accept-package-agreements --accept-source-agreements --silent | Out-Null
 
                         if ($LASTEXITCODE -eq 0) {
-                            Write-Host "âœ“ Successfully installed " -ForegroundColor Green -NoNewline
+                            Write-Host "[OK] Successfully installed " -ForegroundColor Green -NoNewline
                             Write-Host $packageId -ForegroundColor White
                             $successCount++
                         }
                         else {
-                            Write-Host "âœ— Failed to install " -ForegroundColor Red -NoNewline
+                            Write-Host "[FAIL] Failed to install " -ForegroundColor Red -NoNewline
                             Write-Host $packageId -ForegroundColor White -NoNewline
                             Write-Host " (Exit code: $LASTEXITCODE)" -ForegroundColor Red
                             $failCount++
@@ -1758,7 +2079,7 @@ function Get-WingetNewPackages {
                     Write-Host "`n" + ("=" * 60) -ForegroundColor Green
                     Write-Host "Installation Complete" -ForegroundColor Green
                     Write-Host ("=" * 60) -ForegroundColor Green
-                    Write-Host "Success: " -ForegroundColor Green -NoNewline
+                            Write-Host "  - " -ForegroundColor Green -NoNewline
                     Write-Host $successCount -ForegroundColor White -NoNewline
                     Write-Host " | Failed: " -ForegroundColor Red -NoNewline
                     Write-Host $failCount -ForegroundColor White
@@ -1799,7 +2120,7 @@ function Get-WingetNewPackages {
         Write-Error "Failed to fetch new packages from GitHub: $_"
         if ($_.Exception.Response.StatusCode -eq 403 -or $_ -match 'rate limit') {
             Write-Host "`nâ”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”" -ForegroundColor Yellow
-            Write-Host "âš  GitHub API Rate Limit Exceeded" -ForegroundColor Yellow
+            Write-Host "[!] GitHub API Rate Limit Exceeded" -ForegroundColor Yellow
             Write-Host "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”" -ForegroundColor Yellow
             Write-Host ""
             Write-Host "Unauthenticated requests are limited to 60 per hour." -ForegroundColor White
@@ -1814,6 +2135,9 @@ function Get-WingetNewPackages {
         }
     }
 }
+
+
+
 
 # EndRegion
 
@@ -1845,7 +2169,10 @@ function Get-WingetUpdates {
         [switch]$Force,
 
         [Parameter()]
-        [switch]$IWantToLiterallyUpdateAllFuckingResults
+        [switch]$IWantToLiterallyUpdateAllFuckingResults,
+
+        [Parameter()]
+        [switch]$ExportHtml
     )
 
     # Ensure PwshSpectreConsole is available
@@ -1906,17 +2233,37 @@ function Get-WingetUpdates {
     }
 
     if ($updatesAvailable.Count -eq 0) {
-        Write-Host "âœ“ All packages are up to date!" -ForegroundColor Green
+        Write-Host "[OK] All packages are up to date!" -ForegroundColor Green
         return
     }
 
     Write-Host ""
-    Write-Host "Found " -ForegroundColor Green -NoNewline
+                            Write-Host "  - " -ForegroundColor Green -NoNewline
     Write-Host "$($updatesAvailable.Count)" -ForegroundColor White -NoNewline
     Write-Host " update(s) available" -ForegroundColor Green
     Write-Host ""
 
     # Interactive selection using Spectre Console
+        if ($ExportHtml) {
+            Write-Host "
+[HTML] Exporting HTML report..." -ForegroundColor Cyan
+            $timestamp = (Get-Date).ToString("yyyyMMdd_HHmmss")
+            $defaultPath = "C:\temp\WingetBatch_Updates_$timestamp.html".Replace(' ', '_')
+            $exportPath = Read-Host "Enter path for HTML report [Default: $defaultPath]"
+            if (-not $exportPath) { $exportPath = $defaultPath }
+            if (-not $exportPath.EndsWith(".html")) { $exportPath += ".html" }
+            
+            try {
+                Export-WingetHtmlReport -Data $updatesAvailable -ReportTitle "Updates" -FilePath $exportPath
+                if (Test-Path $exportPath) {
+                    Write-Host "[OK] Report successfully saved to $exportPath" -ForegroundColor Green
+                    Invoke-Item $exportPath
+                }
+            } catch {
+                Write-Host "[FAIL] Failed to generate HTML report: $_" -ForegroundColor Red
+            }
+        }
+
     if ($IWantToLiterallyUpdateAllFuckingResults) {
         $selectedPackages = $updatesAvailable | ForEach-Object { $_.Id }
     }
@@ -1983,12 +2330,12 @@ function Get-WingetUpdates {
         winget upgrade --id $packageId --accept-package-agreements --accept-source-agreements
 
         if ($LASTEXITCODE -eq 0) {
-            Write-Host "âœ“ Successfully updated " -ForegroundColor Green -NoNewline
+            Write-Host "[OK] Successfully updated " -ForegroundColor Green -NoNewline
             Write-Host $packageId -ForegroundColor White
             $successCount++
         }
         else {
-            Write-Host "âœ— Failed to update " -ForegroundColor Red -NoNewline
+            Write-Host "[FAIL] Failed to update " -ForegroundColor Red -NoNewline
             Write-Host $packageId -ForegroundColor White
             $failCount++
         }
@@ -1998,7 +2345,7 @@ function Get-WingetUpdates {
     Write-Host ("=" * 60) -ForegroundColor Green
     Write-Host "Update Complete" -ForegroundColor Green
     Write-Host ("=" * 60) -ForegroundColor Green
-    Write-Host "Success: " -ForegroundColor Green -NoNewline
+                            Write-Host "  - " -ForegroundColor Green -NoNewline
     Write-Host $successCount -ForegroundColor White -NoNewline
     Write-Host " | Failed: " -ForegroundColor Red -NoNewline
     Write-Host $failCount -ForegroundColor White
@@ -2008,6 +2355,9 @@ function Get-WingetUpdates {
         Remove-Item $cacheFile -Force
     }
 }
+
+
+
 
 # EndRegion
 
@@ -2033,6 +2383,7 @@ function Import-WingetBatchConfig {
     Expand-Archive -Path $Path -DestinationPath $configDir -Force
     Write-Host "Imported WingetBatch configuration from $Path" -ForegroundColor Green
 }
+
 
 # EndRegion
 
@@ -2578,6 +2929,7 @@ function Install-WingetAll {
     }
 }
 
+
 # EndRegion
 
 # Region: Public/Invoke-WingetBatchCleanup.ps1
@@ -2611,6 +2963,7 @@ function Invoke-WingetBatchCleanup {
     $mbFreed = [math]::Round($bytesFreed / 1MB, 2)
     Write-Host "Cleanup complete. Freed $mbFreed MB of cache." -ForegroundColor Green
 }
+
 
 # EndRegion
 
@@ -2745,6 +3098,7 @@ function New-WingetBatchGitHubToken {
     Write-Host "Get-WingetNewPackages -Days 30" -ForegroundColor Yellow
     Write-Host ""
 }
+
 
 # EndRegion
 
@@ -3035,6 +3389,7 @@ function Remove-WingetRecent {
     }
 }
 
+
 # EndRegion
 
 # Region: Public/Set-WingetBatchGitHubToken.ps1
@@ -3136,6 +3491,7 @@ function Set-WingetBatchGitHubToken {
     }
 }
 
+
 # EndRegion
 
 # Region: Public/Update-WingetBatch.ps1
@@ -3150,6 +3506,7 @@ function Update-WingetBatch {
     Update-Module -Name WingetBatch -Force -AcceptLicense -ErrorAction Stop
     Write-Host "WingetBatch module updated successfully!" -ForegroundColor Green
 }
+
 
 # EndRegion
 

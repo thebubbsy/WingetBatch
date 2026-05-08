@@ -1,4 +1,4 @@
-﻿function Get-WingetNewPackages {
+function Get-WingetNewPackages {
     <#
     .SYNOPSIS
         Get recently added NEW packages from the winget repository.
@@ -399,7 +399,7 @@
             if (-not $exportPath.EndsWith(".html")) { $exportPath += ".html" }
             
             try {
-                Export-WingetHtmlReport -Data $newPackages -ReportTitle "New Packages" -OutFile $exportPath
+                Export-WingetHtmlReport -Data $newPackages -ReportTitle "New Packages" -FilePath $exportPath
                 if (Test-Path $exportPath) {
                     Write-Host "[OK] Report successfully saved to $exportPath" -ForegroundColor Green
                     Invoke-Item $exportPath

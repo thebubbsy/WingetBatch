@@ -1,4 +1,4 @@
-﻿function Get-WingetUpdates {
+function Get-WingetUpdates {
     <#
     .SYNOPSIS
         Check for and install available winget package updates.
@@ -110,7 +110,7 @@
             if (-not $exportPath.EndsWith(".html")) { $exportPath += ".html" }
             
             try {
-                Export-WingetHtmlReport -Data $updatesAvailable -ReportTitle "Updates" -OutFile $exportPath
+                Export-WingetHtmlReport -Data $updatesAvailable -ReportTitle "Updates" -FilePath $exportPath
                 if (Test-Path $exportPath) {
                     Write-Host "[OK] Report successfully saved to $exportPath" -ForegroundColor Green
                     Invoke-Item $exportPath

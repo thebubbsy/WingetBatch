@@ -1,4 +1,4 @@
-﻿function Export-WingetHtmlReport {
+function Export-WingetHtmlReport {
     <#
     .SYNOPSIS
         Exports an array of objects to a highly styled, interactive HTML report.
@@ -26,7 +26,7 @@
         [string]$ReportTitle,
 
         [Parameter(Mandatory=$true)]
-        [string]$OutFile
+        [string]$FilePath
     )
 
     if (-not $Data -or $Data.Count -eq 0) {
@@ -34,9 +34,10 @@
         return
     }
 
-$savePath = Split-Path $OutFile
-$filename = Split-Path $OutFile -Leaf
-if (-not $savePath) { $savePath = "." }
+    # Check directory
+    $savePath = Split-Path $FilePath
+    $filename = Split-Path $FilePath -Leaf
+    if (-not $savePath) { $savePath = "." }
     $fullPath = Join-Path $savePath $filename
 
     Write-Host "Generating HTML report..." -ForegroundColor DarkGray
@@ -71,7 +72,7 @@ if (-not $savePath) { $savePath = "." }
     }
 
     # HTML Template
-    $htmlContent = @"
+    $htmlReport = @"
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -273,17 +274,18 @@ if (-not $savePath) { $savePath = "." }
 "@
 
     try {
-        [System.IO.File]::WriteAllText($fullPath, $htmlContent, [System.Text.Encoding]::UTF8)
-                            Write-Host "  - " -ForegroundColor Green -NoNewline
-        Write-Host $fullPath -ForegroundColor White
+        # Save and Open
+        Write-Host "[INFO] Generating HTML report: $FilePath" -ForegroundColor Cyan
+        $htmlReport | Out-File -FilePath $FilePath -Encoding UTF8 -Force
         
-        Write-Host "Opening report in default browser..." -ForegroundColor DarkGray
-        Invoke-Item $fullPath
+        if (Test-Path $FilePath) {
+            Write-Host "[OK] Report saved successfully." -ForegroundColor Green
+            Start-Process $FilePath
+        }
     }
     catch {
         Write-Error "Failed to save HTML report: $_"
     }
 }
-
 
 
