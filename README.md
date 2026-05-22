@@ -114,6 +114,15 @@ Get-WingetUpdates -Force
 - **PowerShell 5.1** or **PowerShell 7+** (Recommended)
 - **PwshSpectreConsole** module (Auto-installed if missing)
 
+## Next-Generation Architecture
+
+We are actively designing a next-generation architecture to transition `wingetbatch` from a CLI wrapper to an enterprise-grade package deployment tool. Key pillars include:
+* **COM API Integration (`Microsoft.WinGet.Client`)** to eliminate stdout parsing.
+* **Split-Phase Concurrency (RunspacePools)** for parallel downloading with serialized installation.
+* **Declarative State Management** for idempotent deployments.
+
+For a detailed breakdown of the roadmap and execution logic, view our [Next-Generation Architecture Roadmap](docs/architecture_nextgen.md).
+
 ## Credits & Attribution
 
 **WingetBatch** is architected and maintained exclusively by **Matthew Bubb**.
