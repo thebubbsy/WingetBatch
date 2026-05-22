@@ -3,7 +3,7 @@
     RootModule = 'WingetBatch.psm1'
 
     # Version number of this module.
-    ModuleVersion = '2.2.1'
+    ModuleVersion = '2.3.0'
 
     # ID used to uniquely identify this module
     GUID = 'b9e8f5d2-4c3f-4a6b-8d9e-2f7a8b5c6e4f'
@@ -36,7 +36,8 @@
         'Export-WingetBatchConfig',
         'Import-WingetBatchConfig',
         'Invoke-WingetBatchCleanup',
-        'Update-WingetBatch'
+        'Update-WingetBatch',
+        'Invoke-WinGetBatch'
     )
 
     # Cmdlets to export from this module
@@ -65,6 +66,16 @@
 
             # ReleaseNotes of this module
             ReleaseNotes = @'
+v2.3.0 - Next-Generation Idempotent Deployment Engine
+- NEW: Invoke-WinGetBatch - Idempotent, manifest-driven package deployments using native COM APIs.
+  * Decoupled from fragile CLI regex parsing; uses Microsoft.WinGet.Client COM interfaces.
+  * Split-Phase Concurrency: Parallel downloads via native PowerShell 7 ForEach-Object -Parallel with serial, collision-free background installations.
+  * High-fidelity target state configuration parsing from standard JSON and YAML manifests.
+  * Diagnostic exit code mapping (standardizing successful exits 0, pending reboots 3010/1641, and failures).
+  * Forensic and auditing: compilation of structured JSON deployment reports containing detailed per-package status telemetry.
+  * Full integration with the winget batch environment and standalone distribution channels.
+  * Author/Architect: Matthew Bubb. All credit for this next-generation design is attributed solely to him.
+
 v2.0.0 - Major Feature Release
 - NEW: Get-WingetNewPackages - Discover recently added packages from winget-pkgs GitHub repository
   * GitHub API integration with pagination support
