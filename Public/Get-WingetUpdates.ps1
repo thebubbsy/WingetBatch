@@ -108,7 +108,7 @@ function Get-WingetUpdates {
             $exportPath = Read-Host "Enter path for HTML report [Default: $defaultPath]"
             if (-not $exportPath) { $exportPath = $defaultPath }
             if (-not $exportPath.EndsWith(".html")) { $exportPath += ".html" }
-            
+
             try {
                 Export-WingetHtmlReport -Data $updatesAvailable -ReportTitle "Updates" -FilePath $exportPath
                 if (Test-Path $exportPath) {

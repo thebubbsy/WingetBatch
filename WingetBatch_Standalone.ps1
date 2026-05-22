@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
     WingetBatch Standalone Script
-    
+
 .DESCRIPTION
     This is an automatically generated standalone script containing all the functions
     from the WingetBatch module. You can dot-source this script directly if you don't
@@ -1304,7 +1304,7 @@ function Export-WingetBatchConfig {
     <#
     .SYNOPSIS
         Export WingetBatch configuration and caches.
-    
+
     .DESCRIPTION
         Compresses the user's ~/.wingetbatch directory into a zip archive.
         This includes the GitHub token, rate limits, caches, and general configuration.
@@ -1730,7 +1730,7 @@ function Get-WingetNewPackages {
             $exportPath = Read-Host "Enter path for HTML report [Default: $defaultPath]"
             if (-not $exportPath) { $exportPath = $defaultPath }
             if (-not $exportPath.EndsWith(".html")) { $exportPath += ".html" }
-            
+
             try {
                 Export-WingetHtmlReport -Data $newPackages -ReportTitle "New Packages" -FilePath $exportPath
                 if (Test-Path $exportPath) {
@@ -2139,6 +2139,7 @@ function Get-WingetNewPackages {
 
 
 
+
 # EndRegion
 
 # Region: Public/Get-WingetUpdates.ps1
@@ -2252,7 +2253,7 @@ function Get-WingetUpdates {
             $exportPath = Read-Host "Enter path for HTML report [Default: $defaultPath]"
             if (-not $exportPath) { $exportPath = $defaultPath }
             if (-not $exportPath.EndsWith(".html")) { $exportPath += ".html" }
-            
+
             try {
                 Export-WingetHtmlReport -Data $updatesAvailable -ReportTitle "Updates" -FilePath $exportPath
                 if (Test-Path $exportPath) {
@@ -2355,6 +2356,7 @@ function Get-WingetUpdates {
         Remove-Item $cacheFile -Force
     }
 }
+
 
 
 
@@ -2943,7 +2945,7 @@ function Invoke-WingetBatchCleanup {
     $configDir = Get-WingetBatchConfigDir
     $cacheFile = Join-Path $configDir "package_cache.json"
     $updateCacheFile = Join-Path $configDir "update_cache.json"
-    
+
     $bytesFreed = 0
     if (Test-Path $cacheFile) {
         $bytesFreed += (Get-Item $cacheFile).Length
@@ -2953,13 +2955,13 @@ function Invoke-WingetBatchCleanup {
         $bytesFreed += (Get-Item $updateCacheFile).Length
         Remove-Item $updateCacheFile -Force
     }
-    
+
     # Clean orphaned jobs from current session
     $jobs = Get-Job -ErrorAction SilentlyContinue | Where-Object { $_.State -in @('Completed', 'Failed', 'Stopped') }
     if ($jobs) {
         $jobs | Remove-Job -Force
     }
-    
+
     $mbFreed = [math]::Round($bytesFreed / 1MB, 2)
     Write-Host "Cleanup complete. Freed $mbFreed MB of cache." -ForegroundColor Green
 }
@@ -3196,6 +3198,10 @@ function Remove-WingetRecent {
 
         $cutoffDate = (Get-Date).AddDays(-$Days).Date
 
+        # Pre-calculate array and concatenated string of registry keys for optimized fuzzy matching
+        $registryKeys = [string[]]($registryApps.Keys)
+        $registryKeysStr = $registryKeys -join "`n"
+
         foreach ($line in $listLines) {
             # Find the header line to determine column positions
             if ($line -match '^Name\s+Id\s+') {
@@ -3236,16 +3242,28 @@ function Remove-WingetRecent {
                     }
                     else {
                         # Try fuzzy match - check if registry name contains package name or vice versa
-                        foreach ($regName in $registryApps.Keys) {
-                            # Check if regName contains packageName
-                            if ($regName.Length -ge $packageName.Length -and $regName.IndexOf($packageName, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
-                                $installDate = $registryApps[$regName]
-                                break
+                        $found = $false
+
+                        # Fast path: check if package name is contained in any registry name using the concatenated string
+                        if ($registryKeysStr.IndexOf($packageName, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+                            foreach ($regName in $registryKeys) {
+                                if ($regName.Length -ge $packageName.Length -and $regName.IndexOf($packageName, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+                                    $installDate = $registryApps[$regName]
+                                    $found = $true
+                                    break
+                                }
                             }
-                            # Check if packageName contains regName
-                            if ($packageName.Length -ge $regName.Length -and $packageName.IndexOf($regName, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
-                                $installDate = $registryApps[$regName]
-                                break
+                        }
+
+                        # Fallback: check if package name contains any registry name
+                        if (-not $found) {
+                            $pkgLen = $packageName.Length
+                            foreach ($regName in $registryKeys) {
+                                $regLen = $regName.Length
+                                if ($pkgLen -ge $regLen -and $packageName.IndexOf($regName, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+                                    $installDate = $registryApps[$regName]
+                                    break
+                                }
                             }
                         }
                     }
@@ -3509,4 +3527,3 @@ function Update-WingetBatch {
 
 
 # EndRegion
-

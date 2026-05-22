@@ -91,6 +91,10 @@
 
         $cutoffDate = (Get-Date).AddDays(-$Days).Date
 
+        # Pre-calculate array and concatenated string of registry keys for optimized fuzzy matching
+        $registryKeys = [string[]]($registryApps.Keys)
+        $registryKeysStr = $registryKeys -join "`n"
+
         foreach ($line in $listLines) {
             # Find the header line to determine column positions
             if ($line -match '^Name\s+Id\s+') {
@@ -131,16 +135,28 @@
                     }
                     else {
                         # Try fuzzy match - check if registry name contains package name or vice versa
-                        foreach ($regName in $registryApps.Keys) {
-                            # Check if regName contains packageName
-                            if ($regName.Length -ge $packageName.Length -and $regName.IndexOf($packageName, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
-                                $installDate = $registryApps[$regName]
-                                break
+                        $found = $false
+
+                        # Fast path: check if package name is contained in any registry name using the concatenated string
+                        if ($registryKeysStr.IndexOf($packageName, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+                            foreach ($regName in $registryKeys) {
+                                if ($regName.Length -ge $packageName.Length -and $regName.IndexOf($packageName, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+                                    $installDate = $registryApps[$regName]
+                                    $found = $true
+                                    break
+                                }
                             }
-                            # Check if packageName contains regName
-                            if ($packageName.Length -ge $regName.Length -and $packageName.IndexOf($regName, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
-                                $installDate = $registryApps[$regName]
-                                break
+                        }
+
+                        # Fallback: check if package name contains any registry name
+                        if (-not $found) {
+                            $pkgLen = $packageName.Length
+                            foreach ($regName in $registryKeys) {
+                                $regLen = $regName.Length
+                                if ($pkgLen -ge $regLen -and $packageName.IndexOf($regName, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+                                    $installDate = $registryApps[$regName]
+                                    break
+                                }
                             }
                         }
                     }
