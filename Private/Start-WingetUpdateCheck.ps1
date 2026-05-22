@@ -1,4 +1,4 @@
-﻿function Start-WingetUpdateCheck {
+function Start-WingetUpdateCheck {
     <#
     .SYNOPSIS
         Internal function that runs the update check and displays notifications.
@@ -47,9 +47,9 @@
         $shouldCheck = $true
     }
 
-    if (-not $shouldCheck) {
-        # Load cached results if available
-        if (Test-Path $cacheFile) {
+    # Always load cached results if available to provide immediate feedback
+    if (Test-Path $cacheFile) {
+        try {
             $cache = Get-Content $cacheFile | ConvertFrom-Json
             if ($cache.UpdateCount -gt 0) {
                 Write-Host ""
@@ -60,6 +60,10 @@
                 Write-Host " to view and install them" -ForegroundColor DarkGray
             }
         }
+        catch { }
+    }
+
+    if (-not $shouldCheck) {
         return
     }
 
@@ -122,21 +126,7 @@
     $config.LastCheck = (Get-Date).ToString('o')
     $config | ConvertTo-Json | Out-File -FilePath $configFile -Encoding UTF8 -Force
 
-    # Wait briefly for job (non-blocking)
-    Wait-Job -Job $job -Timeout 10 | Out-Null
-
-    if ($job.State -eq 'Completed') {
-        $updateCount = Receive-Job -Job $job
-
-        if ($updateCount -gt 0) {
-            Write-Host ""
-            Write-Host "📦 " -NoNewline -ForegroundColor Cyan
-            Write-Host "$updateCount winget package update(s) available" -ForegroundColor Yellow
-            Write-Host "   Run " -NoNewline -ForegroundColor DarkGray
-            Write-Host "Get-WingetUpdates" -NoNewline -ForegroundColor White
-            Write-Host " to view and install them" -ForegroundColor DarkGray
-        }
-    }
-
-    Remove-Job -Job $job -Force
+    # Note: Removed Wait-Job to avoid blocking profile startup.
+    # The background job will finish on its own and write to the cache.
+    # We always load cached results early to inform the user.
 }
