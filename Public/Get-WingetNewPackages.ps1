@@ -397,7 +397,7 @@ function Get-WingetNewPackages {
             $exportPath = Read-Host "Enter path for HTML report [Default: $defaultPath]"
             if (-not $exportPath) { $exportPath = $defaultPath }
             if (-not $exportPath.EndsWith(".html")) { $exportPath += ".html" }
-            
+
             try {
                 Export-WingetHtmlReport -Data $newPackages -ReportTitle "New Packages" -FilePath $exportPath
                 if (Test-Path $exportPath) {

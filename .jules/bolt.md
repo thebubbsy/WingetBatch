@@ -25,3 +25,6 @@
 ## 2025-11-20 - [Avoid regex overhead in simple substring substitution]
 **Learning:** Using `-replace` with a regular expression string incurs significant compilation and matching overhead in tight loop or hot path (like escaping strings for a UI framework). Using `.IndexOf()` to quickly bail out, and `.Replace()` for direct string substitution avoids this overhead.
 **Action:** In performance-critical PowerShell paths, avoid using the regex-based `-replace` operator for simple string literal substitutions. Instead, use native string operations like `.Contains()` and `.Replace()` (e.g., `$Text.Replace('[', '[[')`) to significantly reduce regex compilation and evaluation overhead.
+## 2024-05-22 - [Performance] Fast Path Substring Search for Nested Loop Avoidance
+**Learning:** When executing `O(N*M)` fuzzy matching logic (e.g., checking if one string contains another in a large registry list vs package list), looping through every item and doing a double `.IndexOf()` is extremely slow.
+**Action:** Pre-calculate an array of the keys to search, and `join` them into a single long string (`$registryKeysStr`). Use a single `$registryKeysStr.IndexOf()` call first to short-circuit the entire array loop for items that have no match at all, which eliminates the `O(N*M)` overhead for the vast majority of non-matching comparisons.
