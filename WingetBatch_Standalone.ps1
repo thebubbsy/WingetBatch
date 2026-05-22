@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
     WingetBatch Standalone Script
-    
+
 .DESCRIPTION
     This is an automatically generated standalone script containing all the functions
     from the WingetBatch module. You can dot-source this script directly if you don't
@@ -993,9 +993,9 @@ function Start-WingetUpdateCheck {
         $shouldCheck = $true
     }
 
-    if (-not $shouldCheck) {
-        # Load cached results if available
-        if (Test-Path $cacheFile) {
+    # Always load cached results if available to provide immediate feedback
+    if (Test-Path $cacheFile) {
+        try {
             $cache = Get-Content $cacheFile | ConvertFrom-Json
             if ($cache.UpdateCount -gt 0) {
                 Write-Host ""
@@ -1006,6 +1006,10 @@ function Start-WingetUpdateCheck {
                 Write-Host " to view and install them" -ForegroundColor DarkGray
             }
         }
+        catch { }
+    }
+
+    if (-not $shouldCheck) {
         return
     }
 
@@ -1068,23 +1072,9 @@ function Start-WingetUpdateCheck {
     $config.LastCheck = (Get-Date).ToString('o')
     $config | ConvertTo-Json | Out-File -FilePath $configFile -Encoding UTF8 -Force
 
-    # Wait briefly for job (non-blocking)
-    Wait-Job -Job $job -Timeout 10 | Out-Null
-
-    if ($job.State -eq 'Completed') {
-        $updateCount = Receive-Job -Job $job
-
-        if ($updateCount -gt 0) {
-            Write-Host ""
-            Write-Host "📦 " -NoNewline -ForegroundColor Cyan
-            Write-Host "$updateCount winget package update(s) available" -ForegroundColor Yellow
-            Write-Host "   Run " -NoNewline -ForegroundColor DarkGray
-            Write-Host "Get-WingetUpdates" -NoNewline -ForegroundColor White
-            Write-Host " to view and install them" -ForegroundColor DarkGray
-        }
-    }
-
-    Remove-Job -Job $job -Force
+    # Note: Removed Wait-Job to avoid blocking profile startup.
+    # The background job will finish on its own and write to the cache.
+    # We always load cached results early to inform the user.
 }
 
 # EndRegion
@@ -1304,7 +1294,7 @@ function Export-WingetBatchConfig {
     <#
     .SYNOPSIS
         Export WingetBatch configuration and caches.
-    
+
     .DESCRIPTION
         Compresses the user's ~/.wingetbatch directory into a zip archive.
         This includes the GitHub token, rate limits, caches, and general configuration.
@@ -2943,7 +2933,7 @@ function Invoke-WingetBatchCleanup {
     $configDir = Get-WingetBatchConfigDir
     $cacheFile = Join-Path $configDir "package_cache.json"
     $updateCacheFile = Join-Path $configDir "update_cache.json"
-    
+
     $bytesFreed = 0
     if (Test-Path $cacheFile) {
         $bytesFreed += (Get-Item $cacheFile).Length
@@ -2953,13 +2943,13 @@ function Invoke-WingetBatchCleanup {
         $bytesFreed += (Get-Item $updateCacheFile).Length
         Remove-Item $updateCacheFile -Force
     }
-    
+
     # Clean orphaned jobs from current session
     $jobs = Get-Job -ErrorAction SilentlyContinue | Where-Object { $_.State -in @('Completed', 'Failed', 'Stopped') }
     if ($jobs) {
         $jobs | Remove-Job -Force
     }
-    
+
     $mbFreed = [math]::Round($bytesFreed / 1MB, 2)
     Write-Host "Cleanup complete. Freed $mbFreed MB of cache." -ForegroundColor Green
 }
@@ -3509,4 +3499,3 @@ function Update-WingetBatch {
 
 
 # EndRegion
-
