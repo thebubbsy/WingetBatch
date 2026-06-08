@@ -1377,7 +1377,7 @@ function Export-WingetBatchConfig {
 # EndRegion
 
 # Region: Public/Get-WingetHoroscope.ps1
-"function Get-WingetHoroscope {
+function Get-WingetHoroscope {
     <#
     .SYNOPSIS
         Calculates an astrological reading for a package.
@@ -1421,8 +1421,12 @@ function Export-WingetBatchConfig {
         $successRate = ($hash * 13) % 100
 
         Write-Host "`nAstrological Profile for $Id" -ForegroundColor Cyan
-        Write-Host "==============================
-<truncated 508 bytes>
+        Write-Host "================================" -ForegroundColor Cyan
+        Write-Host "Celestial Sign: $sign" -ForegroundColor Yellow
+        Write-Host "Cosmic Forecast: $fortune" -ForegroundColor Green
+        Write-Host "Installation Probability: $successRate%" -ForegroundColor Red
+    }
+}
 # EndRegion
 
 # Region: Public/Get-WingetNewPackages.ps1
@@ -3415,7 +3419,7 @@ function Invoke-WingetBatchCleanup {
 # EndRegion
 
 # Region: Public/Invoke-WingetRussianRoulette.ps1
-"function Invoke-WingetRussianRoulette {
+function Invoke-WingetRussianRoulette {
     <#
     .SYNOPSIS
         Picks a random package from winget and installs it.
@@ -3470,8 +3474,9 @@ function Invoke-WingetBatchCleanup {
     if ($LASTEXITCODE -eq 0) {
         Write-Host "Installation successful! Enjoy your random software." -ForegroundColor Green
     } else {
-        Write-Host "Installation failed. The software gods spared your system."
-<truncated 35 bytes>
+        Write-Host "Installation failed. The software gods spared your system." -ForegroundColor DarkYellow
+    }
+}
 # EndRegion
 
 # Region: Public/New-WingetBatchGitHubToken.ps1

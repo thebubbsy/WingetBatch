@@ -1,4 +1,4 @@
-﻿"function Get-WingetHoroscope {
+function Get-WingetHoroscope {
     <#
     .SYNOPSIS
         Calculates an astrological reading for a package.
@@ -42,5 +42,9 @@
         $successRate = ($hash * 13) % 100
 
         Write-Host "`nAstrological Profile for $Id" -ForegroundColor Cyan
-        Write-Host "==============================
-<truncated 508 bytes>
+        Write-Host "================================" -ForegroundColor Cyan
+        Write-Host "Celestial Sign: $sign" -ForegroundColor Yellow
+        Write-Host "Cosmic Forecast: $fortune" -ForegroundColor Green
+        Write-Host "Installation Probability: $successRate%" -ForegroundColor Red
+    }
+}

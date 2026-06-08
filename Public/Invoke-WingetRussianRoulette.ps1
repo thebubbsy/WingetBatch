@@ -1,4 +1,4 @@
-﻿"function Invoke-WingetRussianRoulette {
+function Invoke-WingetRussianRoulette {
     <#
     .SYNOPSIS
         Picks a random package from winget and installs it.
@@ -53,5 +53,6 @@
     if ($LASTEXITCODE -eq 0) {
         Write-Host "Installation successful! Enjoy your random software." -ForegroundColor Green
     } else {
-        Write-Host "Installation failed. The software gods spared your system."
-<truncated 35 bytes>
+        Write-Host "Installation failed. The software gods spared your system." -ForegroundColor DarkYellow
+    }
+}
