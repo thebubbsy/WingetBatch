@@ -1162,7 +1162,49 @@ function Update-GitHubApiRequestCount {
 # EndRegion
 
 # Region: Public/Convert-WingetPackageToHaiku.ps1
+function Convert-WingetPackageToHaiku {
+    <#
+    .SYNOPSIS
+        Generates a poetic 5-7-5 syllable Haiku about a Winget package.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true, Position=0, ValueFromPipeline=$true)]
+        [string]$Id
+    )
 
+    process {
+        # Determine some arbitrary traits based on the package ID
+        $parts = $Id -split '\.'
+        $publisher = if ($parts.Count -gt 0) { $parts[0] } else { "Unknown" }
+        $app = if ($parts.Count -gt 1) { $parts[1] } else { $Id }
+
+        $line1 = @(
+            "Software from $publisher",
+            "Code of $publisher",
+            "A gift from $publisher",
+            "Bits from $publisher"
+        ) | Get-Random
+
+        $line2 = @(
+            "Downloading $app now",
+            "Updating $app soon",
+            "$app comes to my disk",
+            "Wait for $app to run"
+        ) | Get-Random
+
+        $line3 = @(
+            "Exit code zero.",
+            "Reboot required now.",
+            "Install is complete.",
+            "Cache is full of bytes."
+        ) | Get-Random
+
+        Write-Host "`n  $line1" -ForegroundColor Cyan
+        Write-Host "  $line2" -ForegroundColor Cyan
+        Write-Host "  $line3`n" -ForegroundColor Cyan
+    }
+}
 # EndRegion
 
 # Region: Public/Disable-WingetUpdateNotifications.ps1
@@ -1335,7 +1377,52 @@ function Export-WingetBatchConfig {
 # EndRegion
 
 # Region: Public/Get-WingetHoroscope.ps1
+"function Get-WingetHoroscope {
+    <#
+    .SYNOPSIS
+        Calculates an astrological reading for a package.
+    .DESCRIPTION
+        Predicts the success rate of a package installation based on current astrology and package name hashes.
+    .PARAMETER Id
+        The package ID to get a horoscope for.
+    .EXAMPLE
+        Get-WingetHoroscope "Google.Chrome"
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true, Position=0, ValueFromPipeline=$true)]
+        [string]$Id
+    )
 
+    process {
+        Write-Host "Consulting the stars for $Id..." -ForegroundColor Magenta
+
+        $hash = 0
+        foreach ($char in $Id.ToCharArray()) {
+            $hash += [int]$char
+        }
+
+        $signs = @("Aries (The Installer)", "Taurus (The Cache)", "Gemini (The Parallel Threads)", "Cancer (The Registry)", 
+                   "Leo (The Admin Prompt)", "Virgo (The Manifest)", "Libra (The Idempotency)", "Scorpio (The Exit Code)", 
+                   "Sagittarius (The Pipeline)", "Capricorn (The Module)", "Aquarius (The Cloud)", "Pisces (The Dependencies)")
+
+        $fortunes = @(
+            "Your package is in retrograde. Expect an exit code of 1603.",
+            "The stars align perfectly. Idempotency is guaranteed today.",
+            "A dark moon approaches. A reboot will certainly be required.",
+            "Mars is in the 4th house. The registry keys will resist your installation.",
+            "Jupiter blesses your bandwidth. The download will be swift.",
+            "Mercury is in retrograde. The YAML manifest might be malformed.",
+            "Venus brings harmony to your dependencies. No conflicts will occur."
+        )
+
+        $sign = $signs[$hash % $signs.Count]
+        $fortune = $fortunes[($hash * (Get-Date).DayOfYear) % $fortunes.Count]
+        $successRate = ($hash * 13) % 100
+
+        Write-Host "`nAstrological Profile for $Id" -ForegroundColor Cyan
+        Write-Host "==============================
+<truncated 508 bytes>
 # EndRegion
 
 # Region: Public/Get-WingetNewPackages.ps1
@@ -3328,7 +3415,63 @@ function Invoke-WingetBatchCleanup {
 # EndRegion
 
 # Region: Public/Invoke-WingetRussianRoulette.ps1
+"function Invoke-WingetRussianRoulette {
+    <#
+    .SYNOPSIS
+        Picks a random package from winget and installs it.
+    .DESCRIPTION
+        Extremely chaotic feature. Pulls a random package from the Winget repository and attempts to install it.
+    .PARAMETER Confirm
+        Prompt for confirmation before installing a random package.
+    .PARAMETER YOLO
+        Skip all confirmations and just do it.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter()]
+        [switch]$YOLO
+    )
 
+    Write-Host "Spinning the Winget cylinder..." -ForegroundColor Red
+
+    # Search for random letter to get a large pool
+    $letters = "abcdefghijklmnopqrstuvwxyz".ToCharArray()
+    $randomLetter = $letters | Get-Random
+
+    $results = winget search $randomLetter --accept-source-agreements 2>&1
+    $packages = @()
+
+    foreach ($line in $results) {
+        if ($line -match '\s+([A-Za-z][A-Za-z0-9]*\.[A-Za-z0-9][A-Za-z0-9\.\-_]*)\s+') {
+            $packages += $matches[1].Trim()
+        }
+    }
+
+    if ($packages.Count -eq 0) {
+        Write-Host "The chamber was empty. You survived." -ForegroundColor Green
+        return
+    }
+
+    $target = $packages | Get-Random
+    Write-Host "CLICK! The hammer strikes on: " -NoNewline -ForegroundColor Yellow
+    Write-Host $target -ForegroundColor Red
+
+    if (-not $YOLO) {
+        $confirm = Read-Host "Are you sure you want to install $target? (y/N)"
+        if ($confirm -notmatch "^y") {
+            Write-Host "You pulled away from the table. The package was not installed." -ForegroundColor DarkGray
+            return
+        }
+    }
+
+    Write-Host "Installing $target..." -ForegroundColor Cyan
+    winget install --id $target --accept-package-agreements --accept-source-agreements
+    
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "Installation successful! Enjoy your random software." -ForegroundColor Green
+    } else {
+        Write-Host "Installation failed. The software gods spared your system."
+<truncated 35 bytes>
 # EndRegion
 
 # Region: Public/New-WingetBatchGitHubToken.ps1
@@ -3859,11 +4002,100 @@ function Set-WingetBatchGitHubToken {
 # EndRegion
 
 # Region: Public/Show-WingetMatrix.ps1
+function Show-WingetMatrix {
+    <#
+    .SYNOPSIS
+        Displays installed packages falling like The Matrix.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter()]
+        [int]$DurationSeconds = 5
+    )
 
+    Write-Host "Initializing The Matrix..." -ForegroundColor DarkGreen
+    Start-Sleep -Seconds 1
+
+    # Only get IDs to be fast
+    $packages = winget list | Select-String -Pattern '\s+([A-Za-z][A-Za-z0-9]*\.[A-Za-z0-9][A-Za-z0-9\.\-_]*)\s+' | ForEach-Object {
+        if ($_.Line -match '\s+([A-Za-z][A-Za-z0-9]*\.[A-Za-z0-9][A-Za-z0-9\.\-_]*)\s+') {
+            $matches[1]
+        }
+    }
+
+    if ($packages.Count -eq 0) {
+        $packages = @("System32.Dll", "Microsoft.Windows", "Matrix.Core", "Neo.Awake", "Morpheus.Pill")
+    }
+
+    $startTime = Get-Date
+    $width = $Host.UI.RawUI.WindowSize.Width
+    if ($width -le 0) { $width = 80 }
+
+    Clear-Host
+
+    while (((Get-Date) - $startTime).TotalSeconds -lt $DurationSeconds) {
+        $pkg = $packages | Get-Random
+        $spaces = " " * (Get-Random -Minimum 0 -Maximum ($width - $pkg.Length - 1))
+        
+        $color = @("Green", "DarkGreen", "Cyan", "DarkCyan") | Get-Random
+        
+        Write-Host "$spaces$pkg" -ForegroundColor $color
+        Start-Sleep -Milliseconds (Get-Random -Minimum 10 -Maximum 100)
+    }
+
+    Clear-Host
+    Write-Host "Wake up, Neo... The winget batch update has you." -ForegroundColor Green
+    Write-Host ""
+}
 # EndRegion
 
 # Region: Public/Test-WingetPackageVibes.ps1
+function Test-WingetPackageVibes {
+    <#
+    .SYNOPSIS
+        Analyzes a package's metadata and outputs whether its vibes are Based, Cringe, or Sus.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true, Position=0, ValueFromPipeline=$true)]
+        [string]$Id
+    )
 
+    process {
+        Write-Host "Scanning $Id for vibes..." -ForegroundColor Magenta
+        
+        $vowels = ($Id -replace '[^aeiouAEIOU]', '').Length
+        $consonants = ($Id -replace '[^a-zA-Z]', '').Length - $vowels
+        $score = $vowels * 2 + $consonants
+
+        $vibe = "Unknown"
+        $color = "White"
+
+        if ($Id -match "Microsoft|Google|Apple") {
+            $vibe = "Corporate (Cringe)"
+            $color = "Red"
+        }
+        elseif ($score % 7 -eq 0) {
+            $vibe = "Immaculate"
+            $color = "Cyan"
+        }
+        elseif ($score % 3 -eq 0) {
+            $vibe = "Based"
+            $color = "Green"
+        }
+        elseif ($score % 2 -eq 0) {
+            $vibe = "Sus"
+            $color = "Yellow"
+        }
+        else {
+            $vibe = "Mid"
+            $color = "DarkGray"
+        }
+
+        Write-Host "Vibe Check Result: " -NoNewline
+        Write-Host $vibe -ForegroundColor $color
+    }
+}
 # EndRegion
 
 # Region: Public/Update-WingetBatch.ps1
