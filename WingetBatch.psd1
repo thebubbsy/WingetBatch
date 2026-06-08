@@ -3,7 +3,7 @@
     RootModule = 'WingetBatch.psm1'
 
     # Version number of this module.
-    ModuleVersion = '2.3.0'
+    ModuleVersion = '2.4.0'
 
     # ID used to uniquely identify this module
     GUID = 'b9e8f5d2-4c3f-4a6b-8d9e-2f7a8b5c6e4f'
@@ -37,7 +37,12 @@
         'Import-WingetBatchConfig',
         'Invoke-WingetBatchCleanup',
         'Update-WingetBatch',
-        'Invoke-WinGetBatch'
+        'Invoke-WinGetBatch',
+        'Get-WingetHoroscope',
+        'Test-WingetPackageVibes',
+        'Convert-WingetPackageToHaiku',
+        'Show-WingetMatrix',
+        'Invoke-WingetRussianRoulette'
     )
 
     # Cmdlets to export from this module
@@ -66,6 +71,16 @@
 
             # ReleaseNotes of this module
             ReleaseNotes = @'
+v2.4.0 - Security Update & Massive Feature Bloat
+- FIXED: Replaced unsafe Invoke-Expression with argument array execution in Invoke-WinGetBatch.
+- FIXED: Fallback PS5.1 execution for ForEach-Object -Parallel downloads.
+- FIXED: Array casting fixes and character encoding parsing fixes.
+- NEW: Get-WingetHoroscope - Predict the celestial fate of your package updates.
+- NEW: Invoke-WingetRussianRoulette - Installs a completely random package from the Winget repository.
+- NEW: Convert-WingetPackageToHaiku - Generates a 5-7-5 syllable poem for any package.
+- NEW: Show-WingetMatrix - Displays your installed packages cascading down the screen like The Matrix.
+- NEW: Test-WingetPackageVibes - Arbitrary algorithmic vibe check for Winget packages (Corporate = Cringe).
+
 v2.3.0 - Next-Generation Idempotent Deployment Engine
 - NEW: Invoke-WinGetBatch - Idempotent, manifest-driven package deployments using native COM APIs.
   * Decoupled from fragile CLI regex parsing; uses Microsoft.WinGet.Client COM interfaces.
