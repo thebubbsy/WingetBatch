@@ -79,6 +79,8 @@ Get-WingetNewPackages -Days 3 -ExportHtml
 | `New-WingetBatchGitHubToken` | **Auth** | Interactive GitHub OAuth flow |
 | `Invoke-WingetBatchCleanup` | **Maintenance** | Clean up cache and temporary files |
 | `Remove-WingetRecent` | **Maintenance** | Clear local history of installed packages |
+| `Repair-WingetBatchManager` | **Diagnostics** | Diagnose and repair common winget issues |
+| `Invoke-WinGetBatch` | **Deployment** | Idempotent manifest-driven package deployments |
 | `Export-WingetBatchConfig` | **System** | Backup local configuration |
 | `Import-WingetBatchConfig` | **System** | Restore configuration from backup |
 
@@ -112,6 +114,7 @@ Get-WingetUpdates -Force
 
 - **Windows Package Manager** (winget)
 - **PowerShell 5.1** or **PowerShell 7+** (Recommended)
+- **Microsoft.WinGet.Client** module (Auto-installed as a dependency)
 - **PwshSpectreConsole** module (Auto-installed if missing)
 
 ## Next-Generation Architecture
@@ -129,7 +132,9 @@ For a detailed breakdown of the roadmap and execution logic, view our [Next-Gene
 
 ## Version History
 
-- **2.2.1** (Current) - Resolved HTML report parameter binding issues and improved module loading robustness.
+- **2.5.0** (Current) - COM API Migration: Replaced all winget.exe CLI text-parsing with Microsoft.WinGet.Client COM API. Added Repair-WingetBatchManager.
+- **2.4.7** - Performance and stability improvements.
+- **2.2.1** - Resolved HTML report parameter binding issues and improved module loading robustness.
 - **2.2.0** - Added professional HTML reporting engine (`-ExportHtml`).
 - **2.1.0** - Enhanced cache management and high-volume GitHub commit fetching.
 - **2.0.0** - Major overhaul: Added update notifications, discovery engine, and GitHub Auth.

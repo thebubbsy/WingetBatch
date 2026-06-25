@@ -1,9 +1,9 @@
-﻿@{
+@{
     # Script module or binary module file associated with this manifest.
     RootModule = 'WingetBatch.psm1'
 
     # Version number of this module.
-    ModuleVersion = '2.4.7'
+    ModuleVersion = '2.5.0'
 
     # ID used to uniquely identify this module
     GUID = 'b9e8f5d2-4c3f-4a6b-8d9e-2f7a8b5c6e4f'
@@ -23,8 +23,11 @@
     # Minimum version of the PowerShell engine required by this module
     PowerShellVersion = '5.1'
 
+    # Required modules
+    RequiredModules = @('Microsoft.WinGet.Client')
+
     # Functions to export from this module
-    FunctionsToExport = @('Start-WingetUpdateCheck', 
+    FunctionsToExport = @('Start-WingetUpdateCheck',
         'Install-WingetAll',
         'Get-WingetNewPackages',
         'Get-WingetUpdates',
@@ -38,6 +41,7 @@
         'Invoke-WingetBatchCleanup',
         'Update-WingetBatch',
         'Invoke-WinGetBatch',
+        'Repair-WingetBatchManager',
         'Get-WingetHoroscope',
         'Test-WingetPackageVibes',
         'Convert-WingetPackageToHaiku',
@@ -71,6 +75,21 @@
 
             # ReleaseNotes of this module
             ReleaseNotes = @'
+v2.5.0 - COM API Migration (Breaking Fix)
+- CRITICAL FIX: Migrated all core functions from winget.exe CLI text-parsing to Microsoft.WinGet.Client COM API.
+  * Install-WingetAll now uses Find-WinGetPackage (COM) instead of parsing 'winget search' text output.
+  * Get-WingetUpdates now uses Get-WinGetPackage (COM) instead of parsing 'winget upgrade' text output.
+  * Installation now uses Install-WinGetPackage (COM) instead of shelling out to winget.exe.
+  * Updates now use Update-WinGetPackage (COM) instead of shelling out to winget.exe.
+  * This eliminates all dependency on winget.exe being in PATH (a known Windows update regression).
+- NEW: Repair-WingetBatchManager - Diagnostic and self-repair tool for common winget issues.
+  * Checks winget.exe PATH, Microsoft.WinGet.Client module, COM API health.
+  * Auto-repairs by re-registering App Installer and fixing PATH.
+- ENHANCED: Background detail jobs now resolve winget.exe by known filesystem paths with COM API fallback.
+- ENHANCED: Added --no-progress and --disable-interactivity flags to all remaining CLI calls for cleaner output.
+- DEPENDENCY: Microsoft.WinGet.Client is now a required module (auto-installed with WingetBatch).
+- Author/Architect: Matthew Bubb. All credit for this architectural migration is attributed solely to him.
+
 v2.4.0 - Security Update & Massive Feature Bloat
 - FIXED: Replaced unsafe Invoke-Expression with argument array execution in Invoke-WinGetBatch.
 - FIXED: Fallback PS5.1 execution for ForEach-Object -Parallel downloads.

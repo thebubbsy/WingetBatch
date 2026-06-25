@@ -1,4 +1,4 @@
-﻿function Install-WingetAll {
+function Install-WingetAll {
     <#
     .SYNOPSIS
         Search for winget packages and install all results.
@@ -46,6 +46,17 @@
     )
 
     begin {
+        # Ensure Microsoft.WinGet.Client is available (COM API - no winget.exe PATH dependency)
+        if (-not (Get-Module -Name Microsoft.WinGet.Client)) {
+            try {
+                Import-Module Microsoft.WinGet.Client -ErrorAction Stop
+            }
+            catch {
+                Write-Error "Microsoft.WinGet.Client module is required. Install it with: Install-Module Microsoft.WinGet.Client -Force"
+                return
+            }
+        }
+
         # Check if PwshSpectreConsole is available
         if (-not (Get-Module -ListAvailable -Name PwshSpectreConsole)) {
             Write-Warning "PwshSpectreConsole module not found. Installing..."
@@ -83,129 +94,29 @@
             $normalizedQuery = $searchWords -join ' '
 
             # Combine all search results from each word
-            $querySearchResults = [System.Collections.Generic.List[string]]::new()
-
-            try {
-                $wordResults = winget search $query --accept-source-agreements 2>&1
-
-                if ($LASTEXITCODE -eq 0 -and $null -ne $wordResults) {
-                    $querySearchResults.AddRange([string[]]$wordResults)
-                }
-            }
-            catch {
-                Write-Warning "Failed to search for query: $query"
-            }
-
-            if ($querySearchResults.Count -eq 0) {
-                continue
-            }
-
-            # Parse the search results to extract package IDs and Names
-            $lines = $querySearchResults
+            # Use COM API for search — no winget.exe PATH dependency, no text parsing
             $queryPackages = [System.Collections.Generic.List[PSCustomObject]]::new()
 
-            $headerFound = $false
-            $nameColEnd = -1
-            $idColStart = -1
-            $idColEnd = -1
-            $versionColStart = -1
-            $sourceColStart = -1
-            $matchColStart = -1
+            try {
+                $comResults = Find-WinGetPackage -Query $query -ErrorAction Stop
 
-            foreach ($line in $lines) {
-                # Find the header line to determine column positions
-                if ($line -match '^Name\s+Id\s+') {
-                    $nameColEnd = $line.IndexOf('Id') - 1
-                    $idColStart = $line.IndexOf('Id')
+                foreach ($result in $comResults) {
+                    $packageId = $result.Id
+                    $packageName = $result.Name
+                    $packageVersion = if ($result.Version) { $result.Version } else { "Unknown" }
+                    $packageSource = if ($result.Source) { $result.Source } else { "Unknown" }
 
-                    # Reset
-                    $versionColStart = -1
-                    $sourceColStart = -1
-                    $matchColStart = -1
-
-                    # Find Version
-                    if ($line -match 'Version') {
-                        $idColEnd = $line.IndexOf('Version') - 1
-                        $versionColStart = $line.IndexOf('Version')
-                    } else {
-                        $idColEnd = $line.Length
-                    }
-
-                    # Find Match
-                    if ($line -match 'Match') {
-                        $matchColStart = $line.IndexOf('Match')
-                    }
-
-                    # Find Source
-                    if ($line -match 'Source') {
-                        $sourceColStart = $line.IndexOf('Source')
-                    }
-                    continue
-                }
-
-                # Skip until we find the header separator line (dashes)
-                if ($line -match '^-+') {
-                    $headerFound = $true
-                    continue
-                }
-
-                if ($headerFound -and $line.Trim() -ne '' -and $idColStart -gt 0 -and $line.Length -gt $idColStart) {
-                    # Extract the entire line for filtering and the ID
-                    $endPos = if ($idColEnd -lt $line.Length) { $idColEnd } else { $line.Length }
-                    $packageId = $line.Substring($idColStart, $endPos - $idColStart).Trim()
-
-                    # Extract Name
-                    $packageName = if ($nameColEnd -gt 0 -and $line.Length -gt $nameColEnd) {
-                        $line.Substring(0, $nameColEnd).Trim()
-                    } else {
-                        $packageId # Fallback
-                    }
-
-                    # Extract Version
-                    $packageVersion = "Unknown"
-                    if ($versionColStart -gt -1 -and $line.Length -gt $versionColStart) {
-                        $vEnd = $line.Length
-                        # If Match is present
-                        if ($matchColStart -gt $versionColStart) {
-                            $vEnd = $matchColStart
-                        }
-                        # If Source is present (and no Match or Match is after Source)
-                        elseif ($sourceColStart -gt $versionColStart) {
-                            $vEnd = $sourceColStart
-                        }
-
-                        if ($vEnd -gt $line.Length) { $vEnd = $line.Length }
-                        $packageVersion = $line.Substring($versionColStart, $vEnd - $versionColStart).Trim()
-                    }
-
-                    # Extract Source
-                    $packageSource = "Unknown"
-                    if ($sourceColStart -gt -1 -and $line.Length -gt $sourceColStart) {
-                        $packageSource = $line.Substring($sourceColStart).Trim()
-                    }
-
-                    # Only add if it looks like a valid package ID
-                    if ($packageId -and $packageId -match '^[A-Za-z0-9\.\-_]+$' -and $packageId -notmatch '^\d+\.\d+') {
-                        # If multiple search words, filter to only packages matching ALL words (case-insensitive)
-                        if ($searchWords.Count -gt 1) {
-                            $matchesAll = $true
-                            foreach ($word in $searchWords) {
-                                if ($line.IndexOf($word, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
-                                    $matchesAll = $false
-                                    break
-                                }
-                            }
-                            if ($matchesAll) {
-                                $queryPackages.Add([PSCustomObject]@{
-                                    Id = $packageId
-                                    Name = $packageName
-                                    Version = $packageVersion
-                                    Source = $packageSource
-                                    SearchTerm = $query
-                                })
+                    # If multiple search words, filter to only packages matching ALL words (case-insensitive)
+                    if ($searchWords.Count -gt 1) {
+                        $matchesAll = $true
+                        $combinedText = "$packageName $packageId"
+                        foreach ($word in $searchWords) {
+                            if ($combinedText.IndexOf($word, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+                                $matchesAll = $false
+                                break
                             }
                         }
-                        else {
+                        if ($matchesAll) {
                             $queryPackages.Add([PSCustomObject]@{
                                 Id = $packageId
                                 Name = $packageName
@@ -215,7 +126,25 @@
                             })
                         }
                     }
+                    else {
+                        $queryPackages.Add([PSCustomObject]@{
+                            Id = $packageId
+                            Name = $packageName
+                            Version = $packageVersion
+                            Source = $packageSource
+                            SearchTerm = $query
+                        })
+                    }
                 }
+            }
+            catch {
+                Write-Warning "Failed to search for query: $query"
+                Write-Warning "  $_"
+            }
+
+            if ($queryPackages.Count -eq 0) {
+                Write-Warning "No packages found matching '$query'"
+                continue
             }
 
             # Deduplicate packages within this query based on Id (preserving order)
@@ -514,17 +443,16 @@
                 Write-Host " from $pkgSource" -ForegroundColor $sColor
             } else { Write-Host "" }
 
-            winget install --id $packageId --accept-package-agreements --accept-source-agreements --silent | Out-Null
-
-            if ($LASTEXITCODE -eq 0) {
-                Write-Host "✓ Successfully installed " -ForegroundColor Green -NoNewline
+            try {
+                Install-WinGetPackage -Id $packageId -Mode Silent -ErrorAction Stop | Out-Null
+                Write-Host "[OK] Successfully installed " -ForegroundColor Green -NoNewline
                 Write-Host $packageId -ForegroundColor White
                 $successCount++
             }
-            else {
-                Write-Host "✗ Failed to install " -ForegroundColor Red -NoNewline
+            catch {
+                Write-Host "[FAIL] Failed to install " -ForegroundColor Red -NoNewline
                 Write-Host $packageId -ForegroundColor White -NoNewline
-                Write-Host " (Exit code: $LASTEXITCODE)" -ForegroundColor Red
+                Write-Host " ($_)" -ForegroundColor Red
                 $failCount++
             }
         }

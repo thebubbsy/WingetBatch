@@ -355,13 +355,27 @@ function Get-WingetNewPackages {
             Write-Host "[OK] Found $($cachedResults.Count) packages in cache" -ForegroundColor Green
         }
 
+        # Resolve winget.exe path for detail fetching
+        $wingetExe = $null
+        $testPaths = @(
+            "$env:LOCALAPPDATA\Microsoft\WindowsApps\winget.exe",
+            "C:\Users\$env:USERNAME\AppData\Local\Microsoft\WindowsApps\winget.exe"
+        )
+        foreach ($tp in $testPaths) {
+            if (Test-Path $tp) { $wingetExe = $tp; break }
+        }
+        if (-not $wingetExe) {
+            $cmd = Get-Command winget -ErrorAction SilentlyContinue
+            if ($cmd) { $wingetExe = $cmd.Source }
+        }
+
         for ($i = 0; $i -lt $actualJobCount; $i++) {
             $startIndex = $i * $packagesPerJob
             $endIndex = [Math]::Min($startIndex + $packagesPerJob - 1, $totalPackagesToFetch - 1)
             $packageBatch = $packagesToFetch[$startIndex..$endIndex]
 
             $job = Start-WingetBatchJob -ScriptBlock {
-                param($packageList, $cacheDir, $ParseSB)
+                param($packageList, $cacheDir, $ParseSB, $WingetPath)
                 $results = @{}
 
                 # Define Parse-WingetShowOutput in the job scope from the passed script block
@@ -370,17 +384,48 @@ function Get-WingetNewPackages {
                 }
 
                 foreach ($packageId in $packageList) {
-                    # Fetch from winget
-                    $output = winget show --id $packageId 2>&1 | Out-String
+                    $info = $null
 
-                    # Parse winget show output - capture ALL available fields
-                    $info = Parse-WingetShowOutput -Output $output -PackageId $packageId
+                    # Try winget.exe for rich details
+                    if ($WingetPath -and (Test-Path $WingetPath)) {
+                        try {
+                            $output = & $WingetPath show --id $packageId --no-progress --disable-interactivity 2>&1 | Out-String
+                            $info = Parse-WingetShowOutput -Output $output -PackageId $packageId
+                        }
+                        catch { }
+                    }
+
+                    # Fallback: COM API (limited fields)
+                    if (-not $info -or -not $info.Version) {
+                        try {
+                            Import-Module Microsoft.WinGet.Client -ErrorAction SilentlyContinue
+                            $comResult = Find-WinGetPackage -Id $packageId -Exact -ErrorAction SilentlyContinue | Select-Object -First 1
+                            if ($comResult) {
+                                $info = @{
+                                    Id = $packageId
+                                    Version = $comResult.Version
+                                    Name = $comResult.Name
+                                    Publisher = $null
+                                    PublisherName = $null
+                                    Homepage = $null
+                                    Description = $null
+                                    Tags = @()
+                                    License = $null
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+
+                    if (-not $info) {
+                        $info = @{ Id = $packageId }
+                    }
 
                     $results[$packageId] = $info
                 }
 
                 return $results
-            } -ArgumentList (,$packageBatch), $configDir, $function:Parse-WingetShowOutput
+            } -ArgumentList (,$packageBatch), $configDir, $function:Parse-WingetShowOutput, $wingetExe
 
             $jobs.Add($job)
             $jobPackageMap[$job.Id] = $packageBatch
@@ -663,12 +708,29 @@ function Get-WingetNewPackages {
                                         $reselectedPackageDetails[$pkgId] = $cached
                                     }
                                     else {
-                                        # Fetch from winget
+                                        # Fetch details using resolved winget path or COM API fallback
                                         Write-Host "  Fetching $pkgId..." -ForegroundColor DarkGray
-                                        $output = winget show --id $pkgId 2>&1 | Out-String
+                                        $info = $null
 
-                                        # Parse winget show output
-                                        $info = Parse-WingetShowOutput -Output $output -PackageId $pkgId
+                                        if ($wingetExe -and (Test-Path $wingetExe)) {
+                                            try {
+                                                $output = & $wingetExe show --id $pkgId --no-progress --disable-interactivity 2>&1 | Out-String
+                                                $info = Parse-WingetShowOutput -Output $output -PackageId $pkgId
+                                            }
+                                            catch { }
+                                        }
+
+                                        if (-not $info -or -not $info.Version) {
+                                            try {
+                                                $comResult = Find-WinGetPackage -Id $pkgId -Exact -ErrorAction SilentlyContinue | Select-Object -First 1
+                                                if ($comResult) {
+                                                    $info = @{ Id = $pkgId; Version = $comResult.Version; Name = $comResult.Name }
+                                                }
+                                            }
+                                            catch { }
+                                        }
+
+                                        if (-not $info) { $info = @{ Id = $pkgId } }
 
                                         Set-PackageDetailsCache -PackageId $pkgId -Details $info
                                         $reselectedPackageDetails[$pkgId] = $info
@@ -728,17 +790,16 @@ function Get-WingetNewPackages {
                         Write-Host "`n>>> Installing: " -ForegroundColor Magenta -NoNewline
                         Write-Host $packageId -ForegroundColor White
 
-                        winget install --id $packageId --accept-package-agreements --accept-source-agreements --silent | Out-Null
-
-                        if ($LASTEXITCODE -eq 0) {
+                        try {
+                            Install-WinGetPackage -Id $packageId -Mode Silent -ErrorAction Stop | Out-Null
                             Write-Host "[OK] Successfully installed " -ForegroundColor Green -NoNewline
                             Write-Host $packageId -ForegroundColor White
                             $successCount++
                         }
-                        else {
+                        catch {
                             Write-Host "[FAIL] Failed to install " -ForegroundColor Red -NoNewline
                             Write-Host $packageId -ForegroundColor White -NoNewline
-                            Write-Host " (Exit code: $LASTEXITCODE)" -ForegroundColor Red
+                            Write-Host " ($_)" -ForegroundColor Red
                             $failCount++
                         }
                     }
