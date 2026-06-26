@@ -34,12 +34,54 @@ function Install-WingetAll {
 
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory=$true, Position=0, ValueFromPipeline=$true)]
-        [Alias('SearchTerm')]
-        [string[]]$SearchTerms,
+        [Parameter(Position=0, ValueFromPipeline=$true)]
+        [Alias('SearchTerms')]
+        [string[]]$Query,
+
+        [Parameter()]
+        [string[]]$Id,
+
+        [Parameter()]
+        [ValidateSet("Equals", "EqualsCaseInsensitive", "StartsWithCaseInsensitive", "ContainsCaseInsensitive")]
+        [string]$MatchOption,
+
+        [Parameter()]
+        [string]$Source,
+
+        [Parameter()]
+        [int]$LimitResult = 100,
 
         [Parameter()]
         [switch]$Silent,
+
+        [Parameter()]
+        [ValidateSet("Default", "Silent", "Interactive")]
+        [string]$Mode,
+
+        [Parameter()]
+        [ValidateSet("User", "Machine")]
+        [string]$Scope,
+
+        [Parameter()]
+        [string]$Architecture,
+
+        [Parameter()]
+        [string]$Override,
+
+        [Parameter()]
+        [string]$Location,
+
+        [Parameter()]
+        [switch]$Force,
+
+        [Parameter()]
+        [switch]$SkipDependencies,
+
+        [Parameter()]
+        [switch]$AllowHashMismatch,
+
+        [Parameter()]
+        [switch]$IWantToLiterallyInstallAllFuckingResults,
 
         [Parameter()]
         [switch]$WhatIf
@@ -73,91 +115,165 @@ function Install-WingetAll {
             Import-Module PwshSpectreConsole -ErrorAction SilentlyContinue
         }
 
-        Write-Host "Searching for packages matching: " -ForegroundColor Cyan -NoNewline
-        Write-Host ($SearchTerms -join ", ") -ForegroundColor Yellow
+        # Check SQLite Index Health
+        $wingetDir = "$env:LOCALAPPDATA\Packages\Microsoft.DesktopAppInstaller_8wekyb3d8bbwe\LocalState\Microsoft.Winget.Source_8wekyb3d8bbwe\winget"
+        if (Test-Path "$wingetDir\source.db") {
+            $dbAge = (Get-Date) - (Get-Item "$wingetDir\source.db").LastWriteTime
+            if ($dbAge.TotalDays -gt 7) {
+                Write-Host ""
+                Write-Host " [!] Your Winget local index cache is outdated ($([Math]::Floor($dbAge.TotalDays)) days old) or fragmented." -ForegroundColor Yellow
+                Write-Host "     This can severely degrade search performance and return stale results." -ForegroundColor Gray
+                Write-Host "     Recommendation: Run '" -ForegroundColor Gray -NoNewline
+                Write-Host "winget source update --force" -ForegroundColor White -NoNewline
+                Write-Host "' to rebuild it." -ForegroundColor Gray
+                Write-Host ""
+            }
+        }
+
+        # Determine MatchOption: Param overrides Config overrides Default
+        $matchOptionEnum = "ContainsCaseInsensitive"
+        if ($MatchOption) {
+            $matchOptionEnum = $MatchOption
+        }
+        else {
+            try {
+                $configPath = Join-Path (Get-WingetBatchConfigDir) "config.json"
+                if (Test-Path $configPath) {
+                    $config = Get-Content $configPath -Raw | ConvertFrom-Json
+                    if ($config.SearchMatchOption) {
+                        $matchOptionEnum = $config.SearchMatchOption
+                    }
+                }
+            } catch { }
+        }
+
+        # Output intent
+        if ($Query) {
+            Write-Host "Searching for packages matching: " -ForegroundColor Cyan -NoNewline
+            Write-Host ($Query -join ", ") -ForegroundColor Yellow
+        }
+        if ($Id) {
+            Write-Host "Searching for exact IDs: " -ForegroundColor Cyan -NoNewline
+            Write-Host ($Id -join ", ") -ForegroundColor Yellow
+        }
     }
 
     process {
-        # Parse multiple search terms: handle both arrays (PowerShell comma list) and comma-separated strings
-        $searchQueries = $SearchTerms | ForEach-Object { $_ -split ',' } | Where-Object { $_ -ne '' }
+        if (-not $Query -and -not $Id) {
+            Write-Error "You must provide either a search query or a specific package ID."
+            return
+        }
+
         $allPackages = [System.Collections.Generic.List[Object]]::new()
 
-        foreach ($query in $searchQueries) {
-            $query = $query.Trim()
-            if ([string]::IsNullOrWhiteSpace($query)) { continue }
+        # Handle Explicit IDs
+        if ($Id) {
+            foreach ($i in $Id) {
+                if ([string]::IsNullOrWhiteSpace($i)) { continue }
+                Write-Host "Resolving ID: " -ForegroundColor Cyan -NoNewline
+                Write-Host $i -ForegroundColor Yellow
 
-            Write-Host "Searching for: " -ForegroundColor Cyan -NoNewline
-            Write-Host $query -ForegroundColor Yellow
-
-            # Normalize query (collapse multiple spaces)
-            $searchWords = $query -split '\s+' | Where-Object { $_ -ne '' }
-            $normalizedQuery = $searchWords -join ' '
-
-            # Combine all search results from each word
-            # Use COM API for search — no winget.exe PATH dependency, no text parsing
-            $queryPackages = [System.Collections.Generic.List[PSCustomObject]]::new()
-
-            try {
-                $comResults = Find-WinGetPackage -Query $query -ErrorAction Stop
-
-                foreach ($result in $comResults) {
-                    $packageId = $result.Id
-                    $packageName = $result.Name
-                    $packageVersion = if ($result.Version) { $result.Version } else { "Unknown" }
-                    $packageSource = if ($result.Source) { $result.Source } else { "Unknown" }
-
-                    # If multiple search words, filter to only packages matching ALL words (case-insensitive)
-                    if ($searchWords.Count -gt 1) {
-                        $matchesAll = $true
-                        $combinedText = "$packageName $packageId"
-                        foreach ($word in $searchWords) {
-                            if ($combinedText.IndexOf($word, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
-                                $matchesAll = $false
-                                break
-                            }
-                        }
-                        if ($matchesAll) {
-                            $queryPackages.Add([PSCustomObject]@{
-                                Id = $packageId
-                                Name = $packageName
-                                Version = $packageVersion
-                                Source = $packageSource
-                                SearchTerm = $query
-                            })
-                        }
-                    }
-                    else {
-                        $queryPackages.Add([PSCustomObject]@{
-                            Id = $packageId
-                            Name = $packageName
-                            Version = $packageVersion
-                            Source = $packageSource
-                            SearchTerm = $query
+                try {
+                    $comArgs = @{ Id = $i; Count = $LimitResult; ErrorAction = 'Stop' }
+                    if ($Source) { $comArgs.Source = $Source }
+                    
+                    $comResults = Microsoft.WinGet.Client\Find-WinGetPackage @comArgs
+                    foreach ($result in $comResults) {
+                        $allPackages.Add([PSCustomObject]@{
+                            Id = $result.Id; Name = $result.Name
+                            Version = if ($result.Version) { $result.Version } else { "Unknown" }
+                            Source = if ($result.Source) { $result.Source } else { "Unknown" }
+                            SearchTerm = $i
                         })
                     }
-                }
+                } catch { Write-Warning "Failed to search for ID: $i" }
             }
-            catch {
-                Write-Warning "Failed to search for query: $query"
-                Write-Warning "  $_"
-            }
-
-            if ($queryPackages.Count -eq 0) {
-                Write-Warning "No packages found matching '$query'"
-                continue
-            }
-
-            # Deduplicate packages within this query based on Id (preserving order)
-            $seenIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-            $uniqueQueryPackages = [System.Collections.Generic.List[PSCustomObject]]::new()
-
-            foreach ($pkg in $queryPackages) {
-                if ($seenIds.Add($pkg.Id)) {
-                    $uniqueQueryPackages.Add($pkg)
-                }
-            }
-            $allPackages.AddRange([array]$uniqueQueryPackages)
         }
+
+        # Handle Query searches
+        if ($Query) {
+            $searchQueries = $Query | ForEach-Object { $_ -split ',' } | Where-Object { $_ -ne '' }
+
+            foreach ($q in $searchQueries) {
+                $q = $q.Trim()
+                if ([string]::IsNullOrWhiteSpace($q)) { continue }
+
+                Write-Host "Searching for: " -ForegroundColor Cyan -NoNewline
+                Write-Host $q -ForegroundColor Yellow
+
+                $searchWords = $q -split '\s+' | Where-Object { $_ -ne '' }
+                $queryPackages = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+                try {
+                    $comArgs = @{ Count = $LimitResult; ErrorAction = 'Stop'; MatchOption = $matchOptionEnum }
+                    if ($Source) { $comArgs.Source = $Source }
+
+                    $comResults = @()
+
+                    if ($q -match '^\d+$') {
+                        # Smart Routing: Pure numbers bypass ID to prevent garbage matches, but retain Name, Tag, and Moniker
+                        $nameArgs = $comArgs.Clone()
+                        $nameArgs.Name = $q
+                        $tagArgs = $comArgs.Clone()
+                        $tagArgs.Tag = $q
+                        $monikerArgs = $comArgs.Clone()
+                        $monikerArgs.Moniker = $q
+
+                        $comResults += Microsoft.WinGet.Client\Find-WinGetPackage @nameArgs
+                        $comResults += Microsoft.WinGet.Client\Find-WinGetPackage @tagArgs
+                        $comResults += Microsoft.WinGet.Client\Find-WinGetPackage @monikerArgs
+                    }
+                    else {
+                        # Standard OR routing (Name, ID, Moniker, Tags)
+                        $comArgs.Query = $q
+                        $comResults = Microsoft.WinGet.Client\Find-WinGetPackage @comArgs
+                    }
+
+                    foreach ($result in $comResults) {
+                        if (-not $result) { continue }
+                        $packageId = $result.Id
+                        $packageName = $result.Name
+                        $packageVersion = if ($result.Version) { $result.Version } else { "Unknown" }
+                        $packageSource = if ($result.Source) { $result.Source } else { "Unknown" }
+
+                        # If multiple search words, filter to only packages matching ALL words
+                        if ($searchWords.Count -gt 1) {
+                            $matchesAll = $true
+                            $combinedText = "$packageName $packageId"
+                            foreach ($word in $searchWords) {
+                                if ($combinedText.IndexOf($word, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+                                    $matchesAll = $false; break
+                                }
+                            }
+                            if ($matchesAll) {
+                                $queryPackages.Add([PSCustomObject]@{ Id = $packageId; Name = $packageName; Version = $packageVersion; Source = $packageSource; SearchTerm = $q })
+                            }
+                        }
+                        else {
+                            $queryPackages.Add([PSCustomObject]@{ Id = $packageId; Name = $packageName; Version = $packageVersion; Source = $packageSource; SearchTerm = $q })
+                        }
+                    }
+                }
+                catch { Write-Warning "Failed to search for query: $q" }
+
+                if ($queryPackages.Count -gt 0) {
+                    $allPackages.AddRange([array]$queryPackages)
+                } else {
+                    Write-Warning "No packages found matching '$q'"
+                }
+            }
+        }
+
+        # Deduplicate all collected packages based on Id (preserving order)
+        $seenIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        $uniquePackages = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+        foreach ($pkg in $allPackages) {
+            if ($seenIds.Add([string]$pkg.Id)) {
+                $uniquePackages.Add($pkg)
+            }
+        }
+        $foundPackages = $uniquePackages
 
         # Keep all packages (including potential duplicates across queries) for display
         $foundPackages = $allPackages
@@ -233,8 +349,11 @@ function Install-WingetAll {
 
         $packagesToInstall = @()
 
-        # Interactive selection using Spectre Console
-        if (-not $Silent -and (Get-Module -Name PwshSpectreConsole)) {
+        # Interactive Selection using PwshSpectreConsole
+        if ($IWantToLiterallyInstallAllFuckingResults -or $Silent) {
+            $packagesToInstall = $foundPackages.Id
+        }
+        elseif (-not $Silent -and (Get-Module -Name PwshSpectreConsole)) {
             Write-Host ""
 
             try {
@@ -270,7 +389,7 @@ function Install-WingetAll {
              $packagesToInstall = $foundPackages.Id
         }
 
-        if (-not $Silent -and $packagesToInstall.Count -gt 0) {
+        if (-not ($Silent -or $IWantToLiterallyInstallAllFuckingResults) -and $packagesToInstall.Count -gt 0) {
             Write-Host "`nFetching package details..." -ForegroundColor DarkGray
             $configDir = Get-WingetBatchConfigDir
 
@@ -382,7 +501,7 @@ function Install-WingetAll {
                     $srcColor = if ($item.Source -match 'msstore') { "magenta" } else { "cyan" }
 
                     $obj = [ordered]@{
-                        Name = "📦 " + (ConvertTo-SpectreEscaped $item.Name)
+                        Name = (ConvertTo-SpectreEscaped $item.Name)
                         Id = ConvertTo-SpectreEscaped $item.Id
                         Version = "[$verColor]$($item.Version)[/]"
                         Source = "[$srcColor]$($item.Source)[/]"
@@ -407,7 +526,7 @@ function Install-WingetAll {
                 # Simple modification for fallback table too
                 $showPublisher = ($summaryList | Where-Object { -not [string]::IsNullOrWhiteSpace($_.Publisher) } | Measure-Object).Count -gt 0
 
-                $fallbackList = $summaryList | Select-Object @{N='Name';E={"📦 " + $_.Name}}, Id, Version, Source, Publisher, SearchTerm
+                $fallbackList = $summaryList | Select-Object Name, Id, Version, Source, Publisher, SearchTerm
 
                 $props = [System.Collections.Generic.List[string]]::new()
                 $props.AddRange([string[]]@('Name', 'Id', 'Version', 'Source'))
@@ -444,7 +563,20 @@ function Install-WingetAll {
             } else { Write-Host "" }
 
             try {
-                Install-WinGetPackage -Id $packageId -Mode Silent -ErrorAction Stop | Out-Null
+                $installParams = @{
+                    Id = $packageId
+                    ErrorAction = 'Stop'
+                }
+                if ($PSBoundParameters.ContainsKey('Mode')) { $installParams['Mode'] = $Mode }
+                if ($PSBoundParameters.ContainsKey('Scope')) { $installParams['Scope'] = $Scope }
+                if ($PSBoundParameters.ContainsKey('Architecture')) { $installParams['Architecture'] = $Architecture }
+                if ($PSBoundParameters.ContainsKey('Override')) { $installParams['Override'] = $Override }
+                if ($PSBoundParameters.ContainsKey('Location')) { $installParams['Location'] = $Location }
+                if ($Force) { $installParams['Force'] = $true }
+                if ($SkipDependencies) { $installParams['SkipDependencies'] = $true }
+                if ($AllowHashMismatch) { $installParams['AllowHashMismatch'] = $true }
+
+                Microsoft.WinGet.Client\Install-WinGetPackage @installParams | Out-Null
                 Write-Host "[OK] Successfully installed " -ForegroundColor Green -NoNewline
                 Write-Host $packageId -ForegroundColor White
                 $successCount++

@@ -66,7 +66,33 @@ function Get-WingetNewPackages {
         [switch]$IWantToLiterallyInstallAllFuckingResults,
 
         [Parameter()]
-        [switch]$ExportHtml
+        [switch]$ExportHtml,
+
+        [Parameter()]
+        [ValidateSet("Default", "Silent", "Interactive")]
+        [string]$Mode,
+
+        [Parameter()]
+        [ValidateSet("User", "Machine")]
+        [string]$Scope,
+
+        [Parameter()]
+        [string]$Architecture,
+
+        [Parameter()]
+        [string]$Override,
+
+        [Parameter()]
+        [string]$Location,
+
+        [Parameter()]
+        [switch]$ForceInstall,
+
+        [Parameter()]
+        [switch]$SkipDependencies,
+
+        [Parameter()]
+        [switch]$AllowHashMismatch
     )
 
     # Ensure PwshSpectreConsole is available
@@ -791,7 +817,21 @@ function Get-WingetNewPackages {
                         Write-Host $packageId -ForegroundColor White
 
                         try {
-                            Install-WinGetPackage -Id $packageId -Mode Silent -ErrorAction Stop | Out-Null
+                            $installParams = @{
+                                Id = $packageId
+                                ErrorAction = 'Stop'
+                            }
+                            if ($PSBoundParameters.ContainsKey('Mode')) { $installParams['Mode'] = $Mode }
+                            else { $installParams['Mode'] = 'Silent' } # Maintain default silent update behavior
+                            if ($PSBoundParameters.ContainsKey('Scope')) { $installParams['Scope'] = $Scope }
+                            if ($PSBoundParameters.ContainsKey('Architecture')) { $installParams['Architecture'] = $Architecture }
+                            if ($PSBoundParameters.ContainsKey('Override')) { $installParams['Override'] = $Override }
+                            if ($PSBoundParameters.ContainsKey('Location')) { $installParams['Location'] = $Location }
+                            if ($ForceInstall) { $installParams['Force'] = $true }
+                            if ($SkipDependencies) { $installParams['SkipDependencies'] = $true }
+                            if ($AllowHashMismatch) { $installParams['AllowHashMismatch'] = $true }
+
+                            Microsoft.WinGet.Client\Install-WinGetPackage @installParams | Out-Null
                             Write-Host "[OK] Successfully installed " -ForegroundColor Green -NoNewline
                             Write-Host $packageId -ForegroundColor White
                             $successCount++

@@ -1,4 +1,4 @@
-function Invoke-WinGetBatch {
+﻿function Invoke-WinGetBatch {
     <#
     .SYNOPSIS
         Invoke Next-Generation idempotent package deployments using COM APIs and parallel downloading.
@@ -45,6 +45,32 @@ function Invoke-WinGetBatch {
 
         [Parameter()]
         [switch]$Silent,
+
+        [Parameter()]
+        [ValidateSet("Default", "Silent", "Interactive")]
+        [string]$Mode,
+
+        [Parameter()]
+        [ValidateSet("User", "Machine")]
+        [string]$Scope,
+
+        [Parameter()]
+        [string]$Architecture,
+
+        [Parameter()]
+        [string]$Override,
+
+        [Parameter()]
+        [string]$Location,
+
+        [Parameter()]
+        [switch]$Force,
+
+        [Parameter()]
+        [switch]$SkipDependencies,
+
+        [Parameter()]
+        [switch]$AllowHashMismatch,
 
         [Parameter()]
         [switch]$WhatIf
@@ -146,7 +172,7 @@ function Invoke-WinGetBatch {
             $pkgId = $target.Id
             $targetVer = $target.Version
 
-            Write-Host "  • Checking " -NoNewline -ForegroundColor Gray
+            Write-Host "   Checking " -NoNewline -ForegroundColor Gray
             Write-Host $pkgId -NoNewline -ForegroundColor White
 
             if ($installedMap.ContainsKey($pkgId)) {
@@ -216,11 +242,11 @@ function Invoke-WinGetBatch {
             Invoke-Expression $cmd | Out-Null
 
             if ($LASTEXITCODE -eq 0) {
-                Write-Host "  ✓ Cached installer: $pkgId" -ForegroundColor Green
+                Write-Host "   Cached installer: $pkgId" -ForegroundColor Green
                 return [PSCustomObject]@{ Id = $pkgId; Downloaded = $true; Path = $dlPath }
             }
             else {
-                Write-Host "  ✗ Failed download cache: $pkgId (Exit Code: $LASTEXITCODE)" -ForegroundColor Red
+                Write-Host "   Failed download cache: $pkgId (Exit Code: $LASTEXITCODE)" -ForegroundColor Red
                 return [PSCustomObject]@{ Id = $pkgId; Downloaded = $false; Path = $null }
             }
         } -ThrottleLimit $ThrottleLimit
@@ -254,11 +280,21 @@ function Invoke-WinGetBatch {
             }
 
             # Run installation
-            $installMode = if ($Silent) { "--silent" } else { "" }
+            $installMode = if ($Silent -or $Mode -eq 'Silent') { "--silent" } elseif ($Mode -eq 'Interactive') { "--interactive" } else { "" }
             $versionArg = if ($targetVer -ne "latest") { "--version $targetVer" } else { "" }
 
+            $extraArgs = ""
+            if ($Scope -eq "Machine") { $extraArgs += " --machine" }
+            elseif ($Scope -eq "User") { $extraArgs += " --user" }
+            if ($Architecture) { $extraArgs += " --architecture $Architecture" }
+            if ($Location) { $extraArgs += " --location `"$Location`"" }
+            if ($Override) { $extraArgs += " --override `"$Override`"" }
+            if ($Force) { $extraArgs += " --force" }
+            if ($SkipDependencies) { $extraArgs += " --skip-dependencies" }
+            if ($AllowHashMismatch) { $extraArgs += " --ignore-security-hash" }
+
             # Execute serialized install
-            $cmd = "winget install --id $pkgId --exact --accept-package-agreements --accept-source-agreements --disable-interactivity $installMode $versionArg"
+            $cmd = "winget install --id $pkgId --exact --accept-package-agreements --accept-source-agreements --disable-interactivity $installMode $versionArg $extraArgs"
             $output = Invoke-Expression $cmd 2>&1 | Out-String
             $exitCode = $LASTEXITCODE
 
@@ -271,7 +307,7 @@ function Invoke-WinGetBatch {
                     $status = "Success"
                     $message = "Successfully installed package."
                     $successCount++
-                    Write-Host "✓ Successfully deployed " -NoNewline -ForegroundColor Green
+                    Write-Host "[OK] Successfully deployed " -NoNewline -ForegroundColor Green
                     Write-Host $pkgId -ForegroundColor White
                 }
                 3010 {
@@ -279,7 +315,7 @@ function Invoke-WinGetBatch {
                     $message = "Installation successful, but system reboot is required."
                     $successCount++
                     $rebootPending = $true
-                    Write-Host "✓ Deployed (Reboot Required): " -NoNewline -ForegroundColor Yellow
+                    Write-Host "[OK] Deployed (Reboot Required): " -NoNewline -ForegroundColor Yellow
                     Write-Host $pkgId -ForegroundColor White
                 }
                 1641 {
@@ -287,14 +323,14 @@ function Invoke-WinGetBatch {
                     $message = "Installation successful, reboot has been initiated."
                     $successCount++
                     $rebootPending = $true
-                    Write-Host "✓ Deployed (Reboot Initiated): " -NoNewline -ForegroundColor Yellow
+                    Write-Host "[OK] Deployed (Reboot Initiated): " -NoNewline -ForegroundColor Yellow
                     Write-Host $pkgId -ForegroundColor White
                 }
                 default {
                     $status = "Failed"
                     $message = "Installer returned non-zero code: $exitCode."
                     $failCount++
-                    Write-Host "✗ Installation failed for " -NoNewline -ForegroundColor Red
+                    Write-Host " Installation failed for " -NoNewline -ForegroundColor Red
                     Write-Host $pkgId -NoNewline -ForegroundColor White
                     Write-Host " (Exit Code: $exitCode)" -ForegroundColor Red
                     Write-Host $output -ForegroundColor DarkGray
@@ -333,16 +369,18 @@ function Invoke-WinGetBatch {
         Write-Host "`n" + ("=" * 60) -ForegroundColor Green
         Write-Host "Deployment Operations Concluded" -ForegroundColor Green
         Write-Host ("=" * 60) -ForegroundColor Green
-        Write-Host "  • Successful: " -NoNewline -ForegroundColor Green
+        Write-Host "   Successful: " -NoNewline -ForegroundColor Green
         Write-Host $successCount -ForegroundColor White
-        Write-Host "  • Failed:     " -NoNewline -ForegroundColor Red
+        Write-Host "   Failed:     " -NoNewline -ForegroundColor Red
         Write-Host $failCount -ForegroundColor White
         
         if ($rebootPending) {
-            Write-Host "  ⚠️ A system reboot is pending to complete installation changes." -ForegroundColor Yellow
+            Write-Host "   A system reboot is pending to complete installation changes." -ForegroundColor Yellow
         }
 
         Write-Host "`nStructured JSON deployment audit report saved to:" -ForegroundColor Gray
         Write-Host "  $reportPath" -ForegroundColor Cyan
     }
 }
+
+

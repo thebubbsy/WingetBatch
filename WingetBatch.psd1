@@ -3,7 +3,7 @@
     RootModule = 'WingetBatch.psm1'
 
     # Version number of this module.
-    ModuleVersion = '2.5.0'
+    ModuleVersion = '2.6.0'
 
     # ID used to uniquely identify this module
     GUID = 'b9e8f5d2-4c3f-4a6b-8d9e-2f7a8b5c6e4f'
@@ -38,6 +38,8 @@
         'Remove-WingetRecent',
         'Export-WingetBatchConfig',
         'Import-WingetBatchConfig',
+        'Set-WingetBatchConfig',
+        'Get-WingetBatchConfig',
         'Invoke-WingetBatchCleanup',
         'Update-WingetBatch',
         'Invoke-WinGetBatch',
@@ -75,6 +77,14 @@
 
             # ReleaseNotes of this module
             ReleaseNotes = @'
+v2.6.0 - Smart Search Architecture
+- ENHANCED: Smart Scope Routing implemented in Install-WingetAll. Purely numeric queries automatically bypass "Id" and "Moniker" fields while retaining Tag matching.
+- NEW: Added -LimitResult (default 100) mapped natively to COM API Count parameter, ending searches early to massively boost performance.
+- NEW: Added -Id parameter to easily specify specific exact IDs instead of wildcard queries.
+- NEW: Added SQLite cache fragmentation check directly in Install-WingetAll logic with automated rebuild recommendations.
+- NEW: Implemented Set-WingetBatchConfig and Get-WingetBatchConfig module preferences.
+- ENHANCED: Dynamic config-driven COM SearchMatchOption override. ContainsCaseInsensitive remains default.
+- FIXED: Microsoft.WinGet.Client\Find-WinGetPackage forced namespace avoids naming collisions with shadowing modules (like Cobalt).
 v2.5.0 - COM API Migration (Breaking Fix)
 - CRITICAL FIX: Migrated all core functions from winget.exe CLI text-parsing to Microsoft.WinGet.Client COM API.
   * Install-WingetAll now uses Find-WinGetPackage (COM) instead of parsing 'winget search' text output.

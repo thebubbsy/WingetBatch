@@ -65,24 +65,29 @@ Enable-WingetUpdateNotifications
 Get-WingetNewPackages -Days 3 -ExportHtml
 ```
 
+> [!WARNING]
+> **The Power of `-IWantToLiterallyInstallAllFuckingResults`**
+> 
+> This parameter is insanely powerful and bypasses all interactive prompts and safeguards to automatically install every single matched package. When paired with broad searches (e.g., searching for "Microsoft", or using `Get-WingetNewPackages -Days 30`), you can easily lead yourself down a path where you automatically queue and install over 200 applications without warning. Use this parameter with extreme caution!
+
 ## Command Reference
 
-| Command | Category | Description |
-|:---|:---|:---|
-| `Install-WingetAll` | **Deployment** | Batch install packages from search results |
-| `Get-WingetNewPackages` | **Discovery** | Find truly new packages added to winget |
-| `Get-WingetUpdates` | **Maintenance** | Check and install available updates |
-| `Export-WingetHtmlReport` | **Reporting** | Generate HTML audit reports from package data |
-| `Enable-WingetUpdateNotifications` | **Automation** | Activate background update monitoring |
-| `Disable-WingetUpdateNotifications` | **Automation** | Deactivate update monitoring |
-| `Set-WingetBatchGitHubToken` | **Auth** | Set or remove GitHub API token |
-| `New-WingetBatchGitHubToken` | **Auth** | Interactive GitHub OAuth flow |
-| `Invoke-WingetBatchCleanup` | **Maintenance** | Clean up cache and temporary files |
-| `Remove-WingetRecent` | **Maintenance** | Clear local history of installed packages |
-| `Repair-WingetBatchManager` | **Diagnostics** | Diagnose and repair common winget issues |
-| `Invoke-WinGetBatch` | **Deployment** | Idempotent manifest-driven package deployments |
-| `Export-WingetBatchConfig` | **System** | Backup local configuration |
-| `Import-WingetBatchConfig` | **System** | Restore configuration from backup |
+| Command | Category | Description | Parameters |
+|:---|:---|:---|:---|
+| `Install-WingetAll` | **Deployment** | Batch install packages from search results | `-SearchTerms`, `-MatchOption`, `-Silent`, `-WhatIf`, `-Mode`, `-Scope`, `-Architecture`, `-Override`, `-Location`, `-Force`, `-SkipDependencies`, `-AllowHashMismatch`, `-IWantToLiterallyInstallAllFuckingResults` |
+| `Get-WingetNewPackages` | **Discovery** | Find truly new packages added to winget | `-Hours`, `-Days`, `-GitHubToken`, `-ExcludeTerm`, `-IWantToLiterallyInstallAllFuckingResults`, `-ExportHtml`, `-Mode`, `-Scope`, `-Architecture`, `-Override`, `-Location`, `-ForceInstall`, `-SkipDependencies`, `-AllowHashMismatch` |
+| `Get-WingetUpdates` | **Maintenance** | Check and install available updates | `-Force`, `-IWantToLiterallyUpdateAllFuckingResults`, `-ExportHtml`, `-Mode`, `-Scope`, `-Architecture`, `-Override`, `-Location`, `-ForceInstall`, `-SkipDependencies`, `-AllowHashMismatch` |
+| `Export-WingetHtmlReport` | **Reporting** | Generate HTML audit reports from package data | `-Data`, `-ReportTitle`, `-FilePath` |
+| `Enable-WingetUpdateNotifications` | **Automation** | Activate background update monitoring | `-Interval` |
+| `Disable-WingetUpdateNotifications` | **Automation** | Deactivate update monitoring | *None* |
+| `Set-WingetBatchGitHubToken` | **Auth** | Set or remove GitHub API token | `-Token`, `-Remove` |
+| `New-WingetBatchGitHubToken` | **Auth** | Interactive GitHub OAuth flow | *None* |
+| `Invoke-WingetBatchCleanup` | **Maintenance** | Clean up cache and temporary files | *None* |
+| `Remove-WingetRecent` | **Maintenance** | Clear local history of installed packages | `-Days` |
+| `Repair-WingetBatchManager` | **Diagnostics** | Diagnose and repair common winget issues | *None* |
+| `Invoke-WinGetBatch` | **Deployment** | Idempotent manifest-driven package deployments | `-Path`, `-ThrottleLimit`, `-Silent`, `-WhatIf` |
+| `Export-WingetBatchConfig` | **System** | Backup local configuration | `-Path` |
+| `Import-WingetBatchConfig` | **System** | Restore configuration from backup | `-Path` |
 
 ## Usage Examples
 
@@ -90,6 +95,12 @@ Get-WingetNewPackages -Days 3 -ExportHtml
 ```powershell
 # Install nodejs silently
 Install-WingetAll "nodejs" -Silent
+
+# Use advanced COM parameters to install Python specifically to Machine scope with custom architecture and location
+Install-WingetAll "python" -Scope Machine -Architecture X64 -Location "C:\Python" -Mode Silent
+
+# Deploy packages from a manifest file with custom throttling
+Invoke-WinGetBatch -Path ".\work-apps.yaml" -ThrottleLimit 6 -Silent -SkipDependencies -AllowHashMismatch
 ```
 
 ### 🆕 Advanced Discovery
@@ -98,10 +109,53 @@ Install-WingetAll "nodejs" -Silent
 Get-WingetNewPackages -Days 30 -ExcludeTerm "Microsoft" -ExportHtml
 ```
 
-### 🛠️ Maintenance
+### 🛠️ Maintenance & Updates
 ```powershell
 # Force a fresh update check bypassing the 30-min cache
 Get-WingetUpdates -Force
+
+# Auto-update everything without prompting
+Get-WingetUpdates -IWantToLiterallyUpdateAllFuckingResults
+
+# Clear recently installed packages history older than 5 days
+Remove-WingetRecent -Days 5
+
+# Clean up temporary files and cache
+Invoke-WingetBatchCleanup
+
+# Diagnose and repair Winget Batch Manager issues
+Repair-WingetBatchManager
+```
+
+### ⚙️ Automation & Configuration
+```powershell
+# Enable background update notifications every 4 hours
+Enable-WingetUpdateNotifications -Interval 4
+
+# Disable background update notifications
+Disable-WingetUpdateNotifications
+
+# Export current WingetBatch configuration to a file
+Export-WingetBatchConfig -Path ".\wingetbatch-backup.json"
+
+# Restore WingetBatch configuration from a backup
+Import-WingetBatchConfig -Path ".\wingetbatch-backup.json"
+```
+
+### 🔐 Authentication & Reporting
+```powershell
+# Interactively authenticate with GitHub via OAuth
+New-WingetBatchGitHubToken
+
+# Manually set a GitHub Personal Access Token
+Set-WingetBatchGitHubToken -Token "ghp_xxxxxxxxxxxxxxxxx"
+
+# Remove GitHub Token
+Set-WingetBatchGitHubToken -Remove
+
+# Export custom data to a stylized HTML report
+$data = @(@{Name="App1"; Version="1.0"}, @{Name="App2"; Version="2.0"})
+Export-WingetHtmlReport -Data $data -ReportTitle "Custom Audit" -FilePath ".\audit.html"
 ```
 
 ## Configuration & Storage
