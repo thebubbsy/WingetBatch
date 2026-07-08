@@ -1,12 +1,9 @@
 Describe "Parse-WingetShowOutput" {
     BeforeAll {
-        # Dot-source the module to access internal functions
-        # We need to use Import-Module to load the module properly if it exports members
-        # But for testing internal functions, dot-sourcing is often required if they are not exported
-        # However, Export-ModuleMember might interfere.
-        # Best practice for testing internal functions is InModuleScope, but that requires the module to be imported.
-
-        # Try to import the module
+        # Parse-WingetShowOutput is internal, so test it via InModuleScope.
+        # IMPORTANT: InModuleScope runs the scriptblock in the MODULE's session
+        # state, not the test's -- so $output from the It block is NOT visible
+        # unless passed explicitly via -Parameters (consumed by a matching param()).
         Import-Module "$PSScriptRoot/../WingetBatch.psd1" -Force
     }
 
@@ -30,8 +27,8 @@ Tags: mongodb, shell, cli
 Installer:
   Installer Type: wix
 "@
-            # InModuleScope is required to test internal function
-            $result = InModuleScope WingetBatch {
+            $result = InModuleScope WingetBatch -Parameters @{ output = $output } {
+                param($output)
                 Parse-WingetShowOutput -Output $output -PackageId "MongoDB.Shell"
             }
 
@@ -53,76 +50,82 @@ Installer:
         }
 
         It "Parses GitHub Publisher URL correctly" {
-             $output = @"
+            $output = @"
 Publisher Url: https://github.com/microsoft/winget-cli
 "@
-             $result = InModuleScope WingetBatch {
+            $result = InModuleScope WingetBatch -Parameters @{ output = $output } {
+                param($output)
                 Parse-WingetShowOutput -Output $output -PackageId "Test"
-             }
+            }
 
-             $result.PublisherGitHub | Should -Be "https://github.com/microsoft/winget-cli"
+            $result.PublisherGitHub | Should -Be "https://github.com/microsoft/winget-cli"
         }
     }
 
     Context "Edge Cases" {
         It "Handles extra whitespace around keys and values" {
-             $output = @"
+            $output = @"
   Version:   1.0.0
    Publisher:    Test Pub
 "@
-             $result = InModuleScope WingetBatch {
+            $result = InModuleScope WingetBatch -Parameters @{ output = $output } {
+                param($output)
                 Parse-WingetShowOutput -Output $output -PackageId "Test"
-             }
+            }
 
-             $result.Version | Should -Be "1.0.0"
-             $result.Publisher | Should -Be "Test Pub"
+            $result.Version | Should -Be "1.0.0"
+            $result.Publisher | Should -Be "Test Pub"
         }
 
         It "Handles empty values gracefully" {
-             $output = @"
+            $output = @"
 Version:
 Publisher:
 "@
-             $result = InModuleScope WingetBatch {
+            $result = InModuleScope WingetBatch -Parameters @{ output = $output } {
+                param($output)
                 Parse-WingetShowOutput -Output $output -PackageId "Test"
-             }
+            }
 
-             $result.Version | Should -BeNullOrEmpty
-             $result.Publisher | Should -BeNullOrEmpty
+            $result.Version | Should -BeNullOrEmpty
+            $result.Publisher | Should -BeNullOrEmpty
         }
 
         It "Handles lines without colons (ignores them)" {
-             $output = @"
+            $output = @"
 Just some text
 Another line
 "@
-             $result = InModuleScope WingetBatch {
+            $result = InModuleScope WingetBatch -Parameters @{ output = $output } {
+                param($output)
                 Parse-WingetShowOutput -Output $output -PackageId "Test"
-             }
+            }
 
-             $result.Version | Should -BeNull
+            $result.Version | Should -BeNullOrEmpty
         }
 
         It "Handles keys with spaces correctly" {
-             $output = @"
+            $output = @"
 Release Notes Url: https://example.com/notes
 "@
-             $result = InModuleScope WingetBatch {
+            $result = InModuleScope WingetBatch -Parameters @{ output = $output } {
+                param($output)
                 Parse-WingetShowOutput -Output $output -PackageId "Test"
-             }
+            }
 
-             $result.ReleaseNotesUrl | Should -Be "https://example.com/notes"
+            $result.ReleaseNotesUrl | Should -Be "https://example.com/notes"
         }
 
         It "Handles colons in values correctly" {
-             $output = @"
+            $output = @"
 Description: This is a description: with a colon
 "@
-             $result = InModuleScope WingetBatch {
+            $result = InModuleScope WingetBatch -Parameters @{ output = $output } {
+                param($output)
                 Parse-WingetShowOutput -Output $output -PackageId "Test"
-             }
+            }
 
-             $result.Description | Should -Be "This is a description: with a colon"
+            $result.Description | Should -Be "This is a description: with a colon"
         }
     }
 }

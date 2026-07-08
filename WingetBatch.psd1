@@ -3,7 +3,7 @@
     RootModule = 'WingetBatch.psm1'
 
     # Version number of this module.
-    ModuleVersion = '2.6.0'
+    ModuleVersion = '2.6.1'
 
     # ID used to uniquely identify this module
     GUID = 'b9e8f5d2-4c3f-4a6b-8d9e-2f7a8b5c6e4f'
@@ -24,7 +24,7 @@
     PowerShellVersion = '5.1'
 
     # Required modules
-    RequiredModules = @('Microsoft.WinGet.Client')
+    RequiredModules = @('Microsoft.WinGet.Client', 'PwshSpectreConsole')
 
     # Functions to export from this module
     FunctionsToExport = @('Start-WingetUpdateCheck',
