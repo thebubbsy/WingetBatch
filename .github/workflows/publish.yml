@@ -13,8 +13,14 @@ jobs:
   publish-to-gallery:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v3
-      
+      - uses: actions/checkout@v4
+
+      - name: Install Required Modules
+        shell: pwsh
+        run: |
+          Install-Module -Name PwshSpectreConsole -Force -Scope CurrentUser -SkipPublisherCheck
+          Install-Module -Name Microsoft.WinGet.Client -Force -Scope CurrentUser -SkipPublisherCheck
+
       - name: Publish WingetBatch to PowerShell Gallery
         env:
           PSGALLERY_API_KEY: ${{ secrets.PSGALLERY_API_KEY }}
