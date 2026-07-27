@@ -3,7 +3,7 @@
     RootModule = 'WingetBatch.psm1'
 
     # Version number of this module.
-    ModuleVersion = '2.6.2'
+    ModuleVersion = '2.7.0'
 
     # ID used to uniquely identify this module
     GUID = 'b9e8f5d2-4c3f-4a6b-8d9e-2f7a8b5c6e4f'
@@ -44,11 +44,11 @@
         'Update-WingetBatch',
         'Invoke-WinGetBatch',
         'Repair-WingetBatchManager',
-        'Get-WingetHoroscope',
-        'Test-WingetPackageVibes',
-        'Convert-WingetPackageToHaiku',
-        'Show-WingetMatrix',
-        'Invoke-WingetRussianRoulette'
+        'Get-WingetMachineState',
+        'Get-WingetPackageInfo',
+        'Get-WingetHistory',
+        'Watch-WingetPackages',
+        'Find-WingetDuplicate'
     )
 
     # Cmdlets to export from this module
@@ -77,6 +77,23 @@
 
             # ReleaseNotes of this module
             ReleaseNotes = @'
+v2.7.0 - Machine-as-Code & Developer Experience
+- NEW: Get-WingetMachineState - Full machine state snapshot, drift comparison, and reconciliation (Machine-as-Code).
+  * Export installed packages to portable JSON/YAML manifests.
+  * Compare current state against a golden baseline for drift detection.
+  * Reconcile: auto-install missing, update outdated, optionally remove extraneous packages.
+- NEW: Get-WingetPackageInfo - Rich brew-info-style package explorer with GitHub manifest fetching.
+- NEW: Get-WingetHistory - Installation history timeline from registry and winget logs.
+- NEW: Watch-WingetPackages - Live terminal dashboard (htop-style) for package monitoring.
+- NEW: Find-WingetDuplicate - Detect duplicate packages, multi-source installs, and version clusters.
+- NEW: Tab-completion argument completers for package IDs across all commands.
+- SECURITY: Eliminated all Invoke-Expression usage in Invoke-WinGetBatch (command injection fix).
+- SECURITY: Replaced hardcoded paths with dynamic environment resolution.
+- FIXED: Package deduplication bug in Install-WingetAll (duplicates were shown and installed).
+- ENHANCED: Installation progress counter [N/M] for all batch operations.
+- ENHANCED: Invoke-WinGetBatch now uses COM API as primary install path with CLI fallback.
+- Author/Architect: Matthew Bubb.
+
 v2.6.0 - Smart Search Architecture
 - ENHANCED: Smart Scope Routing implemented in Install-WingetAll. Purely numeric queries automatically bypass "Id" and "Moniker" fields while retaining Tag matching.
 - NEW: Added -LimitResult (default 100) mapped natively to COM API Count parameter, ending searches early to massively boost performance.

@@ -1,0 +1,30 @@
+# Editor & IDE directories
+.history/
+.Jules/
+.jules/
+.vscode/
+.idea/
+*.suo
+*.user
+*.userossc
+
+# PowerShell & Package Manager artifacts
+PSGetModuleInfo.xml
+*.nupkg
+*.nuspec
+
+# Binaries & Compiled Executables
+*.exe
+*.dll
+
+# OS files
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Temporary & Scratch files
+temp_*
+test_*.ps1
+benchmark*.ps1
+measure_*.ps1
+*.tmp

@@ -78,7 +78,10 @@
 
     begin {
         # Prepend WindowsApps folder to ensure winget and COM APIs resolve correctly
-        $env:PATH = "C:\Users\user\AppData\Local\Microsoft\WindowsApps;" + $env:PATH
+        $windowsAppsPath = Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps"
+        if ($env:PATH -notlike "*$windowsAppsPath*") {
+            $env:PATH = "$windowsAppsPath;$env:PATH"
+        }
 
         # Ensure Microsoft.WinGet.Client module is imported
         if (-not (Get-Module -Name Microsoft.WinGet.Client)) {
@@ -89,6 +92,12 @@
                 Write-Error "Microsoft.WinGet.Client module is a required dependency. Please install it."
                 return
             }
+        }
+
+        # Resolve winget.exe path for parallel script blocks
+        $wingetExePath = (Get-Command winget -ErrorAction SilentlyContinue).Source
+        if (-not $wingetExePath) {
+            $wingetExePath = Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps\winget.exe"
         }
 
         # Initialize collections
@@ -224,29 +233,40 @@
 
         # Phase 1: Parallel Downloads using ForEach-Object -Parallel
         Write-Host "`n[PHASE 2] Parallel Download Operations Launching..." -ForegroundColor Cyan
-        $cacheDir = "C:\temp\winget_cache"
+        $cacheDir = Join-Path $env:TEMP "winget_cache"
         if (-not (Test-Path $cacheDir)) {
             New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null
         }
 
         $downloads = $executionQueue | ForEach-Object -Parallel {
-            $env:PATH = "C:\Users\user\AppData\Local\Microsoft\WindowsApps;" + $env:PATH
+            $wingetPath = $using:wingetExePath
             $pkgId = $_.Id
-            $versionStr = if ($_.Version -ne "latest") { "--version $($_.Version)" } else { "" }
+            $dlPath = Join-Path $using:cacheDir $pkgId
 
             Write-Host "  >>> Downloading installer for $pkgId ..." -ForegroundColor DarkGray
-            
-            # Executing winget download
-            $dlPath = "C:\temp\winget_cache\$pkgId"
-            $cmd = "winget download --id $pkgId --exact --accept-package-agreements --accept-source-agreements --disable-interactivity --download-directory $dlPath $versionStr"
-            Invoke-Expression $cmd | Out-Null
 
-            if ($LASTEXITCODE -eq 0) {
+            # Build argument array (no Invoke-Expression - safe from injection)
+            $wingetArgs = @(
+                'download'
+                '--id', $pkgId
+                '--exact'
+                '--accept-package-agreements'
+                '--accept-source-agreements'
+                '--disable-interactivity'
+                '--download-directory', $dlPath
+            )
+            if ($_.Version -ne "latest") {
+                $wingetArgs += @('--version', $_.Version)
+            }
+
+            $process = Start-Process -FilePath $wingetPath -ArgumentList $wingetArgs -Wait -NoNewWindow -PassThru -RedirectStandardOutput "$dlPath\stdout.log" -RedirectStandardError "$dlPath\stderr.log"
+
+            if ($process.ExitCode -eq 0) {
                 Write-Host "   Cached installer: $pkgId" -ForegroundColor Green
                 return [PSCustomObject]@{ Id = $pkgId; Downloaded = $true; Path = $dlPath }
             }
             else {
-                Write-Host "   Failed download cache: $pkgId (Exit Code: $LASTEXITCODE)" -ForegroundColor Red
+                Write-Host "   Failed download cache: $pkgId (Exit Code: $($process.ExitCode))" -ForegroundColor Red
                 return [PSCustomObject]@{ Id = $pkgId; Downloaded = $false; Path = $null }
             }
         } -ThrottleLimit $ThrottleLimit
@@ -279,24 +299,58 @@
                 Write-Warning "Local cache missing. Falling back to dynamic installer fetch."
             }
 
-            # Run installation
-            $installMode = if ($Silent -or $Mode -eq 'Silent') { "--silent" } elseif ($Mode -eq 'Interactive') { "--interactive" } else { "" }
-            $versionArg = if ($targetVer -ne "latest") { "--version $targetVer" } else { "" }
+            # Run installation using COM API (preferred) with CLI fallback
+            $installSucceeded = $false
+            $exitCode = -1
 
-            $extraArgs = ""
-            if ($Scope -eq "Machine") { $extraArgs += " --machine" }
-            elseif ($Scope -eq "User") { $extraArgs += " --user" }
-            if ($Architecture) { $extraArgs += " --architecture $Architecture" }
-            if ($Location) { $extraArgs += " --location `"$Location`"" }
-            if ($Override) { $extraArgs += " --override `"$Override`"" }
-            if ($Force) { $extraArgs += " --force" }
-            if ($SkipDependencies) { $extraArgs += " --skip-dependencies" }
-            if ($AllowHashMismatch) { $extraArgs += " --ignore-security-hash" }
+            try {
+                # Primary: Use COM API for installation (no shell execution needed)
+                $comInstallArgs = @{
+                    Id = $pkgId
+                    ErrorAction = 'Stop'
+                }
+                if ($Silent -or $Mode -eq 'Silent') { $comInstallArgs['Mode'] = 'Silent' }
+                elseif ($Mode -eq 'Interactive') { $comInstallArgs['Mode'] = 'Interactive' }
+                if ($Scope) { $comInstallArgs['Scope'] = $Scope }
+                if ($Architecture) { $comInstallArgs['Architecture'] = $Architecture }
+                if ($Location) { $comInstallArgs['Location'] = $Location }
+                if ($Override) { $comInstallArgs['Override'] = $Override }
+                if ($Force) { $comInstallArgs['Force'] = $true }
+                if ($SkipDependencies) { $comInstallArgs['SkipDependencies'] = $true }
+                if ($AllowHashMismatch) { $comInstallArgs['AllowHashMismatch'] = $true }
 
-            # Execute serialized install
-            $cmd = "winget install --id $pkgId --exact --accept-package-agreements --accept-source-agreements --disable-interactivity $installMode $versionArg $extraArgs"
-            $output = Invoke-Expression $cmd 2>&1 | Out-String
-            $exitCode = $LASTEXITCODE
+                Microsoft.WinGet.Client\Install-WinGetPackage @comInstallArgs | Out-Null
+                $exitCode = 0
+                $installSucceeded = $true
+            }
+            catch {
+                # Fallback: Use winget CLI with safe argument array (no Invoke-Expression)
+                Write-Verbose "COM API install failed, falling back to CLI: $_"
+                $wingetArgs = @(
+                    'install'
+                    '--id', $pkgId
+                    '--exact'
+                    '--accept-package-agreements'
+                    '--accept-source-agreements'
+                    '--disable-interactivity'
+                    '--no-progress'
+                )
+                if ($Silent -or $Mode -eq 'Silent') { $wingetArgs += '--silent' }
+                elseif ($Mode -eq 'Interactive') { $wingetArgs += '--interactive' }
+                if ($targetVer -ne "latest") { $wingetArgs += @('--version', $targetVer) }
+                if ($Scope -eq "Machine") { $wingetArgs += '--machine' }
+                elseif ($Scope -eq "User") { $wingetArgs += '--user' }
+                if ($Architecture) { $wingetArgs += @('--architecture', $Architecture) }
+                if ($Location) { $wingetArgs += @('--location', $Location) }
+                if ($Override) { $wingetArgs += @('--override', $Override) }
+                if ($Force) { $wingetArgs += '--force' }
+                if ($SkipDependencies) { $wingetArgs += '--skip-dependencies' }
+                if ($AllowHashMismatch) { $wingetArgs += '--ignore-security-hash' }
+
+                $process = Start-Process -FilePath $wingetExePath -ArgumentList $wingetArgs -Wait -NoNewWindow -PassThru
+                $exitCode = $process.ExitCode
+                $installSucceeded = ($exitCode -eq 0)
+            }
 
             # Exit Code Trapping & Telemetry Mapping
             $status = "Failed"
@@ -333,7 +387,6 @@
                     Write-Host " Installation failed for " -NoNewline -ForegroundColor Red
                     Write-Host $pkgId -NoNewline -ForegroundColor White
                     Write-Host " (Exit Code: $exitCode)" -ForegroundColor Red
-                    Write-Host $output -ForegroundColor DarkGray
                 }
             }
 
@@ -348,7 +401,7 @@
         }
 
         # Compile structured JSON report
-        $reportDir = "C:\temp\winget_reports"
+        $reportDir = Join-Path $env:TEMP "winget_reports"
         if (-not (Test-Path $reportDir)) {
             New-Item -ItemType Directory -Path $reportDir -Force | Out-Null
         }

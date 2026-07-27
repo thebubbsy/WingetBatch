@@ -8,9 +8,26 @@ Batch installation utilities and reporting tools for Windows Package Manager (wi
 - **Intelligent Search**: Search for packages and install all matching results in one go.
 - **Interactive UI**: Uses PwshSpectreConsole for a modern, fluid interactive package selection experience.
 - **Smart Filtering**: Supports complex multi-word searches with logical AND filtering.
-- **Progress Visibility**: Clear, visual feedback during the entire installation lifecycle.
+- **Progress Visibility**: Clear, visual feedback with [N/M] progress counters during the entire installation lifecycle.
 
-### 📊 HTML Reporting (NEW v2.2.0)
+### 🖥️ Machine-as-Code (NEW v2.7.0)
+- **State Snapshots**: Export your entire machine's package set to a portable JSON/YAML manifest.
+- **Drift Detection**: Compare any machine against a golden baseline and see exactly what's missing, outdated, or extraneous.
+- **Auto-Reconciliation**: One command to install missing, update outdated, and optionally remove extraneous packages.
+- **Golden Machine Replication**: Snapshot a configured machine, then replicate its package set onto any other Windows machine.
+
+### 📊 Live Dashboard (NEW v2.7.0)
+- **Real-Time Monitoring**: `Watch-WingetPackages` displays a live-updating terminal dashboard (htop-style).
+- **System Health**: Winget engine status, source index freshness, GitHub auth state at a glance.
+- **Package Statistics**: Total installed, pending updates, recent installs, source breakdown.
+
+### 🔍 Package Intelligence (NEW v2.7.0)
+- **Rich Package Info**: `Get-WingetPackageInfo` shows brew-info-style details with GitHub manifest data.
+- **Duplicate Detection**: `Find-WingetDuplicate` finds multi-source installs, name collisions, and version clusters.
+- **Installation History**: `Get-WingetHistory` displays a chronological timeline from registry and winget logs.
+- **Tab Completion**: Intelligent argument completers for package IDs across all commands.
+
+### 📊 HTML Reporting
 - **Visual Insights**: Generate professional, stand-alone HTML reports for newly discovered packages or available updates.
 - **Interactive Reports**: Reports include clean layouts and direct package identifiers.
 - **Easy Export**: Use the `-ExportHtml` switch on supported commands to generate a shareable audit trail.
@@ -75,8 +92,14 @@ Get-WingetNewPackages -Days 3 -ExportHtml
 | Command | Category | Description | Parameters |
 |:---|:---|:---|:---|
 | `Install-WingetAll` | **Deployment** | Batch install packages from search results | `-SearchTerms`, `-MatchOption`, `-Silent`, `-WhatIf`, `-Mode`, `-Scope`, `-Architecture`, `-Override`, `-Location`, `-Force`, `-SkipDependencies`, `-AllowHashMismatch`, `-IWantToLiterallyInstallAllFuckingResults` |
+| `Invoke-WinGetBatch` | **Deployment** | Idempotent manifest-driven package deployments | `-Path`, `-ThrottleLimit`, `-Silent`, `-WhatIf` |
+| `Get-WingetMachineState` | **State** | Snapshot, compare, and reconcile machine package state | `-Export`, `-Compare`, `-Reconcile`, `-Path`, `-Format`, `-IncludeVersions`, `-RemoveExtraneous`, `-Source` |
 | `Get-WingetNewPackages` | **Discovery** | Find truly new packages added to winget | `-Hours`, `-Days`, `-GitHubToken`, `-ExcludeTerm`, `-IWantToLiterallyInstallAllFuckingResults`, `-ExportHtml`, `-Mode`, `-Scope`, `-Architecture`, `-Override`, `-Location`, `-ForceInstall`, `-SkipDependencies`, `-AllowHashMismatch` |
+| `Get-WingetPackageInfo` | **Discovery** | Rich package information display (brew-info style) | `-Id`, `-Query`, `-ShowManifest`, `-ShowVersions` |
 | `Get-WingetUpdates` | **Maintenance** | Check and install available updates | `-Force`, `-IWantToLiterallyUpdateAllFuckingResults`, `-ExportHtml`, `-Mode`, `-Scope`, `-Architecture`, `-Override`, `-Location`, `-ForceInstall`, `-SkipDependencies`, `-AllowHashMismatch` |
+| `Get-WingetHistory` | **Maintenance** | Installation history timeline | `-Days`, `-All`, `-Search`, `-ExportHtml`, `-ExportJson` |
+| `Find-WingetDuplicate` | **Maintenance** | Detect duplicate and redundant packages | `-IncludeVersions`, `-ExportHtml` |
+| `Watch-WingetPackages` | **Monitoring** | Live terminal dashboard for package state | `-RefreshInterval`, `-Once` |
 | `Export-WingetHtmlReport` | **Reporting** | Generate HTML audit reports from package data | `-Data`, `-ReportTitle`, `-FilePath` |
 | `Enable-WingetUpdateNotifications` | **Automation** | Activate background update monitoring | `-Interval` |
 | `Disable-WingetUpdateNotifications` | **Automation** | Deactivate update monitoring | *None* |
@@ -85,7 +108,6 @@ Get-WingetNewPackages -Days 3 -ExportHtml
 | `Invoke-WingetBatchCleanup` | **Maintenance** | Clean up cache and temporary files | *None* |
 | `Remove-WingetRecent` | **Maintenance** | Clear local history of installed packages | `-Days` |
 | `Repair-WingetBatchManager` | **Diagnostics** | Diagnose and repair common winget issues | *None* |
-| `Invoke-WinGetBatch` | **Deployment** | Idempotent manifest-driven package deployments | `-Path`, `-ThrottleLimit`, `-Silent`, `-WhatIf` |
 | `Export-WingetBatchConfig` | **System** | Backup local configuration | `-Path` |
 | `Import-WingetBatchConfig` | **System** | Restore configuration from backup | `-Path` |
 
@@ -142,6 +164,46 @@ Export-WingetBatchConfig -Path ".\wingetbatch-backup.json"
 Import-WingetBatchConfig -Path ".\wingetbatch-backup.json"
 ```
 
+### 🖥️ Machine-as-Code (NEW)
+```powershell
+# Snapshot this machine's packages to a portable manifest
+Get-WingetMachineState -Export -Path ".\golden-machine.json"
+
+# Export with exact version pins in YAML
+Get-WingetMachineState -Export -Path ".\state.yaml" -Format YAML -IncludeVersions
+
+# Compare current machine against golden baseline (drift detection)
+Get-WingetMachineState -Compare -Path ".\golden-machine.json"
+
+# Reconcile: install missing + update outdated packages
+Get-WingetMachineState -Reconcile -Path ".\golden-machine.json"
+
+# Full reconciliation: also remove packages not in the manifest
+Get-WingetMachineState -Reconcile -Path ".\golden-machine.json" -RemoveExtraneous
+```
+
+### 🔍 Package Intelligence (NEW)
+```powershell
+# Rich package info (brew-info style)
+Get-WingetPackageInfo -Id "Git.Git"
+
+# Search and explore packages
+Get-WingetPackageInfo -Query "visual studio code" -ShowVersions
+
+# Live terminal dashboard (htop-style monitoring)
+Watch-WingetPackages
+Watch-WingetPackages -RefreshInterval 60 -Once
+
+# Find duplicate/redundant packages
+Find-WingetDuplicate -IncludeVersions
+
+# Installation history timeline (last 7 days)
+Get-WingetHistory -Days 7
+
+# Full history with search filter
+Get-WingetHistory -All -Search "python" -ExportHtml
+```
+
 ### 🔐 Authentication & Reporting
 ```powershell
 # Interactively authenticate with GitHub via OAuth
@@ -186,7 +248,8 @@ For a detailed breakdown of the roadmap and execution logic, view our [Next-Gene
 
 ## Version History
 
-- **2.5.0** (Current) - COM API Migration: Replaced all winget.exe CLI text-parsing with Microsoft.WinGet.Client COM API. Added Repair-WingetBatchManager.
+- **2.7.0** (Current) - Machine-as-Code & Developer Experience: Get-WingetMachineState (snapshot/compare/reconcile), Get-WingetPackageInfo, Get-WingetHistory, Watch-WingetPackages (live dashboard), Find-WingetDuplicate, tab-completion, security fixes (Invoke-Expression elimination), deduplication bug fix.
+- **2.5.0** - COM API Migration: Replaced all winget.exe CLI text-parsing with Microsoft.WinGet.Client COM API. Added Repair-WingetBatchManager.
 - **2.4.7** - Performance and stability improvements.
 - **2.2.1** - Resolved HTML report parameter binding issues and improved module loading robustness.
 - **2.2.0** - Added professional HTML reporting engine (`-ExportHtml`).
