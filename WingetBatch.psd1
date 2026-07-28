@@ -3,7 +3,7 @@
     RootModule = 'WingetBatch.psm1'
 
     # Version number of this module.
-    ModuleVersion = '2.8.0'
+    ModuleVersion = '2.9.0'
 
     # ID used to uniquely identify this module
     GUID = 'b9e8f5d2-4c3f-4a6b-8d9e-2f7a8b5c6e4f'
@@ -59,7 +59,8 @@
         'Get-WingetHealthScore',
         'Send-WingetWebhook',
         'Export-WingetOffline',
-        'Install-WingetProfile'
+        'Install-WingetProfile',
+        'Get-WingetChangelog'
     )
 
     # Cmdlets to export from this module
@@ -88,6 +89,18 @@
 
             # ReleaseNotes of this module
             ReleaseNotes = @'
+v2.9.0 - The Full Arsenal
+- NEW: Get-WingetRecommend - AI-powered package recommendations (persona matching + personality clone).
+- NEW: Invoke-WingetFleet - SCCM-lite fleet management over WinRM/SSH.
+- NEW: Restore-WingetSnapshot - Package-level rollback engine (undo, restore, diff).
+- NEW: Test-WingetCompliance - Policy/compliance engine (required, banned, version floors).
+- NEW: Get-WingetHealthScore - Package trustworthiness rating (0-100, A+ through F).
+- NEW: Send-WingetWebhook - Discord/Slack/Teams notifications for package events.
+- NEW: Export-WingetOffline - Air-gapped offline package deployment with hash verification.
+- NEW: Install-WingetProfile - Shareable community setup profiles (8 built-in).
+- NEW: Get-WingetChangelog - Version history and release notes diff between versions.
+- 34 total commands. Author/Architect: Matthew Bubb.
+
 v2.8.0 - Automation, Visualization & Remote Management
 - NEW: Register-WingetMaintenance - Scheduled maintenance tasks for automatic package updates.
   * Daily/Weekly/Monthly recurrence with configurable time and actions.
