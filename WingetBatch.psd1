@@ -52,7 +52,8 @@
         'Register-WingetMaintenance',
         'Get-WingetDependencyGraph',
         'Start-WingetServer',
-        'Get-WingetRecommend'
+        'Get-WingetRecommend',
+        'Invoke-WingetFleet'
     )
 
     # Cmdlets to export from this module
