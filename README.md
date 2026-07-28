@@ -1,262 +1,285 @@
 # WingetBatch PowerShell Module
 
-Batch installation utilities and reporting tools for Windows Package Manager (winget). Search for packages, install results, and generate professional reports with a single command.
+The ultimate Windows Package Manager power tool. 26 commands for batch deployment, AI-powered recommendations, machine-as-code state management, REST API server, fleet automation, live dashboards, dependency graphs, and scheduled maintenance — all from your terminal.
+
+```powershell
+Install-Module WingetBatch
+```
 
 ## Features
 
-### 🚀 Batch Installation
-- **Intelligent Search**: Search for packages and install all matching results in one go.
-- **Interactive UI**: Uses PwshSpectreConsole for a modern, fluid interactive package selection experience.
-- **Smart Filtering**: Supports complex multi-word searches with logical AND filtering.
-- **Progress Visibility**: Clear, visual feedback with [N/M] progress counters during the entire installation lifecycle.
+### 🧠 AI Package Recommender (NEW v2.8.0)
+- **Persona Matching**: Say "I'm a backend dev" and get a curated, scored install list.
+- **Clone Personality**: Analyzes your installed packages and recommends what's missing using co-occurrence patterns.
+- **10 Built-in Archetypes**: Backend Dev, Frontend Dev, Data Scientist, DevOps, Gamer, Game Dev, Security Researcher, Designer, Productivity, Student.
+- **One-Key Install**: Pipe recommendations directly into interactive install.
 
-### 🖥️ Machine-as-Code (NEW v2.7.0)
-- **State Snapshots**: Export your entire machine's package set to a portable JSON/YAML manifest.
-- **Drift Detection**: Compare any machine against a golden baseline and see exactly what's missing, outdated, or extraneous.
-- **Auto-Reconciliation**: One command to install missing, update outdated, and optionally remove extraneous packages.
-- **Golden Machine Replication**: Snapshot a configured machine, then replicate its package set onto any other Windows machine.
+### 🌐 REST API Server (NEW v2.8.0)
+- **Remote Management**: Full HTTP API for package operations via [Pode](https://github.com/Badgerati/Pode).
+- **12 Endpoints**: List, search, install, uninstall, update, state, history, stats, health.
+- **Secured**: API key auth, per-IP rate limiting, request logging.
+- **Self-Documenting**: `GET /` returns the full endpoint catalog.
 
-### 📊 Live Dashboard (NEW v2.7.0)
-- **Real-Time Monitoring**: `Watch-WingetPackages` displays a live-updating terminal dashboard (htop-style).
-- **System Health**: Winget engine status, source index freshness, GitHub auth state at a glance.
-- **Package Statistics**: Total installed, pending updates, recent installs, source breakdown.
+### 🔧 Scheduled Maintenance (NEW v2.8.0)
+- **Auto-Updates**: Register a Windows Scheduled Task for hands-free package maintenance.
+- **Flexible Schedules**: Daily, Weekly, Monthly with configurable time and actions.
+- **5 Actions**: UpdateAll, UpdateOutdated, CleanupTemp, AuditDrift, NotifyOnly.
+- **Full Lifecycle**: `-Status`, `-RunNow`, `-Unregister` for complete control.
 
-### 🔍 Package Intelligence (NEW v2.7.0)
-- **Rich Package Info**: `Get-WingetPackageInfo` shows brew-info-style details with GitHub manifest data.
-- **Duplicate Detection**: `Find-WingetDuplicate` finds multi-source installs, name collisions, and version clusters.
-- **Installation History**: `Get-WingetHistory` displays a chronological timeline from registry and winget logs.
-- **Tab Completion**: Intelligent argument completers for package IDs across all commands.
+### 🕸️ Dependency Graphs (NEW v2.8.0)
+- **Visualize Relationships**: See how packages depend on each other.
+- **4 Output Formats**: Mermaid (GitHub), DOT (Graphviz), ASCII Tree, structured Object.
+- **Circular Detection**: Finds and highlights dependency cycles.
+- **Configurable Depth**: Traverse 1–10 levels deep.
 
-### 📊 HTML Reporting
-- **Visual Insights**: Generate professional, stand-alone HTML reports for newly discovered packages or available updates.
-- **Interactive Reports**: Reports include clean layouts and direct package identifiers.
-- **Easy Export**: Use the `-ExportHtml` switch on supported commands to generate a shareable audit trail.
+### 🖥️ Machine-as-Code
+- **State Snapshots**: Export your entire machine's package set to portable JSON/YAML.
+- **Drift Detection**: Compare any machine against a golden baseline.
+- **Auto-Reconciliation**: Install missing, update outdated, remove extraneous — one command.
 
-### 🔔 Smart Update Notifications
-- **Background Intelligence**: Automatically monitors your system for winget package updates in the background.
-- **Zero-Latency Profile Integration**: Displays elegant notifications instantly when you open your terminal.
-- **Precision Control**: Configurable check intervals (startup, hourly, or custom) to balance freshness and performance.
-- **Selective Updating**: Interactively choose exactly which packages to update.
+### 📊 Live Dashboard
+- **Real-Time Monitoring**: `Watch-WingetPackages` — htop-style terminal dashboard.
+- **System Health**: Winget status, source freshness, GitHub auth, package stats at a glance.
 
-### 📦 New Package Discovery
-- **Forensic Discovery**: Directly queries the `winget-pkgs` GitHub repository to find truly new packages, not just version bumps.
-- **Historical Analysis**: Look back hours, days, or weeks to see what has been added to the ecosystem.
-- **Massive Scale**: Fetches all commits without artificial limits, powered by GitHub API integration.
+### 🔍 Package Intelligence
+- **Rich Info**: `Get-WingetPackageInfo` — brew-info-style details with GitHub manifest data.
+- **Duplicate Detection**: Multi-source installs, name collisions, version clusters.
+- **History Timeline**: Chronological install history from registry and winget logs.
+- **Tab Completion**: Intelligent argument completers across all commands.
 
-### 🔑 Secure Authentication
-- **Enterprise Rate Limits**: Integrated GitHub authentication boosts API limits from 60 to 5,000 requests per hour.
-- **Zero-Config Usage**: Automatically leverages stored credentials across all modules.
-- **Hardware-Bound Security**: Tokens are encrypted using PowerShell's secure storage, locked to your Windows user account.
+### 🚀 Batch Deployment
+- **Intelligent Search**: Multi-word AND filtering with COM API.
+- **Interactive UI**: PwshSpectreConsole multi-select experience.
+- **Idempotent Manifests**: `Invoke-WinGetBatch` — declarative JSON/YAML deployments.
+- **Split-Phase Concurrency**: Parallel downloads, serialized installs.
+
+### 📦 Discovery & Updates
+- **New Package Discovery**: Queries winget-pkgs GitHub repo for truly new packages.
+- **Smart Update Checks**: Background monitoring with 30-min cache TTL.
+- **HTML Reporting**: Professional standalone reports for audits.
+
+### 🔑 Security
+- **GitHub Auth**: 5,000 req/hr (vs 60 unauthenticated).
+- **AES Encryption**: Tokens encrypted with Windows DPAPI.
+- **No Invoke-Expression**: All execution uses safe argument arrays and COM API.
 
 ## Installation
 
 ```powershell
-# Install from PowerShell Gallery
+# From PowerShell Gallery
 Install-Module -Name WingetBatch -Scope CurrentUser
 
-# Import the module
+# Import
 Import-Module WingetBatch
 ```
 
 ## Quick Start
 
-### 1. Set up GitHub Authentication (Recommended)
 ```powershell
-# Authenticate interactively (opens browser)
-New-WingetBatchGitHubToken
+# "I'm a backend developer" — get AI recommendations
+Get-WingetRecommend -Persona "backend developer" -Install
 
-# This unlocks the full potential of New Package Discovery with 5,000 req/hr
+# Clone this machine's personality onto a new PC
+Get-WingetRecommend -ClonePersonality
+
+# Start the REST API for remote management
+Start-WingetServer -Port 8484
+
+# Schedule weekly auto-updates at 3AM
+Register-WingetMaintenance -Schedule Weekly -Time 03:00
+
+# Snapshot this machine as a golden baseline
+Get-WingetMachineState -Export -Path ".\golden.json"
+
+# Live dashboard
+Watch-WingetPackages
 ```
 
-### 2. Enable Advanced Notifications
-```powershell
-# Activate background monitoring
-Enable-WingetUpdateNotifications
+## Command Reference (26 Commands)
 
-# Restart your terminal to see the logic in action
-```
-
-### 3. Generate an HTML Report
-```powershell
-# Find new packages from the last 3 days and export to HTML
-Get-WingetNewPackages -Days 3 -ExportHtml
-```
-
-> [!WARNING]
-> **The Power of `-IWantToLiterallyInstallAllFuckingResults`**
-> 
-> This parameter is insanely powerful and bypasses all interactive prompts and safeguards to automatically install every single matched package. When paired with broad searches (e.g., searching for "Microsoft", or using `Get-WingetNewPackages -Days 30`), you can easily lead yourself down a path where you automatically queue and install over 200 applications without warning. Use this parameter with extreme caution!
-
-## Command Reference
-
-| Command | Category | Description | Parameters |
-|:---|:---|:---|:---|
-| `Install-WingetAll` | **Deployment** | Batch install packages from search results | `-SearchTerms`, `-MatchOption`, `-Silent`, `-WhatIf`, `-Mode`, `-Scope`, `-Architecture`, `-Override`, `-Location`, `-Force`, `-SkipDependencies`, `-AllowHashMismatch`, `-IWantToLiterallyInstallAllFuckingResults` |
-| `Invoke-WinGetBatch` | **Deployment** | Idempotent manifest-driven package deployments | `-Path`, `-ThrottleLimit`, `-Silent`, `-WhatIf` |
-| `Get-WingetMachineState` | **State** | Snapshot, compare, and reconcile machine package state | `-Export`, `-Compare`, `-Reconcile`, `-Path`, `-Format`, `-IncludeVersions`, `-RemoveExtraneous`, `-Source` |
-| `Get-WingetNewPackages` | **Discovery** | Find truly new packages added to winget | `-Hours`, `-Days`, `-GitHubToken`, `-ExcludeTerm`, `-IWantToLiterallyInstallAllFuckingResults`, `-ExportHtml`, `-Mode`, `-Scope`, `-Architecture`, `-Override`, `-Location`, `-ForceInstall`, `-SkipDependencies`, `-AllowHashMismatch` |
-| `Get-WingetPackageInfo` | **Discovery** | Rich package information display (brew-info style) | `-Id`, `-Query`, `-ShowManifest`, `-ShowVersions` |
-| `Get-WingetUpdates` | **Maintenance** | Check and install available updates | `-Force`, `-IWantToLiterallyUpdateAllFuckingResults`, `-ExportHtml`, `-Mode`, `-Scope`, `-Architecture`, `-Override`, `-Location`, `-ForceInstall`, `-SkipDependencies`, `-AllowHashMismatch` |
-| `Get-WingetHistory` | **Maintenance** | Installation history timeline | `-Days`, `-All`, `-Search`, `-ExportHtml`, `-ExportJson` |
-| `Find-WingetDuplicate` | **Maintenance** | Detect duplicate and redundant packages | `-IncludeVersions`, `-ExportHtml` |
-| `Watch-WingetPackages` | **Monitoring** | Live terminal dashboard for package state | `-RefreshInterval`, `-Once` |
-| `Export-WingetHtmlReport` | **Reporting** | Generate HTML audit reports from package data | `-Data`, `-ReportTitle`, `-FilePath` |
-| `Enable-WingetUpdateNotifications` | **Automation** | Activate background update monitoring | `-Interval` |
-| `Disable-WingetUpdateNotifications` | **Automation** | Deactivate update monitoring | *None* |
-| `Set-WingetBatchGitHubToken` | **Auth** | Set or remove GitHub API token | `-Token`, `-Remove` |
-| `New-WingetBatchGitHubToken` | **Auth** | Interactive GitHub OAuth flow | *None* |
-| `Invoke-WingetBatchCleanup` | **Maintenance** | Clean up cache and temporary files | *None* |
-| `Remove-WingetRecent` | **Maintenance** | Clear local history of installed packages | `-Days` |
-| `Repair-WingetBatchManager` | **Diagnostics** | Diagnose and repair common winget issues | *None* |
-| `Export-WingetBatchConfig` | **System** | Backup local configuration | `-Path` |
-| `Import-WingetBatchConfig` | **System** | Restore configuration from backup | `-Path` |
+| Command | Category | Description |
+|:---|:---|:---|
+| `Get-WingetRecommend` | **AI** | Persona-based and personality-clone package recommendations |
+| `Start-WingetServer` | **API** | REST API server for remote package management (Pode) |
+| `Register-WingetMaintenance` | **Automation** | Scheduled maintenance tasks for auto-updates |
+| `Get-WingetDependencyGraph` | **Visualization** | Package dependency graph (Mermaid/DOT/Tree) |
+| `Get-WingetMachineState` | **State** | Snapshot, compare, reconcile machine state |
+| `Watch-WingetPackages` | **Monitoring** | Live terminal dashboard (htop-style) |
+| `Get-WingetPackageInfo` | **Discovery** | Rich brew-info-style package explorer |
+| `Find-WingetDuplicate` | **Maintenance** | Detect duplicates and version clusters |
+| `Get-WingetHistory` | **Maintenance** | Installation history timeline |
+| `Install-WingetAll` | **Deployment** | Batch install from search results |
+| `Invoke-WinGetBatch` | **Deployment** | Idempotent manifest-driven deployments |
+| `Get-WingetNewPackages` | **Discovery** | Find truly new packages on winget |
+| `Get-WingetUpdates` | **Maintenance** | Check and install available updates |
+| `Enable-WingetUpdateNotifications` | **Automation** | Background update monitoring |
+| `Disable-WingetUpdateNotifications` | **Automation** | Disable update monitoring |
+| `Set-WingetBatchGitHubToken` | **Auth** | Set/remove GitHub API token |
+| `New-WingetBatchGitHubToken` | **Auth** | Interactive GitHub OAuth flow |
+| `Remove-WingetRecent` | **Maintenance** | Uninstall recently added packages |
+| `Invoke-WingetBatchCleanup` | **Maintenance** | Clean cache and temp files |
+| `Repair-WingetBatchManager` | **Diagnostics** | Diagnose and repair winget issues |
+| `Export-WingetBatchConfig` | **System** | Backup configuration |
+| `Import-WingetBatchConfig` | **System** | Restore configuration |
+| `Set-WingetBatchConfig` | **System** | Set module preferences |
+| `Get-WingetBatchConfig` | **System** | View module preferences |
+| `Start-WingetUpdateCheck` | **Automation** | Manual update check trigger |
+| `Update-WingetBatch` | **System** | Self-update the module |
 
 ## Usage Examples
 
-### 📦 Precision Deployment
+### 🧠 AI Recommendations
 ```powershell
-# Install nodejs silently
+# Persona-based recommendations
+Get-WingetRecommend -Persona "data scientist" -Explain
+
+# Clone this machine's personality (what am I missing?)
+Get-WingetRecommend -ClonePersonality -MaxResults 10
+
+# Filter by category and install interactively
+Get-WingetRecommend -Persona "devops engineer" -Category DevOps -Install
+```
+
+### 🌐 REST API Server
+```powershell
+# Start server (generates API key automatically)
+Start-WingetServer -Port 8484
+
+# Then from any HTTP client:
+# GET  /api/packages          — list installed
+# GET  /api/search?q=python   — search winget
+# POST /api/packages/install  — install {"packages": ["Git.Git"]}
+# GET  /api/updates           — pending updates
+# POST /api/updates/apply     — apply all updates
+# GET  /api/state             — machine state
+# GET  /api/stats             — package statistics
+# GET  /api/health            — server health
+```
+
+### 🔧 Scheduled Maintenance
+```powershell
+# Register weekly Sunday 3AM maintenance
+Register-WingetMaintenance -Schedule Weekly -Time 03:00
+
+# Daily updates + drift audit at 2AM
+Register-WingetMaintenance -Schedule Daily -Time 02:00 -Action UpdateAll, AuditDrift
+
+# Check status and last run result
+Register-WingetMaintenance -Status
+
+# Test run immediately
+Register-WingetMaintenance -RunNow
+
+# Remove the task
+Register-WingetMaintenance -Unregister
+```
+
+### 🕸️ Dependency Graphs
+```powershell
+# Mermaid diagram for GitHub docs
+Get-WingetDependencyGraph -PackageId "Python.Python.3.12" -Format Mermaid
+
+# ASCII tree view
+Get-WingetDependencyGraph -PackageId "Microsoft.VisualStudioCode" -Format Tree
+
+# Graphviz DOT for rendering
+Get-WingetDependencyGraph -PackageId "Docker.DockerDesktop" -Format DOT -OutputPath ".\deps.dot"
+
+# All installed packages, 2 levels deep
+Get-WingetDependencyGraph -AllInstalled -Depth 2 -Format Object
+```
+
+### 🖥️ Machine-as-Code
+```powershell
+# Snapshot golden machine
+Get-WingetMachineState -Export -Path ".\golden.json"
+
+# Detect drift on another machine
+Get-WingetMachineState -Compare -Path ".\golden.json"
+
+# Reconcile (install missing + update outdated)
+Get-WingetMachineState -Reconcile -Path ".\golden.json"
+```
+
+### 🚀 Deployment
+```powershell
+# Batch install with search
 Install-WingetAll "nodejs" -Silent
 
-# Use advanced COM parameters to install Python specifically to Machine scope with custom architecture and location
-Install-WingetAll "python" -Scope Machine -Architecture X64 -Location "C:\Python" -Mode Silent
+# Idempotent manifest deployment
+Invoke-WinGetBatch -Path ".\work-apps.yaml" -ThrottleLimit 6
 
-# Deploy packages from a manifest file with custom throttling
-Invoke-WinGetBatch -Path ".\work-apps.yaml" -ThrottleLimit 6 -Silent -SkipDependencies -AllowHashMismatch
+# Install EVERYTHING from search (dangerous!)
+Install-WingetAll "microsoft" -IWantToLiterallyInstallAllFuckingResults
 ```
 
-### 🆕 Advanced Discovery
+### 🔍 Discovery & Monitoring
 ```powershell
-# Find packages from the last 30 days, excluding Microsoft spam
-Get-WingetNewPackages -Days 30 -ExcludeTerm "Microsoft" -ExportHtml
-```
-
-### 🛠️ Maintenance & Updates
-```powershell
-# Force a fresh update check bypassing the 30-min cache
-Get-WingetUpdates -Force
-
-# Auto-update everything without prompting
-Get-WingetUpdates -IWantToLiterallyUpdateAllFuckingResults
-
-# Clear recently installed packages history older than 5 days
-Remove-WingetRecent -Days 5
-
-# Clean up temporary files and cache
-Invoke-WingetBatchCleanup
-
-# Diagnose and repair Winget Batch Manager issues
-Repair-WingetBatchManager
-```
-
-### ⚙️ Automation & Configuration
-```powershell
-# Enable background update notifications every 4 hours
-Enable-WingetUpdateNotifications -Interval 4
-
-# Disable background update notifications
-Disable-WingetUpdateNotifications
-
-# Export current WingetBatch configuration to a file
-Export-WingetBatchConfig -Path ".\wingetbatch-backup.json"
-
-# Restore WingetBatch configuration from a backup
-Import-WingetBatchConfig -Path ".\wingetbatch-backup.json"
-```
-
-### 🖥️ Machine-as-Code (NEW)
-```powershell
-# Snapshot this machine's packages to a portable manifest
-Get-WingetMachineState -Export -Path ".\golden-machine.json"
-
-# Export with exact version pins in YAML
-Get-WingetMachineState -Export -Path ".\state.yaml" -Format YAML -IncludeVersions
-
-# Compare current machine against golden baseline (drift detection)
-Get-WingetMachineState -Compare -Path ".\golden-machine.json"
-
-# Reconcile: install missing + update outdated packages
-Get-WingetMachineState -Reconcile -Path ".\golden-machine.json"
-
-# Full reconciliation: also remove packages not in the manifest
-Get-WingetMachineState -Reconcile -Path ".\golden-machine.json" -RemoveExtraneous
-```
-
-### 🔍 Package Intelligence (NEW)
-```powershell
-# Rich package info (brew-info style)
-Get-WingetPackageInfo -Id "Git.Git"
-
-# Search and explore packages
-Get-WingetPackageInfo -Query "visual studio code" -ShowVersions
-
-# Live terminal dashboard (htop-style monitoring)
+# Live dashboard
 Watch-WingetPackages
-Watch-WingetPackages -RefreshInterval 60 -Once
 
-# Find duplicate/redundant packages
+# New packages from last 7 days
+Get-WingetNewPackages -Days 7 -ExportHtml
+
+# Package info
+Get-WingetPackageInfo -Id "Git.Git" -ShowVersions
+
+# Find duplicates
 Find-WingetDuplicate -IncludeVersions
 
-# Installation history timeline (last 7 days)
-Get-WingetHistory -Days 7
-
-# Full history with search filter
-Get-WingetHistory -All -Search "python" -ExportHtml
+# Installation history
+Get-WingetHistory -Days 30 -Search "python"
 ```
 
-### 🔐 Authentication & Reporting
-```powershell
-# Interactively authenticate with GitHub via OAuth
-New-WingetBatchGitHubToken
+## Configuration
 
-# Manually set a GitHub Personal Access Token
-Set-WingetBatchGitHubToken -Token "ghp_xxxxxxxxxxxxxxxxx"
-
-# Remove GitHub Token
-Set-WingetBatchGitHubToken -Remove
-
-# Export custom data to a stylized HTML report
-$data = @(@{Name="App1"; Version="1.0"}, @{Name="App2"; Version="2.0"})
-Export-WingetHtmlReport -Data $data -ReportTitle "Custom Audit" -FilePath ".\audit.html"
-```
-
-## Configuration & Storage
-
-- **Config Location**: `~\.wingetbatch\config.json`
-- **Secure Credentials**: `~\.wingetbatch\github_token.clixml` (AES encrypted)
-- **Performance Cache**: `~\.wingetbatch\update_cache.json` (30 min TTL)
+| File | Purpose |
+|:---|:---|
+| `~\.wingetbatch\config.json` | Module preferences |
+| `~\.wingetbatch\github_token.clixml` | Encrypted GitHub PAT |
+| `~\.wingetbatch\update_cache.json` | Update check cache (30m TTL) |
+| `~\.wingetbatch\package_cache.json` | Package details cache (30d) |
+| `~\.wingetbatch\maintenance\` | Scheduled task reports |
+| `~\.wingetbatch\maintenance_task.ps1` | Generated maintenance script |
 
 ## Requirements
 
-- **Windows Package Manager** (winget)
-- **PowerShell 5.1** or **PowerShell 7+** (Recommended)
-- **Microsoft.WinGet.Client** module (Auto-installed as a dependency)
-- **PwshSpectreConsole** module (Auto-installed if missing)
+- **Windows 10/11** with winget (App Installer)
+- **PowerShell 5.1+** (7+ recommended)
+- **Microsoft.WinGet.Client** (auto-installed)
+- **PwshSpectreConsole** (auto-installed)
+- **Pode** (auto-installed, only for `Start-WingetServer`)
 
-## Next-Generation Architecture
+## Architecture
 
-We are actively designing a next-generation architecture to transition `wingetbatch` from a CLI wrapper to an enterprise-grade package deployment tool. Key pillars include:
-* **COM API Integration (`Microsoft.WinGet.Client`)** to eliminate stdout parsing.
-* **Split-Phase Concurrency (RunspacePools)** for parallel downloading with serialized installation.
-* **Declarative State Management** for idempotent deployments.
+```
+WingetBatch/
+├── Public/          # 26 exported commands
+├── Private/         # Internal helpers (caching, parsing, jobs, completers)
+├── tests/           # Pester test suite (48+ tests)
+├── wiki/            # GitHub Wiki documentation
+├── docs/            # Architecture design documents
+└── .github/         # CI/CD (auto-publish to PSGallery on push)
+```
 
-For a detailed breakdown of the roadmap and execution logic, view our [Next-Generation Architecture Roadmap](docs/architecture_nextgen.md).
+**Key design decisions:**
+- COM API (`Microsoft.WinGet.Client`) as primary interface — no CLI text parsing
+- Split-phase concurrency: parallel downloads, serialized installs
+- Machine-as-Code: declarative state with drift detection and reconciliation
+- Local-first AI: heuristic archetype matching, no external services required
 
-## Credits & Attribution
+## Credits
 
-**WingetBatch** is architected and maintained exclusively by **Matthew Bubb**.
+**WingetBatch** is architected and maintained by **Matthew Bubb**.
 
 ## Version History
 
-- **2.7.0** (Current) - Machine-as-Code & Developer Experience: Get-WingetMachineState (snapshot/compare/reconcile), Get-WingetPackageInfo, Get-WingetHistory, Watch-WingetPackages (live dashboard), Find-WingetDuplicate, tab-completion, security fixes (Invoke-Expression elimination), deduplication bug fix.
-- **2.5.0** - COM API Migration: Replaced all winget.exe CLI text-parsing with Microsoft.WinGet.Client COM API. Added Repair-WingetBatchManager.
-- **2.4.7** - Performance and stability improvements.
-- **2.2.1** - Resolved HTML report parameter binding issues and improved module loading robustness.
-- **2.2.0** - Added professional HTML reporting engine (`-ExportHtml`).
-- **2.1.0** - Enhanced cache management and high-volume GitHub commit fetching.
-- **2.0.0** - Major overhaul: Added update notifications, discovery engine, and GitHub Auth.
-- **1.0.0** - Initial release: Batch installation core.
+- **2.8.0** (Current) — AI Recommender, REST API Server, Scheduled Maintenance, Dependency Graphs
+- **2.7.0** — Machine-as-Code, Live Dashboard, Package Intelligence, Security Hardening
+- **2.5.0** — COM API Migration, Repair-WingetBatchManager
+- **2.0.0** — Discovery Engine, Update Notifications, GitHub Auth
+- **1.0.0** — Initial batch installation core
 
 ## License
 
-MIT License - See LICENSE file for details.
+MIT — See [LICENSE](LICENSE) for details.

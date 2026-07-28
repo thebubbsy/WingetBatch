@@ -51,7 +51,8 @@
         'Find-WingetDuplicate',
         'Register-WingetMaintenance',
         'Get-WingetDependencyGraph',
-        'Start-WingetServer'
+        'Start-WingetServer',
+        'Get-WingetRecommend'
     )
 
     # Cmdlets to export from this module
