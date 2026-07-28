@@ -54,7 +54,8 @@
         'Start-WingetServer',
         'Get-WingetRecommend',
         'Invoke-WingetFleet',
-        'Restore-WingetSnapshot'
+        'Restore-WingetSnapshot',
+        'Test-WingetCompliance'
     )
 
     # Cmdlets to export from this module
