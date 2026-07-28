@@ -3,7 +3,7 @@
     RootModule = 'WingetBatch.psm1'
 
     # Version number of this module.
-    ModuleVersion = '2.7.0'
+    ModuleVersion = '2.8.0'
 
     # ID used to uniquely identify this module
     GUID = 'b9e8f5d2-4c3f-4a6b-8d9e-2f7a8b5c6e4f'
@@ -48,7 +48,10 @@
         'Get-WingetPackageInfo',
         'Get-WingetHistory',
         'Watch-WingetPackages',
-        'Find-WingetDuplicate'
+        'Find-WingetDuplicate',
+        'Register-WingetMaintenance',
+        'Get-WingetDependencyGraph',
+        'Start-WingetServer'
     )
 
     # Cmdlets to export from this module
@@ -77,6 +80,24 @@
 
             # ReleaseNotes of this module
             ReleaseNotes = @'
+v2.8.0 - Automation, Visualization & Remote Management
+- NEW: Register-WingetMaintenance - Scheduled maintenance tasks for automatic package updates.
+  * Daily/Weekly/Monthly recurrence with configurable time and actions.
+  * Actions: UpdateAll, UpdateOutdated, CleanupTemp, AuditDrift, NotifyOnly.
+  * JSON reports with 30-report retention. Runs as SYSTEM or current user.
+  * -Status, -Unregister, -RunNow for full lifecycle management.
+- NEW: Get-WingetDependencyGraph - Package dependency graph visualization.
+  * Output formats: Mermaid (GitHub/docs), DOT (Graphviz), ASCII Tree, Object.
+  * Circular dependency detection and highlighting.
+  * Fetches dependency data from winget-pkgs GitHub manifests.
+  * Configurable depth, external dependency inclusion, and file output.
+- NEW: Start-WingetServer - REST API server for remote package management (Pode).
+  * Full CRUD: install, uninstall, update, search packages over HTTP.
+  * Endpoints: /api/packages, /api/updates, /api/state, /api/history, /api/stats.
+  * API key authentication, rate limiting, request logging.
+  * Self-documenting: GET / returns full endpoint catalog.
+- Author/Architect: Matthew Bubb.
+
 v2.7.0 - Machine-as-Code & Developer Experience
 - NEW: Get-WingetMachineState - Full machine state snapshot, drift comparison, and reconciliation (Machine-as-Code).
   * Export installed packages to portable JSON/YAML manifests.
