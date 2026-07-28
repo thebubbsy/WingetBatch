@@ -53,7 +53,8 @@
         'Get-WingetDependencyGraph',
         'Start-WingetServer',
         'Get-WingetRecommend',
-        'Invoke-WingetFleet'
+        'Invoke-WingetFleet',
+        'Restore-WingetSnapshot'
     )
 
     # Cmdlets to export from this module
