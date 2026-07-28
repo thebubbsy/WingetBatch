@@ -55,7 +55,8 @@
         'Get-WingetRecommend',
         'Invoke-WingetFleet',
         'Restore-WingetSnapshot',
-        'Test-WingetCompliance'
+        'Test-WingetCompliance',
+        'Get-WingetHealthScore'
     )
 
     # Cmdlets to export from this module
