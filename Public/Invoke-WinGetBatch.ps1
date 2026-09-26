@@ -1,12 +1,13 @@
 ﻿function Invoke-WinGetBatch {
     <#
     .SYNOPSIS
-        Invoke Next-Generation idempotent package deployments using COM APIs and parallel downloading.
+        Idempotent, manifest-driven package deployments using the WinGet COM API.
 
     .DESCRIPTION
         Reads package target states from a pipeline or manifest file (JSON/YAML), verifies local state
-        idempotency using the native Microsoft.WinGet.Client COM APIs, parallelizes download operations,
-        and serializes silent installation execution while trapping and mapping system exit codes.
+        idempotency using the Microsoft.WinGet.Client COM API, then installs missing packages, updates
+        outdated ones and applies version pins one at a time. Each result is checked against WinGet's
+        reported status and written to a JSON report in ~/.wingetbatch/reports.
 
     .PARAMETER Path
         Path to a JSON or YAML state manifest file defining the target package configurations.
@@ -16,7 +17,7 @@
         and an optional 'Version' property.
 
     .PARAMETER ThrottleLimit
-        Maximum number of concurrent downloads. Default is 4.
+        Deprecated and ignored (kept so existing scripts keep working). WinGet downloads each installer during its install.
 
     .PARAMETER Silent
         Runs installations completely silently without user interaction.
@@ -77,12 +78,6 @@
     )
 
     begin {
-        # Prepend WindowsApps folder to ensure winget and COM APIs resolve correctly
-        $windowsAppsPath = Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps"
-        if ($env:PATH -notlike "*$windowsAppsPath*") {
-            $env:PATH = "$windowsAppsPath;$env:PATH"
-        }
-
         # Ensure Microsoft.WinGet.Client module is imported
         if (-not (Get-Module -Name Microsoft.WinGet.Client)) {
             try {
@@ -92,12 +87,6 @@
                 Write-Error "Microsoft.WinGet.Client module is a required dependency. Please install it."
                 return
             }
-        }
-
-        # Resolve winget.exe path for parallel script blocks
-        $wingetExePath = (Get-Command winget -ErrorAction SilentlyContinue).Source
-        if (-not $wingetExePath) {
-            $wingetExePath = Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps\winget.exe"
         }
 
         # Initialize collections
@@ -140,6 +129,7 @@
                     $targetPackages.Add([PSCustomObject]@{
                         Id      = $pkg.id
                         Version = if ($pkg.version) { $pkg.version } else { "latest" }
+                        Source  = $pkg.source
                     })
                 }
             }
@@ -152,6 +142,7 @@
                         $targetPackages.Add([PSCustomObject]@{
                             Id      = $pkg.Id
                             Version = if ($pkg.Version) { $pkg.Version } else { "latest" }
+                            Source  = $pkg.Source
                         })
                     }
                 }
@@ -168,7 +159,7 @@
         Write-Host "`n[PHASE 1] Resolving and Checking Local State Idempotency..." -ForegroundColor Cyan
 
         # Query all installed packages once to optimize execution speed
-        $installedList = Get-WinGetPackage -ErrorAction SilentlyContinue
+        $installedList = Microsoft.WinGet.Client\Get-WinGetPackage -ErrorAction SilentlyContinue
         $installedMap = @{}
         foreach ($inst in $installedList) {
             if ($inst.Id -and -not $installedMap.ContainsKey($inst.Id)) {
@@ -192,7 +183,7 @@
                 if ($targetVer -eq 'latest') {
                     if ($updateAvailable) {
                         Write-Host " [Outdated] Installed: $installedVer (Update Available)" -ForegroundColor Yellow
-                        $executionQueue.Add($target)
+                        $executionQueue.Add([PSCustomObject]@{ Id = $pkgId; Version = $targetVer; Operation = 'Update'; Source = $installedPkg.Source })
                     }
                     else {
                         Write-Host " [Idempotent] Installed: $installedVer (Up to date)" -ForegroundColor Green
@@ -205,13 +196,13 @@
                     }
                     else {
                         Write-Host " [Mismatch] Installed: $installedVer | Target: $targetVer" -ForegroundColor Yellow
-                        $executionQueue.Add($target)
+                        $executionQueue.Add([PSCustomObject]@{ Id = $pkgId; Version = $targetVer; Operation = 'Install'; Source = $installedPkg.Source })
                     }
                 }
             }
             else {
                 Write-Host " [Missing]" -ForegroundColor Red
-                $executionQueue.Add($target)
+                $executionQueue.Add([PSCustomObject]@{ Id = $pkgId; Version = $targetVer; Operation = 'Install'; Source = $target.Source })
             }
         }
 
@@ -224,192 +215,84 @@
         Write-Host "$($executionQueue.Count) packages require changes." -ForegroundColor White
 
         if ($WhatIf) {
-            Write-Host "`n[WhatIf] Would execute split-phase deployment for:" -ForegroundColor Yellow
+            Write-Host "`n[WhatIf] Would deploy:" -ForegroundColor Yellow
             foreach ($item in $executionQueue) {
-                Write-Host "  -> $($item.Id) ($($item.Version))" -ForegroundColor Gray
+                Write-Host "  -> $($item.Operation) $($item.Id) ($($item.Version))" -ForegroundColor Gray
             }
             return
         }
 
-        # Phase 1: Parallel Downloads using ForEach-Object -Parallel
-        Write-Host "`n[PHASE 2] Parallel Download Operations Launching..." -ForegroundColor Cyan
-        $cacheDir = Join-Path $env:TEMP "winget_cache"
-        if (-not (Test-Path $cacheDir)) {
-            New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null
+        if ($PSBoundParameters.ContainsKey('ThrottleLimit')) {
+            Write-Verbose "-ThrottleLimit is ignored: installers are fetched by WinGet during each install."
         }
 
-        $downloads = $executionQueue | ForEach-Object -Parallel {
-            $wingetPath = $using:wingetExePath
-            $pkgId = $_.Id
-            $dlPath = Join-Path $using:cacheDir $pkgId
+        Write-Host "`n[PHASE 2] Installing (one package at a time)..." -ForegroundColor Cyan
 
-            Write-Host "  >>> Downloading installer for $pkgId ..." -ForegroundColor DarkGray
+        Invoke-WingetAutoSnapshot -Reason 'Invoke-WinGetBatch'
 
-            # Build argument array (no Invoke-Expression - safe from injection)
-            $wingetArgs = @(
-                'download'
-                '--id', $pkgId
-                '--exact'
-                '--accept-package-agreements'
-                '--accept-source-agreements'
-                '--disable-interactivity'
-                '--download-directory', $dlPath
-            )
-            if ($_.Version -ne "latest") {
-                $wingetArgs += @('--version', $_.Version)
-            }
-
-            $process = Start-Process -FilePath $wingetPath -ArgumentList $wingetArgs -Wait -NoNewWindow -PassThru -RedirectStandardOutput "$dlPath\stdout.log" -RedirectStandardError "$dlPath\stderr.log"
-
-            if ($process.ExitCode -eq 0) {
-                Write-Host "   Cached installer: $pkgId" -ForegroundColor Green
-                return [PSCustomObject]@{ Id = $pkgId; Downloaded = $true; Path = $dlPath }
-            }
-            else {
-                Write-Host "   Failed download cache: $pkgId (Exit Code: $($process.ExitCode))" -ForegroundColor Red
-                return [PSCustomObject]@{ Id = $pkgId; Downloaded = $false; Path = $null }
-            }
-        } -ThrottleLimit $ThrottleLimit
-
-        $downloadResults = @{}
-        foreach ($res in $downloads) {
-            $downloadResults[$res.Id] = $res
+        $installOptions = @{
+            Mode = $(if ($Silent) { 'Silent' } else { $Mode })
+            Scope = $Scope; Architecture = $Architecture; Override = $Override; Location = $Location
+            Force = [bool]$Force; SkipDependencies = [bool]$SkipDependencies; AllowHashMismatch = [bool]$AllowHashMismatch
         }
 
-        # Phase 2: Serialized Sequential Installations
-        Write-Host "`n[PHASE 3] Serialized Installation Queue Executing..." -ForegroundColor Cyan
-        
         $successCount = 0
         $failCount = 0
         $rebootPending = $false
         $reportData = [System.Collections.Generic.List[PSCustomObject]]::new()
+        $i = 0
 
         foreach ($pkg in $executionQueue) {
-            $pkgId = $pkg.Id
-            $targetVer = $pkg.Version
-            $dlResult = $downloadResults[$pkgId]
+            $i++
+            Write-Host "`n>>> [$i/$($executionQueue.Count)] $($pkg.Operation): " -NoNewline -ForegroundColor Magenta
+            Write-Host $pkg.Id -NoNewline -ForegroundColor White
+            if ($pkg.Version -ne 'latest') { Write-Host " v$($pkg.Version)" -ForegroundColor Green } else { Write-Host "" }
 
-            Write-Host "`n>>> Deploying: " -NoNewline -ForegroundColor Magenta
-            Write-Host $pkgId -ForegroundColor White
+            $result = Invoke-WingetPackageAction -Action $pkg.Operation -Id $pkg.Id -Version $pkg.Version -Source $pkg.Source -Options $installOptions
 
-            if ($dlResult -and $dlResult.Downloaded) {
-                Write-Host "Using pre-cached local installer." -ForegroundColor DarkGray
+            if ($result.Succeeded) {
+                $successCount++
+                if ($result.RebootRequired) {
+                    $rebootPending = $true
+                    $status = "Success (Reboot Required)"
+                    Write-Host "[OK] Deployed (restart required): " -NoNewline -ForegroundColor Yellow
+                }
+                else {
+                    $status = "Success"
+                    Write-Host "[OK] Deployed " -NoNewline -ForegroundColor Green
+                }
+                Write-Host $pkg.Id -ForegroundColor White
             }
             else {
-                Write-Warning "Local cache missing. Falling back to dynamic installer fetch."
-            }
-
-            # Run installation using COM API (preferred) with CLI fallback
-            $installSucceeded = $false
-            $exitCode = -1
-
-            try {
-                # Primary: Use COM API for installation (no shell execution needed)
-                $comInstallArgs = @{
-                    Id = $pkgId
-                    ErrorAction = 'Stop'
-                }
-                if ($Silent -or $Mode -eq 'Silent') { $comInstallArgs['Mode'] = 'Silent' }
-                elseif ($Mode -eq 'Interactive') { $comInstallArgs['Mode'] = 'Interactive' }
-                if ($Scope) { $comInstallArgs['Scope'] = $Scope }
-                if ($Architecture) { $comInstallArgs['Architecture'] = $Architecture }
-                if ($Location) { $comInstallArgs['Location'] = $Location }
-                if ($Override) { $comInstallArgs['Override'] = $Override }
-                if ($Force) { $comInstallArgs['Force'] = $true }
-                if ($SkipDependencies) { $comInstallArgs['SkipDependencies'] = $true }
-                if ($AllowHashMismatch) { $comInstallArgs['AllowHashMismatch'] = $true }
-
-                Microsoft.WinGet.Client\Install-WinGetPackage @comInstallArgs | Out-Null
-                $exitCode = 0
-                $installSucceeded = $true
-            }
-            catch {
-                # Fallback: Use winget CLI with safe argument array (no Invoke-Expression)
-                Write-Verbose "COM API install failed, falling back to CLI: $_"
-                $wingetArgs = @(
-                    'install'
-                    '--id', $pkgId
-                    '--exact'
-                    '--accept-package-agreements'
-                    '--accept-source-agreements'
-                    '--disable-interactivity'
-                    '--no-progress'
-                )
-                if ($Silent -or $Mode -eq 'Silent') { $wingetArgs += '--silent' }
-                elseif ($Mode -eq 'Interactive') { $wingetArgs += '--interactive' }
-                if ($targetVer -ne "latest") { $wingetArgs += @('--version', $targetVer) }
-                if ($Scope -eq "Machine") { $wingetArgs += '--machine' }
-                elseif ($Scope -eq "User") { $wingetArgs += '--user' }
-                if ($Architecture) { $wingetArgs += @('--architecture', $Architecture) }
-                if ($Location) { $wingetArgs += @('--location', $Location) }
-                if ($Override) { $wingetArgs += @('--override', $Override) }
-                if ($Force) { $wingetArgs += '--force' }
-                if ($SkipDependencies) { $wingetArgs += '--skip-dependencies' }
-                if ($AllowHashMismatch) { $wingetArgs += '--ignore-security-hash' }
-
-                $process = Start-Process -FilePath $wingetExePath -ArgumentList $wingetArgs -Wait -NoNewWindow -PassThru
-                $exitCode = $process.ExitCode
-                $installSucceeded = ($exitCode -eq 0)
-            }
-
-            # Exit Code Trapping & Telemetry Mapping
-            $status = "Failed"
-            $message = "Unknown installation error."
-
-            switch ($exitCode) {
-                0 {
-                    $status = "Success"
-                    $message = "Successfully installed package."
-                    $successCount++
-                    Write-Host "[OK] Successfully deployed " -NoNewline -ForegroundColor Green
-                    Write-Host $pkgId -ForegroundColor White
-                }
-                3010 {
-                    $status = "Success (Reboot Required)"
-                    $message = "Installation successful, but system reboot is required."
-                    $successCount++
-                    $rebootPending = $true
-                    Write-Host "[OK] Deployed (Reboot Required): " -NoNewline -ForegroundColor Yellow
-                    Write-Host $pkgId -ForegroundColor White
-                }
-                1641 {
-                    $status = "Success (Reboot Initiated)"
-                    $message = "Installation successful, reboot has been initiated."
-                    $successCount++
-                    $rebootPending = $true
-                    Write-Host "[OK] Deployed (Reboot Initiated): " -NoNewline -ForegroundColor Yellow
-                    Write-Host $pkgId -ForegroundColor White
-                }
-                default {
-                    $status = "Failed"
-                    $message = "Installer returned non-zero code: $exitCode."
-                    $failCount++
-                    Write-Host " Installation failed for " -NoNewline -ForegroundColor Red
-                    Write-Host $pkgId -NoNewline -ForegroundColor White
-                    Write-Host " (Exit Code: $exitCode)" -ForegroundColor Red
-                }
+                $failCount++
+                $status = "Failed"
+                Write-Host "[FAIL] " -NoNewline -ForegroundColor Red
+                Write-Host $pkg.Id -NoNewline -ForegroundColor White
+                Write-Host " ($($result.Message))" -ForegroundColor Red
             }
 
             $reportData.Add([PSCustomObject]@{
-                PackageId = $pkgId
-                Version   = $targetVer
-                Status    = $status
-                ExitCode  = $exitCode
-                Message   = $message
-                Timestamp = (Get-Date).ToString("o")
+                PackageId      = $pkg.Id
+                Operation      = $pkg.Operation
+                Version        = $pkg.Version
+                Status         = $status
+                WinGetStatus   = $result.Status
+                RebootRequired = $result.RebootRequired
+                Message        = $(if ($result.Message) { $result.Message } else { "OK" })
+                Timestamp      = (Get-Date).ToString("o")
             })
         }
 
         # Compile structured JSON report
-        $reportDir = Join-Path $env:TEMP "winget_reports"
+        $reportDir = Join-Path (Get-WingetBatchConfigDir) "reports"
         if (-not (Test-Path $reportDir)) {
             New-Item -ItemType Directory -Path $reportDir -Force | Out-Null
         }
 
         $reportPath = Join-Path $reportDir "deployment_report_$((Get-Date).ToString('yyyyMMdd_HHmmss')).json"
         $reportObj = [ordered]@{
-            Summary = @{
-                TotalInstalled = $executionQueue.Count
+            Summary = [ordered]@{
+                Total          = $executionQueue.Count
                 Successful     = $successCount
                 Failed         = $failCount
                 RebootRequired = $rebootPending
@@ -419,21 +302,19 @@
 
         $reportObj | ConvertTo-Json -Depth 5 | Out-File -FilePath $reportPath -Encoding utf8
 
-        Write-Host "`n" + ("=" * 60) -ForegroundColor Green
-        Write-Host "Deployment Operations Concluded" -ForegroundColor Green
+        Write-Host ("`n" + ("=" * 60)) -ForegroundColor Green
+        Write-Host "Deployment Complete" -ForegroundColor Green
         Write-Host ("=" * 60) -ForegroundColor Green
         Write-Host "   Successful: " -NoNewline -ForegroundColor Green
         Write-Host $successCount -ForegroundColor White
         Write-Host "   Failed:     " -NoNewline -ForegroundColor Red
         Write-Host $failCount -ForegroundColor White
-        
+
         if ($rebootPending) {
-            Write-Host "   A system reboot is pending to complete installation changes." -ForegroundColor Yellow
+            Write-Host "   A restart is required to finish at least one installation." -ForegroundColor Yellow
         }
 
-        Write-Host "`nStructured JSON deployment audit report saved to:" -ForegroundColor Gray
+        Write-Host "`nJSON deployment report saved to:" -ForegroundColor Gray
         Write-Host "  $reportPath" -ForegroundColor Cyan
     }
 }
-
-

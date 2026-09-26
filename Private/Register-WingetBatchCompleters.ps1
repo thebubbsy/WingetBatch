@@ -1,4 +1,4 @@
-function Register-WingetBatchCompleters {
+﻿function Register-WingetBatchCompleters {
     <#
     .SYNOPSIS
         Registers tab-completion argument completers for WingetBatch commands.
@@ -17,11 +17,17 @@ function Register-WingetBatchCompleters {
                 Import-Module Microsoft.WinGet.Client -ErrorAction SilentlyContinue
             }
 
-            $installed = Get-WinGetPackage -ErrorAction SilentlyContinue
-            if ($installed) {
-                $installed |
-                    Where-Object { $_.Id -like "$wordToComplete*" } |
-                    Select-Object -First 20 -ExpandProperty Id |
+            # Enumerating installed packages takes seconds; reuse the list for a minute
+            if (-not $script:CompleterInstalledIds -or ((Get-Date) - $script:CompleterInstalledAt).TotalSeconds -gt 60) {
+                $script:CompleterInstalledIds = @(Microsoft.WinGet.Client\Get-WinGetPackage -ErrorAction SilentlyContinue |
+                    Where-Object { $_.Source } | ForEach-Object { $_.Id } | Sort-Object)
+                $script:CompleterInstalledAt = Get-Date
+            }
+            $word = ([string]$wordToComplete).Trim("'", '"')
+            if ($script:CompleterInstalledIds) {
+                $script:CompleterInstalledIds |
+                    Where-Object { $_ -like "$word*" } |
+                    Select-Object -First 20 |
                     ForEach-Object {
                         [System.Management.Automation.CompletionResult]::new(
                             "'$_'", $_, 'ParameterValue', $_
@@ -62,28 +68,16 @@ function Register-WingetBatchCompleters {
         }
     }
 
-    # Config key completer
-    $configKeyCompleter = {
-        param($commandName, $parameterName, $wordToComplete, $commandAst, $fakeBoundParameters)
+    # Installed package IDs: commands that act on what is already on this machine
+    Register-ArgumentCompleter -CommandName 'Get-WingetChangelog' -ParameterName 'PackageId' -ScriptBlock $packageIdCompleter -ErrorAction SilentlyContinue
 
-        @('SearchMatchOption', 'UpdateInterval', 'CacheEnabled', 'NotificationsEnabled') |
-            Where-Object { $_ -like "$wordToComplete*" } |
-            ForEach-Object {
-                [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
-            }
+    # Any package in the source catalog
+    foreach ($cmd in 'Get-WingetHealthScore', 'Get-WingetDependencyGraph', 'Export-WingetOffline', 'Invoke-WingetFleet') {
+        Register-ArgumentCompleter -CommandName $cmd -ParameterName 'PackageId' -ScriptBlock $packageSearchCompleter -ErrorAction SilentlyContinue
     }
-
-    # Register completers for specific command/parameter combinations
-    $idCommands = @(
-        'Get-WingetPackageInfo'
-        'Find-WingetDuplicate'
-    )
-
-    foreach ($cmd in $idCommands) {
-        Register-ArgumentCompleter -CommandName $cmd -ParameterName 'Id' -ScriptBlock $packageIdCompleter -ErrorAction SilentlyContinue
-    }
-
     Register-ArgumentCompleter -CommandName 'Install-WingetAll' -ParameterName 'Id' -ScriptBlock $packageSearchCompleter -ErrorAction SilentlyContinue
-    Register-ArgumentCompleter -CommandName 'Install-WingetAll' -ParameterName 'Source' -ScriptBlock $sourceCompleter -ErrorAction SilentlyContinue
+    Register-ArgumentCompleter -CommandName 'Get-WingetPackageInfo' -ParameterName 'Id' -ScriptBlock $packageSearchCompleter -ErrorAction SilentlyContinue
     Register-ArgumentCompleter -CommandName 'Get-WingetPackageInfo' -ParameterName 'Query' -ScriptBlock $packageSearchCompleter -ErrorAction SilentlyContinue
+
+    Register-ArgumentCompleter -CommandName 'Install-WingetAll' -ParameterName 'Source' -ScriptBlock $sourceCompleter -ErrorAction SilentlyContinue
 }

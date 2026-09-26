@@ -54,13 +54,13 @@ Install-WingetAll -Id "Git.Git" -Silent
 Idempotent, manifest-driven package deployments using native COM APIs.
 
 ```powershell
-Invoke-WinGetBatch [-Path] <string> [-ThrottleLimit <int>] [-Silent] [-WhatIf]
+Invoke-WinGetBatch [-Path] <string> [-Silent] [-WhatIf]
 ```
 
 | Parameter | Description |
 |:---|:---|
 | `-Path` | Path to JSON or YAML manifest file |
-| `-ThrottleLimit` | Max parallel downloads (default: 4) |
+| `-ThrottleLimit` | Deprecated, ignored (kept for compatibility) |
 | `-Silent` | Suppress all installer UI |
 | `-WhatIf` | Preview deployment without executing |
 
@@ -125,6 +125,7 @@ Get-WingetUpdates [-Force] [-IWantToLiterallyUpdateAllFuckingResults]
 | Parameter | Description |
 |:---|:---|
 | `-Force` | Bypass 30-minute cache, force fresh check |
+| `-ListOnly` | Return pending updates as objects without prompting (for scripts, scheduled tasks, the REST API) |
 | `-IWantToLiterallyUpdateAllFuckingResults` | Auto-update all packages without prompting |
 | `-ExportHtml` | Generate an HTML report of available updates |
 

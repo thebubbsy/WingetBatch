@@ -114,8 +114,8 @@ This ensures update notifications display immediately when you open a new termin
 
 | Environment | Support Level |
 |:---|:---|
-| PowerShell 7+ (pwsh) | Full support (recommended) |
-| Windows PowerShell 5.1 | Full support |
+| PowerShell 7.4+ (pwsh) | Full support (required) |
+| Windows PowerShell 5.1 | Not supported (PwshSpectreConsole needs 7.4+). `Invoke-WingetFleet` targets and the `Install-Offline.ps1` script from `Export-WingetOffline` do run on 5.1. |
 | Windows Terminal | Optimal experience |
 | VS Code Integrated Terminal | Supported |
 | ConEmu / Cmder | Supported |

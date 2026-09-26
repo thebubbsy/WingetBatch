@@ -14,14 +14,11 @@
     [CmdletBinding()]
     param()
 
-    $configDir = Get-WingetBatchConfigDir
-    $configFile = Join-Path $configDir "config.json"
-
-    # Update configuration
-    if (Test-Path $configFile) {
-        $config = Get-Content $configFile | ConvertFrom-Json
-        $config.UpdateNotificationsEnabled = $false
-        $config | ConvertTo-Json | Out-File -FilePath $configFile -Encoding UTF8 -Force
+    # Update configuration (merge, so other settings are kept)
+    $config = Get-WingetBatchConfigData
+    if ($config.Count -gt 0) {
+        $config['UpdateNotificationsEnabled'] = $false
+        Save-WingetBatchConfigData -Config $config
     }
 
     # Remove from profile

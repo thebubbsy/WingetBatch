@@ -39,20 +39,13 @@
     $configDir = Get-WingetBatchConfigDir
     $configFile = Join-Path $configDir "config.json"
 
-    # Create config directory if it doesn't exist
-    if (-not (Test-Path $configDir)) {
-        New-Item -ItemType Directory -Path $configDir -Force | Out-Null
-    }
-
-    # Save configuration
-    $config = @{
-        UpdateNotificationsEnabled = $true
-        CheckInterval = $Interval
-        CheckOnStartup = $CheckOnStartup
-        LastCheck = $null
-    }
-
-    $config | ConvertTo-Json | Out-File -FilePath $configFile -Encoding UTF8 -Force
+    # Merge into the existing config so other settings (search options, webhooks) survive
+    $config = Get-WingetBatchConfigData
+    $config['UpdateNotificationsEnabled'] = $true
+    $config['CheckInterval'] = $Interval
+    $config['CheckOnStartup'] = $CheckOnStartup
+    $config['LastCheck'] = $null
+    Save-WingetBatchConfigData -Config $config
 
     # Add to PowerShell profile
     $profilePath = $PROFILE.CurrentUserAllHosts

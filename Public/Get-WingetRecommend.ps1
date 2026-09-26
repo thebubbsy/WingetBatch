@@ -1,4 +1,4 @@
-function Get-WingetRecommend {
+﻿function Get-WingetRecommend {
     <#
     .SYNOPSIS
         AI-powered package recommendations using local heuristic matching.
@@ -92,16 +92,16 @@ function Get-WingetRecommend {
                 @{ Id = 'Docker.DockerDesktop'; Weight = 9; Reason = 'Container-based service orchestration' }
                 @{ Id = 'Microsoft.VisualStudioCode'; Weight = 9; Reason = 'Primary code editor with extensions' }
                 @{ Id = 'JetBrains.IntelliJIDEA.Community'; Weight = 7; Reason = 'JVM language IDE' }
-                @{ Id = 'Python.Python.3.12'; Weight = 8; Reason = 'Scripting and service tooling' }
+                @{ Id = 'Python.Python.3.13'; Weight = 8; Reason = 'Scripting and service tooling' }
                 @{ Id = 'GoLang.Go'; Weight = 7; Reason = 'High-performance service language' }
                 @{ Id = 'Rustlang.Rustup'; Weight = 6; Reason = 'Systems programming language' }
-                @{ Id = 'PostgreSQL.PostgreSQL'; Weight = 8; Reason = 'Relational database server' }
+                @{ Id = 'PostgreSQL.PostgreSQL.17'; Weight = 8; Reason = 'Relational database server' }
                 @{ Id = 'Redis.Redis'; Weight = 7; Reason = 'In-memory cache and message broker' }
-                @{ Id = 'Microsoft.DotNet.SDK.8'; Weight = 8; Reason = '.NET runtime and SDK' }
+                @{ Id = 'Microsoft.DotNet.SDK.10'; Weight = 8; Reason = '.NET runtime and SDK' }
                 @{ Id = 'OpenJS.NodeJS.LTS'; Weight = 8; Reason = 'JavaScript runtime for tooling' }
                 @{ Id = 'JetBrains.DataGrip'; Weight = 6; Reason = 'Database IDE and query tool' }
                 @{ Id = 'Postman.Postman'; Weight = 7; Reason = 'API testing and documentation' }
-                @{ Id = 'Grafana.Agent'; Weight = 5; Reason = 'Observability and metrics' }
+                @{ Id = 'GrafanaLabs.Alloy'; Weight = 5; Reason = 'Observability and metrics' }
                 @{ Id = 'Kubernetes.kubectl'; Weight = 6; Reason = 'Container orchestration CLI' }
             )
         }
@@ -114,27 +114,26 @@ function Get-WingetRecommend {
                 @{ Id = 'Google.Chrome'; Weight = 8; Reason = 'Primary dev browser with DevTools' }
                 @{ Id = 'Mozilla.Firefox.DeveloperEdition'; Weight = 7; Reason = 'Secondary testing browser' }
                 @{ Id = 'Figma.Figma'; Weight = 7; Reason = 'Design-to-code collaboration' }
-                @{ Id = 'Vercel.nextjs'; Weight = 6; Reason = 'React framework tooling' }
                 @{ Id = 'Yarn.Yarn'; Weight = 6; Reason = 'Alternative package manager' }
                 @{ Id = 'Microsoft.Edge.Dev'; Weight = 5; Reason = 'Chromium testing channel' }
-                @{ Id = 'Nginx.Nginx'; Weight = 5; Reason = 'Local reverse proxy for dev' }
+                @{ Id = 'nginxinc.nginx'; Weight = 5; Reason = 'Local reverse proxy for dev' }
             )
         }
         'Data Scientist' = @{
             Keywords = @('data', 'science', 'ml', 'machine learning', 'ai', 'analytics', 'jupyter', 'pandas', 'numpy', 'tensorflow', 'pytorch', 'statistics', 'visualization')
             Packages = @(
-                @{ Id = 'Python.Python.3.12'; Weight = 10; Reason = 'Primary data science runtime' }
+                @{ Id = 'Python.Python.3.13'; Weight = 10; Reason = 'Primary data science runtime' }
                 @{ Id = 'Anaconda.Anaconda3'; Weight = 9; Reason = 'Scientific computing distribution' }
                 @{ Id = 'Microsoft.VisualStudioCode'; Weight = 8; Reason = 'Editor with Jupyter integration' }
                 @{ Id = 'Git.Git'; Weight = 8; Reason = 'Experiment versioning' }
                 @{ Id = 'Docker.DockerDesktop'; Weight = 7; Reason = 'Reproducible environments' }
-                @{ Id = 'PostgreSQL.PostgreSQL'; Weight = 7; Reason = 'Data warehouse' }
+                @{ Id = 'PostgreSQL.PostgreSQL.17'; Weight = 7; Reason = 'Data warehouse' }
                 @{ Id = 'RProject.R'; Weight = 8; Reason = 'Statistical computing language' }
-                @{ Id = 'RStudio.RStudio.OpenSource'; Weight = 7; Reason = 'R IDE and notebooks' }
+                @{ Id = 'Posit.RStudio'; Weight = 7; Reason = 'R IDE and notebooks' }
                 @{ Id = 'JetBrains.PyCharm.Community'; Weight = 7; Reason = 'Python IDE for ML projects' }
                 @{ Id = 'Microsoft.PowerBI'; Weight = 6; Reason = 'Business intelligence dashboards' }
-                @{ Id = 'Tableau.TableauDesktop'; Weight = 5; Reason = 'Advanced data visualization' }
-                @{ Id = 'Julia.Julia'; Weight = 6; Reason = 'High-performance numerical computing' }
+                @{ Id = 'Tableau.Desktop'; Weight = 5; Reason = 'Advanced data visualization' }
+                @{ Id = 'Julialang.Julia'; Weight = 6; Reason = 'High-performance numerical computing' }
             )
         }
         'DevOps Engineer' = @{
@@ -147,13 +146,12 @@ function Get-WingetRecommend {
                 @{ Id = 'Microsoft.AzureCLI'; Weight = 8; Reason = 'Azure cloud management' }
                 @{ Id = 'Amazon.AWSCLI'; Weight = 8; Reason = 'AWS cloud management' }
                 @{ Id = 'Helm.Helm'; Weight = 7; Reason = 'Kubernetes package manager' }
-                @{ Id = 'Ansible.Ansible'; Weight = 7; Reason = 'Configuration management' }
-                @{ Id = 'Grafana.Grafana'; Weight = 7; Reason = 'Monitoring dashboards' }
+                @{ Id = 'GrafanaLabs.Grafana.OSS'; Weight = 7; Reason = 'Monitoring dashboards' }
                 @{ Id = 'Hashicorp.Vault'; Weight = 6; Reason = 'Secrets management' }
                 @{ Id = 'Microsoft.VisualStudioCode'; Weight = 7; Reason = 'IaC editing' }
                 @{ Id = 'PuTTY.PuTTY'; Weight = 5; Reason = 'SSH access to servers' }
                 @{ Id = 'WiresharkFoundation.Wireshark'; Weight = 6; Reason = 'Network troubleshooting' }
-                @{ Id = 'Python.Python.3.12'; Weight = 7; Reason = 'Automation scripting' }
+                @{ Id = 'Python.Python.3.13'; Weight = 7; Reason = 'Automation scripting' }
             )
         }
         'Gamer' = @{
@@ -163,8 +161,6 @@ function Get-WingetRecommend {
                 @{ Id = 'Discord.Discord'; Weight = 9; Reason = 'Voice chat and communities' }
                 @{ Id = 'OBSProject.OBSStudio'; Weight = 8; Reason = 'Game streaming and recording' }
                 @{ Id = 'EpicGames.EpicGamesLauncher'; Weight = 7; Reason = 'Epic game library' }
-                @{ Id = 'RiotGames.RiotClient'; Weight = 7; Reason = 'League/Valorant client' }
-                @{ Id = 'NVIDIA.GeForceExperience'; Weight = 8; Reason = 'GPU optimization and recording' }
                 @{ Id = 'Elgato.StreamDeck'; Weight = 6; Reason = 'Stream control deck software' }
                 @{ Id = 'Mozilla.Firefox'; Weight = 5; Reason = 'Gaming wikis and guides' }
                 @{ Id = 'Spotify.Spotify'; Weight = 6; Reason = 'Gaming music' }
@@ -175,8 +171,7 @@ function Get-WingetRecommend {
         'Game Developer' = @{
             Keywords = @('game dev', 'game development', 'unity', 'unreal', 'godot', 'gamedev', 'indie', 'shader', '3d', 'blender', 'pixel art')
             Packages = @(
-                @{ Id = 'Unity.Unity'; Weight = 10; Reason = 'Game engine (C#)' }
-                @{ Id = 'EpicGames.UnrealEngine'; Weight = 9; Reason = 'AAA game engine (C++/Blueprints)' }
+                @{ Id = 'Unity.UnityHub'; Weight = 10; Reason = 'Installs and manages Unity editor versions' }
                 @{ Id = 'GodotEngine.GodotEngine'; Weight = 9; Reason = 'Open-source game engine' }
                 @{ Id = 'BlenderFoundation.Blender'; Weight = 9; Reason = '3D modeling and animation' }
                 @{ Id = 'Microsoft.VisualStudioCode'; Weight = 8; Reason = 'Scripting and shader editing' }
@@ -184,7 +179,7 @@ function Get-WingetRecommend {
                 @{ Id = 'GIMP.GIMP'; Weight = 7; Reason = '2D art and texture editing' }
                 @{ Id = 'Inkscape.Inkscape'; Weight = 6; Reason = 'Vector art for UI/sprites' }
                 @{ Id = 'Audacity.Audacity'; Weight = 6; Reason = 'Audio editing for SFX' }
-                @{ Id = 'Microsoft.DotNet.SDK.8'; Weight = 7; Reason = 'C# development for Unity' }
+                @{ Id = 'Microsoft.DotNet.SDK.10'; Weight = 7; Reason = 'C# development for Unity' }
                 @{ Id = 'Microsoft.VisualStudio.Community'; Weight = 7; Reason = 'Full C++ IDE for Unreal' }
             )
         }
@@ -192,17 +187,17 @@ function Get-WingetRecommend {
             Keywords = @('security', 'pentest', 'hacking', 'ctf', 'forensics', 'malware', 'reverse engineering', 'vulnerability', 'red team', 'blue team', 'soc')
             Packages = @(
                 @{ Id = 'WiresharkFoundation.Wireshark'; Weight = 10; Reason = 'Network packet analysis' }
-                @{ Id = 'Python.Python.3.12'; Weight = 9; Reason = 'Exploit scripting and automation' }
+                @{ Id = 'Python.Python.3.13'; Weight = 9; Reason = 'Exploit scripting and automation' }
                 @{ Id = 'Git.Git'; Weight = 8; Reason = 'Tool and research versioning' }
-                @{ Id = 'Nmap.Nmap'; Weight = 9; Reason = 'Network scanning and enumeration' }
+                @{ Id = 'Insecure.Nmap'; Weight = 9; Reason = 'Network scanning and enumeration' }
                 @{ Id = 'GnuPG.GnuPG'; Weight = 7; Reason = 'Encryption and signing' }
                 @{ Id = 'KeePassXCTeam.KeePassXC'; Weight = 7; Reason = 'Credential management' }
                 @{ Id = 'Microsoft.VisualStudioCode'; Weight = 7; Reason = 'Code analysis and scripting' }
                 @{ Id = 'Docker.DockerDesktop'; Weight = 7; Reason = 'Isolated malware analysis labs' }
                 @{ Id = 'Oracle.VirtualBox'; Weight = 8; Reason = 'Vulnerable VM labs' }
                 @{ Id = 'Hex-Rays.IDA.Free'; Weight = 8; Reason = 'Binary reverse engineering' }
-                @{ Id = 'Ghidra.Ghidra'; Weight = 8; Reason = 'NSA reverse engineering suite' }
-                @{ Id = 'Tor.TorBrowser'; Weight = 6; Reason = 'Anonymous research browsing' }
+                @{ Id = 'x64dbg.x64dbg'; Weight = 8; Reason = 'Open-source debugger for reverse engineering' }
+                @{ Id = 'TorProject.TorBrowser'; Weight = 6; Reason = 'Anonymous research browsing' }
             )
         }
         'Designer' = @{
@@ -212,7 +207,7 @@ function Get-WingetRecommend {
                 @{ Id = 'GIMP.GIMP'; Weight = 8; Reason = 'Raster image editing' }
                 @{ Id = 'Inkscape.Inkscape'; Weight = 8; Reason = 'Vector graphics editor' }
                 @{ Id = 'BlenderFoundation.Blender'; Weight = 7; Reason = '3D design and rendering' }
-                @{ Id = 'DaVinciResolve.DaVinciResolve'; Weight = 7; Reason = 'Video editing and color grading' }
+                @{ Id = 'KDE.Kdenlive'; Weight = 7; Reason = 'Open-source video editing' }
                 @{ Id = 'Audacity.Audacity'; Weight = 6; Reason = 'Audio editing' }
                 @{ Id = 'OBSProject.OBSStudio'; Weight = 6; Reason = 'Screen recording for portfolios' }
                 @{ Id = 'Mozilla.Firefox'; Weight = 5; Reason = 'Design inspiration browsing' }
@@ -226,10 +221,10 @@ function Get-WingetRecommend {
             Packages = @(
                 @{ Id = 'Microsoft.Office'; Weight = 9; Reason = 'Document and spreadsheet suite' }
                 @{ Id = 'Microsoft.Teams'; Weight = 8; Reason = 'Meetings and collaboration' }
-                @{ Id = 'Slack.Slack'; Weight = 7; Reason = 'Team communication' }
+                @{ Id = 'SlackTechnologies.Slack'; Weight = 7; Reason = 'Team communication' }
                 @{ Id = 'Notion.Notion'; Weight = 8; Reason = 'Notes and project management' }
                 @{ Id = 'Obsidian.Obsidian'; Weight = 8; Reason = 'Knowledge management (local-first)' }
-                @{ Id = 'Todoist.Todoist'; Weight = 7; Reason = 'Task management' }
+                @{ Id = 'Doist.Todoist'; Weight = 7; Reason = 'Task management' }
                 @{ Id = 'Zoom.Zoom'; Weight = 7; Reason = 'Video conferencing' }
                 @{ Id = 'Mozilla.Firefox'; Weight = 6; Reason = 'Research browser' }
                 @{ Id = '7zip.7zip'; Weight = 6; Reason = 'File compression utility' }
@@ -242,9 +237,9 @@ function Get-WingetRecommend {
             Packages = @(
                 @{ Id = 'Microsoft.VisualStudioCode'; Weight = 9; Reason = 'Free code editor for CS courses' }
                 @{ Id = 'Git.Git'; Weight = 9; Reason = 'Assignment version control' }
-                @{ Id = 'Python.Python.3.12'; Weight = 8; Reason = 'Intro programming language' }
+                @{ Id = 'Python.Python.3.13'; Weight = 8; Reason = 'Intro programming language' }
                 @{ Id = 'Obsidian.Obsidian'; Weight = 8; Reason = 'Study notes and knowledge base' }
-                @{ Id = 'Zotero.Zotero'; Weight = 8; Reason = 'Research paper management' }
+                @{ Id = 'DigitalScholar.Zotero'; Weight = 8; Reason = 'Research paper management' }
                 @{ Id = 'Mozilla.Firefox'; Weight = 7; Reason = 'Research browser with containers' }
                 @{ Id = 'VideoLAN.VLC'; Weight = 6; Reason = 'Lecture video playback' }
                 @{ Id = 'Audacity.Audacity'; Weight = 5; Reason = 'Audio note recording' }
@@ -257,15 +252,15 @@ function Get-WingetRecommend {
 
     # --- CO-OCCURRENCE MATRIX (commonly paired packages) ---
     $coOccurrence = @{
-        'Git.Git' = @('Microsoft.VisualStudioCode', 'Docker.DockerDesktop', 'OpenJS.NodeJS.LTS', 'Python.Python.3.12')
+        'Git.Git' = @('Microsoft.VisualStudioCode', 'Docker.DockerDesktop', 'OpenJS.NodeJS.LTS', 'Python.Python.3.13')
         'Docker.DockerDesktop' = @('Kubernetes.kubectl', 'Hashicorp.Terraform', 'Microsoft.VisualStudioCode', 'Git.Git')
-        'Microsoft.VisualStudioCode' = @('Git.Git', 'Python.Python.3.12', 'OpenJS.NodeJS.LTS', 'Docker.DockerDesktop')
-        'Python.Python.3.12' = @('Microsoft.VisualStudioCode', 'Anaconda.Anaconda3', 'Git.Git', 'JetBrains.PyCharm.Community')
+        'Microsoft.VisualStudioCode' = @('Git.Git', 'Python.Python.3.13', 'OpenJS.NodeJS.LTS', 'Docker.DockerDesktop')
+        'Python.Python.3.13' = @('Microsoft.VisualStudioCode', 'Anaconda.Anaconda3', 'Git.Git', 'JetBrains.PyCharm.Community')
         'OpenJS.NodeJS.LTS' = @('Microsoft.VisualStudioCode', 'Git.Git', 'Yarn.Yarn', 'Docker.DockerDesktop')
-        'Valve.Steam' = @('Discord.Discord', 'OBSProject.OBSStudio', 'NVIDIA.GeForceExperience')
-        'WiresharkFoundation.Wireshark' = @('Nmap.Nmap', 'Python.Python.3.12', 'Oracle.VirtualBox')
-        'BlenderFoundation.Blender' = @('GIMP.GIMP', 'Inkscape.Inkscape', 'DaVinciResolve.DaVinciResolve')
-        'PostgreSQL.PostgreSQL' = @('Redis.Redis', 'JetBrains.DataGrip', 'Docker.DockerDesktop')
+        'Valve.Steam' = @('Discord.Discord', 'OBSProject.OBSStudio')
+        'WiresharkFoundation.Wireshark' = @('Insecure.Nmap', 'Python.Python.3.13', 'Oracle.VirtualBox')
+        'BlenderFoundation.Blender' = @('GIMP.GIMP', 'Inkscape.Inkscape', 'KDE.Kdenlive')
+        'PostgreSQL.PostgreSQL.17' = @('Redis.Redis', 'JetBrains.DataGrip', 'Docker.DockerDesktop')
     }
 
     # --- GET INSTALLED PACKAGES ---
@@ -388,36 +383,34 @@ function Get-WingetRecommend {
     }
 
     # --- FILTER ---
-    $recommendations = $scores.GetEnumerator() |
-        Where-Object { -not $ExcludeInstalled -or $_.Key -notin $installedIds } |
-        Sort-Object { $_.Value.Score } -Descending |
-        Select-Object -First $MaxResults
+    $candidates = $scores.GetEnumerator() | Where-Object { -not $ExcludeInstalled -or $_.Key -notin $installedIds }
 
-    # Category filter
+    # Category filter (applied before MaxResults so the limit counts matching packages)
     if ($Category) {
         # Simple category mapping by package ID patterns
         $categoryMap = @{
             'Development' = @('Git', 'Code', 'Python', 'Node', 'DotNet', 'JetBrains', 'Rust', 'Go', 'Java')
-            'DevOps' = @('Docker', 'Kubernetes', 'Terraform', 'Ansible', 'Helm', 'Grafana', 'Vault', 'Azure', 'AWS')
-            'Gaming' = @('Steam', 'Discord', 'Epic', 'Riot', 'OBS', 'GeForce', 'GOG', 'Ubisoft')
-            'Design' = @('Figma', 'GIMP', 'Inkscape', 'Blender', 'DaVinci', 'Audacity')
-            'Security' = @('Wireshark', 'Nmap', 'Ghidra', 'IDA', 'KeePass', 'GnuPG', 'Tor', 'VirtualBox')
+            'DevOps' = @('Docker', 'Kubernetes', 'Terraform', 'Helm', 'Grafana', 'Vault', 'Azure', 'AWS')
+            'Gaming' = @('Steam', 'Discord', 'Epic', 'OBS', 'GOG', 'Ubisoft')
+            'Design' = @('Figma', 'GIMP', 'Inkscape', 'Blender', 'Kdenlive', 'Audacity')
+            'Security' = @('Wireshark', 'Nmap', 'x64dbg', 'IDA', 'KeePass', 'GnuPG', 'Tor', 'VirtualBox')
             'Productivity' = @('Office', 'Teams', 'Slack', 'Notion', 'Obsidian', 'Zoom', 'Todoist', 'ShareX')
-            'Media' = @('VLC', 'OBS', 'Audacity', 'DaVinci', 'Spotify', 'GIMP')
+            'Media' = @('VLC', 'OBS', 'Audacity', 'Kdenlive', 'Spotify', 'GIMP')
             'Utilities' = @('7zip', 'AutoHotkey', 'PuTTY', 'ShareX')
         }
-        $patterns = $categoryMap[$Category] ?? @()
-        if ($patterns.Count -gt 0) {
-            $recommendations = $recommendations | Where-Object {
+        $patterns = $categoryMap[$Category]
+        if ($patterns) {
+            $candidates = $candidates | Where-Object {
                 $id = $_.Key
-                ($patterns | Where-Object { $id -match [regex]::Escape($_) }).Count -gt 0
+                @($patterns | Where-Object { $id -match [regex]::Escape($_) }).Count -gt 0
             }
         }
     }
 
+    $recommendations = @($candidates | Sort-Object { $_.Value.Score } -Descending | Select-Object -First $MaxResults)
     # --- OUTPUT ---
     if ($recommendations.Count -eq 0) {
-        Write-Host "`n  No recommendations found. Your machine is complete!`n" -ForegroundColor Green
+        Write-Host "`n  No recommendations found$(if ($Category) { " in $Category" }). Everything suggested is already installed.`n" -ForegroundColor Green
         return
     }
 
@@ -450,38 +443,42 @@ function Get-WingetRecommend {
 
     # --- INTERACTIVE INSTALL ---
     if ($Install) {
-        $choices = $recommendations | ForEach-Object { $_.Key }
+        $choices = @($recommendations | ForEach-Object { $_.Key })
+        $selected = @()
 
-        if (Get-Command Read-SpectreMultiSelection -ErrorAction SilentlyContinue) {
-            $selected = Read-SpectreMultiSelection -Choices $choices -Title "Select packages to install"
-        } else {
+        try {
+            $selected = @(Read-SpectreMultiSelection -Choices $choices -Title "[cyan]Select packages to install[/]" -PageSize 20 -Color "Green")
+        }
+        catch {
             Write-Host "  Enter numbers to install (comma-separated, or 'all'): " -NoNewline -ForegroundColor Yellow
-            $input = Read-Host
-            if ($input -eq 'all') {
+            $answer = Read-Host
+            if ($answer -eq 'all') {
                 $selected = $choices
             } else {
-                $indices = $input.Split(',') | ForEach-Object { [int]$_.Trim() - 1 }
-                $selected = $indices | ForEach-Object { $choices[$_] }
+                $selected = @($answer -split '[,\s]+' | Where-Object { $_ -match '^\d+$' -and [int]$_ -ge 1 -and [int]$_ -le $choices.Count } |
+                    ForEach-Object { $choices[[int]$_ - 1] } | Select-Object -Unique)
             }
         }
 
-        if ($selected -and $selected.Count -gt 0) {
+        if ($selected.Count -gt 0) {
             Write-Host "`n  Installing $($selected.Count) packages...`n" -ForegroundColor Green
+            Invoke-WingetAutoSnapshot -Reason 'Get-WingetRecommend -Install'
+            $ok = 0
             $j = 0
             foreach ($pkgId in $selected) {
                 $j++
                 Write-Host "  [$j/$($selected.Count)] Installing $pkgId..." -NoNewline -ForegroundColor Cyan
-                try {
-                    Microsoft.WinGet.Client\Install-WinGetPackage -Id $pkgId -Mode Silent | Out-Null
-                    Write-Host " ✓" -ForegroundColor Green
-                } catch {
-                    Write-Host " ✗ ($($_.Exception.Message))" -ForegroundColor Red
+                $r = Invoke-WingetPackageAction -Action Install -Id $pkgId -Source 'winget' -Options @{ Mode = 'Silent' }
+                if ($r.Succeeded) {
+                    Write-Host " OK" -ForegroundColor Green
+                    $ok++
+                } else {
+                    Write-Host " FAILED ($($r.Message))" -ForegroundColor Red
                 }
             }
-            Write-Host "`n  Done! $($selected.Count) packages processed.`n" -ForegroundColor Green
+            Write-Host "`n  Done: $ok of $($selected.Count) installed.`n" -ForegroundColor $(if ($ok -eq $selected.Count) { 'Green' } else { 'Yellow' })
         }
     }
-
     # Return structured data for pipeline use
     $recommendations | ForEach-Object {
         [PSCustomObject]@{

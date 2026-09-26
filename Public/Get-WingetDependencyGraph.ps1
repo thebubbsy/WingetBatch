@@ -1,4 +1,4 @@
-function Get-WingetDependencyGraph {
+﻿function Get-WingetDependencyGraph {
     <#
     .SYNOPSIS
         Visualize package dependency relationships as a graph.
@@ -114,21 +114,20 @@ function Get-WingetDependencyGraph {
             $inStack.Add($Id) | Out-Null
 
             # Try COM API first for installed package info
-            $deps = @()
             try {
-                $pkgResult = Microsoft.WinGet.Client\Get-WinGetPackage -Id $Id -ErrorAction SilentlyContinue
+                $pkgResult = Microsoft.WinGet.Client\Get-WinGetPackage -Id $Id -MatchOption EqualsCaseInsensitive -ErrorAction SilentlyContinue | Select-Object -First 1
                 if ($pkgResult) {
                     Add-GraphNode -Id $Id -Label "$($pkgResult.Name) ($Id)" -Type 'installed'
                 }
             } catch { }
 
             # Fetch manifest from GitHub for dependency info
-            $manifestDeps = Get-ManifestDependencies -PackageId $Id
+            $manifestDeps = Get-ManifestDependencies -PkgId $Id
             if ($manifestDeps) {
                 Add-GraphNode -Id $Id -Label $Id -Type 'package'
                 foreach ($dep in $manifestDeps) {
                     $depId = $dep.PackageIdentifier
-                    $depType = $dep.Type ?? 'package'
+                    $depType = if ($dep.Type) { $dep.Type } else { 'package' }
 
                     if (-not $IncludeExternal -and $depType -in @('WindowsFeature', 'WindowsStore')) {
                         continue
@@ -147,72 +146,50 @@ function Get-WingetDependencyGraph {
             param([string]$PkgId)
 
             try {
-                # winget-pkgs manifest path: manifests/p/Publisher/Package/Version/Publisher.Package.yaml
-                $idParts = $PkgId.Split('.')
-                if ($idParts.Count -lt 2) { return $null }
+                $manifest = Get-WingetPkgsManifest -PackageId $PkgId
+                if (-not $manifest -or -not $manifest.Installer) { return $null }
 
-                $publisher = $idParts[0]
-                $firstLetter = $publisher[0].ToString().ToLower()
-                $packagePath = $idParts -join '/'
-
-                # Try to get the latest version manifest
-                $apiBase = "https://api.github.com/repos/microsoft/winget-pkgs/contents"
-                $manifestDir = "$apiBase/manifests/$firstLetter/$packagePath"
-
-                $headers = @{ 'User-Agent' = 'WingetBatch' }
-                $token = Get-WingetBatchGitHubToken -ErrorAction SilentlyContinue
-                if ($token) { $headers['Authorization'] = "Bearer $token" }
-
-                $versions = Invoke-RestMethod -Uri $manifestDir -Headers $headers -ErrorAction SilentlyContinue
-                if (-not $versions) { return $null }
-
-                # Get latest version
-                $latest = $versions | Sort-Object { [version]($_.name -replace '[^0-9.]', '') } -ErrorAction SilentlyContinue | Select-Object -Last 1
-                if (-not $latest) { $latest = $versions | Select-Object -Last 1 }
-
-                # Fetch the installer manifest (contains dependencies)
-                $versionFiles = Invoke-RestMethod -Uri $latest.url -Headers $headers -ErrorAction SilentlyContinue
-                $installerManifest = $versionFiles | Where-Object { $_.name -match '\.installer\.yaml$' } | Select-Object -First 1
-
-                if ($installerManifest) {
-                    $content = Invoke-RestMethod -Uri $installerManifest.url -Headers $headers -ErrorAction SilentlyContinue
-                    # Parse YAML content for Dependencies section
-                    $rawContent = $content.content
-                    if ($content.encoding -eq 'base64') {
-                        $rawContent = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($rawContent))
+                # Dependencies can sit at the top level or under each installer; collect
+                # PackageDependencies (and WindowsFeatures when requested) wherever they appear.
+                $deps = [System.Collections.Generic.List[hashtable]]::new()
+                $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+                $section = $null
+                foreach ($line in ($manifest.Installer -split "\r?\n")) {
+                    if ($line -match '^\s*(PackageDependencies|WindowsFeatures|WindowsLibraries|ExternalDependencies):\s*$') {
+                        $section = $Matches[1]; continue
                     }
-
-                    # Simple YAML parsing for dependencies
-                    $deps = @()
-                    $inDeps = $false
-                    $currentDep = @{}
-                    foreach ($line in $rawContent.Split("`n")) {
-                        if ($line -match '^\s*Dependencies:') { $inDeps = $true; continue }
-                        if ($inDeps) {
-                            if ($line -match '^\s*-\s*PackageIdentifier:\s*(.+)') {
-                                if ($currentDep.Count -gt 0) { $deps += $currentDep }
-                                $currentDep = @{ PackageIdentifier = $Matches[1].Trim(); Type = 'package' }
-                            }
-                            elseif ($line -match '^\s*WindowsFeatures:') { $inDeps = $false }
-                            elseif ($line -match '^\s*ExternalDependencies:') { $inDeps = $false }
-                            elseif ($line -match '^\S' -and $line -notmatch '^\s') { $inDeps = $false }
-                        }
+                    if ($section -eq 'PackageDependencies' -and $line -match '^\s*-\s*PackageIdentifier:\s*(\S+)') {
+                        if ($seen.Add($Matches[1])) { $deps.Add(@{ PackageIdentifier = $Matches[1]; Type = 'package' }) }
+                        continue
                     }
-                    if ($currentDep.Count -gt 0) { $deps += $currentDep }
-                    return $deps
+                    if ($section -eq 'PackageDependencies' -and $line -match '^\s*MinimumVersion:') { continue }
+                    if ($section -eq 'WindowsFeatures' -and $line -match '^\s*-\s*(\S+)') {
+                        if ($seen.Add($Matches[1])) { $deps.Add(@{ PackageIdentifier = $Matches[1]; Type = 'WindowsFeature' }) }
+                        continue
+                    }
+                    # Any other key ends the current list
+                    if ($line -match '^\s*[A-Za-z]+:' -and $line -notmatch '^\s*-') { $section = $null }
                 }
+                return $deps.ToArray()
             } catch {
+                $status = [int]$_.Exception.Response.StatusCode
+                if ($status -in 403, 429) {
+                    Write-Warning "GitHub rate limit reached while reading $PkgId. Run New-WingetBatchGitHubToken for 5,000 requests/hour."
+                }
                 Write-Verbose "Could not fetch manifest for ${PkgId}: $_"
             }
             return $null
         }
     }
-
     process {
         if ($AllInstalled) {
             Write-Progress -Activity "Building dependency graph" -Status "Enumerating installed packages..." -PercentComplete 0
-            $installed = Microsoft.WinGet.Client\Get-WinGetPackage -ErrorAction SilentlyContinue
+            # Only WinGet-sourced packages have winget-pkgs manifests
+            $installed = @(Microsoft.WinGet.Client\Get-WinGetPackage -ErrorAction SilentlyContinue | Where-Object { $_.Source -eq 'winget' })
             $total = $installed.Count
+            if (-not (Get-WingetBatchGitHubToken) -and $total -gt 25) {
+                Write-Warning "Scanning $total packages needs about $($total * 2) GitHub API requests; without a token the limit is 60/hour. Run New-WingetBatchGitHubToken first."
+            }
             $i = 0
 
             foreach ($pkg in $installed) {
@@ -276,12 +253,12 @@ function Format-MermaidGraph {
     # Node definitions with shapes based on type
     foreach ($node in $graph.Nodes.Values) {
         $safeId = $node.Id -replace '[^a-zA-Z0-9]', '_'
-        $label = $node.Label -replace '"', "'"
+        $label = $node.Label -replace '"', '#quot;'
         switch ($node.Type) {
-            'root' { [void]$sb.AppendLine("    $safeId[/$label/]") }  # Parallelogram for root
-            'installed' { [void]$sb.AppendLine("    $safeId[$label]") }  # Rectangle
-            'WindowsFeature' { [void]$sb.AppendLine("    $safeId(($label))") }  # Circle
-            default { [void]$sb.AppendLine("    $safeId[$label]") }
+            'root' { [void]$sb.AppendLine("    $safeId[/`"$label`"/]") }  # Parallelogram for root
+            'installed' { [void]$sb.AppendLine("    $safeId[`"$label`"]") }  # Rectangle
+            'WindowsFeature' { [void]$sb.AppendLine("    $safeId((`"$label`"))") }  # Circle
+            default { [void]$sb.AppendLine("    $safeId[`"$label`"]") }
         }
     }
 
@@ -314,7 +291,7 @@ function Format-DOTGraph {
     [void]$sb.AppendLine("")
 
     foreach ($node in $graph.Nodes.Values) {
-        $attrs = "label=`"$($node.Label)`""
+        $attrs = "label=`"$($node.Label -replace '"', '\"')`""
         switch ($node.Type) {
             'root' { $attrs += ", style=`"rounded,bold`", color=`"#2196F3`"" }
             'installed' { $attrs += ", color=`"#4CAF50`"" }
@@ -339,9 +316,9 @@ function Format-TreeGraph {
     $roots = $graph.Nodes.Values | Where-Object { $_.Type -eq 'root' -or $_.Dependents.Count -eq 0 }
 
     function Write-TreeNode {
-        param([hashtable]$Node, [string]$Prefix = "", [bool]$IsLast = $true)
+        param([hashtable]$Node, [string]$Prefix = "", [bool]$IsLast = $true, [bool]$IsRoot = $false)
 
-        $connector = if ($Prefix -eq "") { "" } elseif ($IsLast) { "└── " } else { "├── " }
+        $connector = if ($IsRoot) { "" } elseif ($IsLast) { "└── " } else { "├── " }
         $typeIcon = switch ($Node.Type) {
             'root' { "◆" }
             'installed' { "●" }
@@ -351,8 +328,8 @@ function Format-TreeGraph {
 
         [void]$sb.AppendLine("$Prefix$connector$typeIcon $($Node.Label)")
 
-        $childPrefix = if ($Prefix -eq "") { "" } elseif ($IsLast) { "$Prefix    " } else { "$Prefix│   " }
-        $deps = $Node.Dependencies | Select-Object -Unique
+        $childPrefix = if ($IsRoot) { "" } elseif ($IsLast) { "$Prefix    " } else { "$Prefix│   " }
+        $deps = @($Node.Dependencies | Select-Object -Unique)
         for ($i = 0; $i -lt $deps.Count; $i++) {
             $childId = $deps[$i]
             if ($graph.Nodes.ContainsKey($childId)) {
@@ -362,7 +339,7 @@ function Format-TreeGraph {
     }
 
     foreach ($root in $roots) {
-        Write-TreeNode -Node $root
+        Write-TreeNode -Node $root -IsRoot $true
         [void]$sb.AppendLine("")
     }
 

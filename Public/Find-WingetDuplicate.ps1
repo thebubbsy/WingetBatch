@@ -1,4 +1,4 @@
-function Find-WingetDuplicate {
+﻿function Find-WingetDuplicate {
     <#
     .SYNOPSIS
         Detect duplicate and redundant packages on the system.
@@ -57,8 +57,9 @@ function Find-WingetDuplicate {
         Write-Host ""
         Write-Host "  Scanning for duplicate packages..." -ForegroundColor Cyan
 
-        $installed = Get-WinGetPackage -ErrorAction SilentlyContinue
-        if (-not $installed -or $installed.Count -eq 0) {
+        $installed = Microsoft.WinGet.Client\Get-WinGetPackage -ErrorAction SilentlyContinue
+        $installed = @($installed)
+        if ($installed.Count -eq 0) {
             Write-Host "  No installed packages found." -ForegroundColor Yellow
             return
         }
@@ -182,7 +183,9 @@ function Find-WingetDuplicate {
         if ($duplicates.Count -gt 0) {
             Write-Host "  - Remove duplicate source installs:" -ForegroundColor White
             foreach ($dup in $duplicates | Where-Object { $_.Type -eq 'Multi-Source' }) {
-                Write-Host "    Uninstall-WinGetPackage -Id '$($dup.PackageId)' --Source msstore" -ForegroundColor DarkGray
+                $sources = @($installed | Where-Object { $_.Id -eq $dup.PackageId } | ForEach-Object { $_.Source } | Where-Object { $_ } | Select-Object -Unique)
+                $removeFrom = if ($sources -contains 'msstore') { 'msstore' } else { $sources | Select-Object -Last 1 }
+                Write-Host "    Uninstall-WinGetPackage -Id '$($dup.PackageId)' -Source $removeFrom" -ForegroundColor DarkGray
             }
         }
         if ($versionClusters.Count -gt 0) {

@@ -34,7 +34,7 @@ WingetBatch transforms winget from a single-package CLI tool into a powerful bat
 ## Requirements
 
 - **Windows Package Manager** (winget)
-- **PowerShell 5.1** or **PowerShell 7+** (Recommended)
+- **PowerShell 7.4+** (required by the PwshSpectreConsole dependency)
 - **Microsoft.WinGet.Client** module (auto-installed as dependency)
 - **PwshSpectreConsole** module (auto-installed if missing)
 

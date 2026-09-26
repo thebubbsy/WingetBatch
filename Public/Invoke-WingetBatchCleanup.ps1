@@ -19,8 +19,10 @@
         Remove-Item $updateCacheFile -Force
     }
     
-    # Clean orphaned jobs from current session
-    $jobs = Get-Job -ErrorAction SilentlyContinue | Where-Object { $_.State -in @('Completed', 'Failed', 'Stopped') }
+    # Clean up finished WingetBatch jobs only (leave the user's own jobs alone)
+    $jobs = Get-Job -ErrorAction SilentlyContinue | Where-Object {
+        $_.Name -in 'WingetBatchDetails', 'WingetUpdateCheck' -and $_.State -in @('Completed', 'Failed', 'Stopped')
+    }
     if ($jobs) {
         $jobs | Remove-Job -Force
     }

@@ -1,4 +1,4 @@
-function Repair-WingetBatchManager {
+﻿function Repair-WingetBatchManager {
     <#
     .SYNOPSIS
         Diagnose and repair common winget issues.
@@ -38,7 +38,7 @@ function Repair-WingetBatchManager {
         $issuesFound++
         Write-Host "  [FIX] Installing Microsoft.WinGet.Client..." -ForegroundColor Yellow
         try {
-            Install-Module -Name Microsoft.WinGet.Client -Scope CurrentUser -Force -SkipPublisherCheck
+            Install-WingetBatchDependency -Name Microsoft.WinGet.Client
             Write-Host "  [OK] Installed successfully." -ForegroundColor Green
             $issuesFixed++
         }
@@ -92,7 +92,7 @@ function Repair-WingetBatchManager {
     Write-Host "[CHECK] WinGet Package Manager health..." -ForegroundColor Cyan -NoNewline
     try {
         Import-Module Microsoft.WinGet.Client -ErrorAction Stop
-        $version = Get-WinGetVersion -ErrorAction Stop
+        $version = Microsoft.WinGet.Client\Get-WinGetVersion -ErrorAction Stop
         Write-Host " OK (WinGet v$version)" -ForegroundColor Green
     }
     catch {
@@ -113,7 +113,7 @@ function Repair-WingetBatchManager {
     # Check 4: COM API functional test
     Write-Host "[CHECK] COM API search functional test..." -ForegroundColor Cyan -NoNewline
     try {
-        $testResult = Find-WinGetPackage -Query "Microsoft.PowerShell" -Count 1 -ErrorAction Stop
+        $testResult = Microsoft.WinGet.Client\Find-WinGetPackage -Query "Microsoft.PowerShell" -Count 1 -ErrorAction Stop
         if ($testResult) {
             Write-Host " OK (Search returned results)" -ForegroundColor Green
         }

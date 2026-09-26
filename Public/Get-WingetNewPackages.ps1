@@ -1,4 +1,4 @@
-function Get-WingetNewPackages {
+﻿function Get-WingetNewPackages {
     <#
     .SYNOPSIS
         Get recently added NEW packages from the winget repository.
@@ -118,7 +118,8 @@ function Get-WingetNewPackages {
 
     try {
         # Calculate the date threshold
-        $since = (Get-Date).Subtract($timeSpan).ToString("yyyy-MM-ddTHH:mm:ssZ")
+        # GitHub expects UTC; formatting local time with a 'Z' suffix shifted the window by the UTC offset
+        $since = (Get-Date).ToUniversalTime().Subtract($timeSpan).ToString("yyyy-MM-ddTHH:mm:ssZ")
 
         $newPackages = [System.Collections.Generic.List[PSCustomObject]]::new()
         $processedPackages = @{}
@@ -185,6 +186,9 @@ function Get-WingetNewPackages {
                 }
             }
             catch {
+                # Rate limiting on the first page means there is nothing to show - surface it
+                $statusCode = [int]$_.Exception.Response.StatusCode
+                if ($page -eq 1 -and $statusCode -in 403, 429) { throw }
                 Write-Warning "Failed to fetch page $page : $_"
                 $fetchMore = $false
             }
@@ -208,7 +212,7 @@ function Get-WingetNewPackages {
         Write-Host " commits" -ForegroundColor Green
 
         if ($allCommits.Count -eq 0) {
-            Write-Warning "No commits found in the last $Days days. The winget-pkgs repository might have no recent activity."
+            Write-Warning "No commits found in the last $timeDesc. The winget-pkgs repository might have no recent activity."
             return
         }
 
@@ -425,7 +429,7 @@ function Get-WingetNewPackages {
                     if (-not $info -or -not $info.Version) {
                         try {
                             Import-Module Microsoft.WinGet.Client -ErrorAction SilentlyContinue
-                            $comResult = Find-WinGetPackage -Id $packageId -Exact -ErrorAction SilentlyContinue | Select-Object -First 1
+                            $comResult = Microsoft.WinGet.Client\Find-WinGetPackage -Id $packageId -MatchOption EqualsCaseInsensitive -ErrorAction SilentlyContinue | Select-Object -First 1
                             if ($comResult) {
                                 $info = @{
                                     Id = $packageId
@@ -451,7 +455,7 @@ function Get-WingetNewPackages {
                 }
 
                 return $results
-            } -ArgumentList (,$packageBatch), $configDir, $function:Parse-WingetShowOutput, $wingetExe
+            } -ArgumentList (,$packageBatch), $configDir, ${function:Parse-WingetShowOutput}, $wingetExe
 
             $jobs.Add($job)
             $jobPackageMap[$job.Id] = $packageBatch
@@ -748,7 +752,7 @@ function Get-WingetNewPackages {
 
                                         if (-not $info -or -not $info.Version) {
                                             try {
-                                                $comResult = Find-WinGetPackage -Id $pkgId -Exact -ErrorAction SilentlyContinue | Select-Object -First 1
+                                                $comResult = Microsoft.WinGet.Client\Find-WinGetPackage -Id $pkgId -MatchOption EqualsCaseInsensitive -ErrorAction SilentlyContinue | Select-Object -First 1
                                                 if ($comResult) {
                                                     $info = @{ Id = $pkgId; Version = $comResult.Version; Name = $comResult.Name }
                                                 }
@@ -811,43 +815,37 @@ function Get-WingetNewPackages {
 
                     $successCount = 0
                     $failCount = 0
+                    $installOptions = @{
+                        Mode = $(if ($Mode) { $Mode } else { 'Silent' })
+                        Scope = $Scope; Architecture = $Architecture; Override = $Override; Location = $Location
+                        Force = [bool]$ForceInstall; SkipDependencies = [bool]$SkipDependencies; AllowHashMismatch = [bool]$AllowHashMismatch
+                    }
+
+                    Invoke-WingetAutoSnapshot -Reason 'Get-WingetNewPackages'
 
                     foreach ($packageId in $packagesToInstall) {
                         Write-Host "`n>>> Installing: " -ForegroundColor Magenta -NoNewline
                         Write-Host $packageId -ForegroundColor White
 
-                        try {
-                            $installParams = @{
-                                Id = $packageId
-                                ErrorAction = 'Stop'
-                            }
-                            if ($PSBoundParameters.ContainsKey('Mode')) { $installParams['Mode'] = $Mode }
-                            else { $installParams['Mode'] = 'Silent' } # Maintain default silent update behavior
-                            if ($PSBoundParameters.ContainsKey('Scope')) { $installParams['Scope'] = $Scope }
-                            if ($PSBoundParameters.ContainsKey('Architecture')) { $installParams['Architecture'] = $Architecture }
-                            if ($PSBoundParameters.ContainsKey('Override')) { $installParams['Override'] = $Override }
-                            if ($PSBoundParameters.ContainsKey('Location')) { $installParams['Location'] = $Location }
-                            if ($ForceInstall) { $installParams['Force'] = $true }
-                            if ($SkipDependencies) { $installParams['SkipDependencies'] = $true }
-                            if ($AllowHashMismatch) { $installParams['AllowHashMismatch'] = $true }
-
-                            Microsoft.WinGet.Client\Install-WinGetPackage @installParams | Out-Null
+                        # New packages come from the winget-pkgs repository, i.e. the winget source
+                        $result = Invoke-WingetPackageAction -Action Install -Id $packageId -Source 'winget' -Options $installOptions
+                        if ($result.Succeeded) {
                             Write-Host "[OK] Successfully installed " -ForegroundColor Green -NoNewline
                             Write-Host $packageId -ForegroundColor White
                             $successCount++
                         }
-                        catch {
+                        else {
                             Write-Host "[FAIL] Failed to install " -ForegroundColor Red -NoNewline
                             Write-Host $packageId -ForegroundColor White -NoNewline
-                            Write-Host " ($_)" -ForegroundColor Red
+                            Write-Host " ($($result.Message))" -ForegroundColor Red
                             $failCount++
                         }
                     }
 
-                    Write-Host "`n" + ("=" * 60) -ForegroundColor Green
+                    Write-Host ("`n" + ("=" * 60)) -ForegroundColor Green
                     Write-Host "Installation Complete" -ForegroundColor Green
                     Write-Host ("=" * 60) -ForegroundColor Green
-                            Write-Host "  - " -ForegroundColor Green -NoNewline
+                    Write-Host "Installed: " -ForegroundColor Green -NoNewline
                     Write-Host $successCount -ForegroundColor White -NoNewline
                     Write-Host " | Failed: " -ForegroundColor Red -NoNewline
                     Write-Host $failCount -ForegroundColor White
@@ -887,9 +885,9 @@ function Get-WingetNewPackages {
     catch {
         Write-Error "Failed to fetch new packages from GitHub: $_"
         if ($_.Exception.Response.StatusCode -eq 403 -or $_ -match 'rate limit') {
-            Write-Host "`nâ”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”" -ForegroundColor Yellow
+            Write-Host "`n$("-" * 62)" -ForegroundColor Yellow
             Write-Host "[!] GitHub API Rate Limit Exceeded" -ForegroundColor Yellow
-            Write-Host "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”" -ForegroundColor Yellow
+            Write-Host ("-" * 62) -ForegroundColor Yellow
             Write-Host ""
             Write-Host "Unauthenticated requests are limited to 60 per hour." -ForegroundColor White
             Write-Host ""
@@ -899,7 +897,7 @@ function Get-WingetNewPackages {
             Write-Host "     (Interactive wizard to create and save a token)" -ForegroundColor DarkGray
             Write-Host ""
             Write-Host "Or wait an hour and try again with a shorter time period." -ForegroundColor DarkGray
-            Write-Host "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”" -ForegroundColor Yellow
+            Write-Host ("-" * 62) -ForegroundColor Yellow
         }
     }
 }

@@ -1,4 +1,4 @@
-function Get-WingetPackageInfo {
+﻿function Get-WingetPackageInfo {
     <#
     .SYNOPSIS
         Display rich, detailed information about a winget package.
@@ -135,8 +135,31 @@ function Get-WingetPackageInfo {
             return
         }
 
-        # Also check if installed locally
-        $localPkg = Get-WinGetPackage -Id $package.Id -ErrorAction SilentlyContinue
+        # Also check if installed locally (exact ID match; -Id alone is a substring search)
+        $localPkg = Microsoft.WinGet.Client\Get-WinGetPackage -Id $package.Id -MatchOption EqualsCaseInsensitive -ErrorAction SilentlyContinue | Select-Object -First 1
+
+        # Extended details come from the package's winget-pkgs manifest
+        $manifest = $null
+        $versionList = $null
+        if ($ShowManifest -or $ShowVersions) {
+            Write-Host ""
+            Write-Host "  Fetching extended details from winget-pkgs..." -ForegroundColor DarkGray
+            try {
+                $versionList = @(Get-WingetPkgsVersions -PackageId $package.Id)
+                if ($versionList.Count -gt 0) {
+                    $manifest = Get-WingetPkgsManifest -PackageId $package.Id -Version $versionList[0].Name
+                }
+            }
+            catch {
+                $status = [int]$_.Exception.Response.StatusCode
+                if ($status -in 403, 429) {
+                    Write-Host "  GitHub rate limit reached - run New-WingetBatchGitHubToken for 5,000 requests/hour." -ForegroundColor Yellow
+                }
+                else {
+                    Write-Host "  Package not found in winget-pkgs (it may come from another source)." -ForegroundColor DarkGray
+                }
+            }
+        }
 
         # Display rich info
         Write-Host ""
@@ -164,12 +187,29 @@ function Get-WingetPackageInfo {
         if ($localPkg) {
             $infoItems['Installed Ver'] = if ($localPkg.InstalledVersion) { $localPkg.InstalledVersion } else { 'Unknown' }
             $infoItems['Update Available'] = if ($localPkg.IsUpdateAvailable) { 'Yes' } else { 'No' }
-            if ($localPkg.IsUpdateAvailable -and $localPkg.AvailableVersion) {
-                $infoItems['Latest Version'] = $localPkg.AvailableVersion
+            if ($localPkg.IsUpdateAvailable -and @($localPkg.AvailableVersions).Count -gt 0) {
+                $infoItems['Latest Version'] = @($localPkg.AvailableVersions)[0]
             }
         }
 
-        $infoItems['Publisher'] = if ($package.Publisher) { $package.Publisher } else { 'Unknown' }
+        if ($manifest) {
+            $fields = [ordered]@{
+                'Publisher'   = 'Publisher'
+                'Description' = 'ShortDescription'
+                'License'     = 'License'
+                'License URL' = 'LicenseUrl'
+                'Homepage'    = 'PackageUrl'
+                'Release Notes' = 'ReleaseNotesUrl'
+                'Moniker'     = 'Moniker'
+            }
+            foreach ($label in $fields.Keys) {
+                $value = Get-WingetYamlValue -Yaml $manifest.Locale -Key $fields[$label]
+                if ($value) { $infoItems[$label] = $value }
+            }
+            $installerType = Get-WingetYamlValue -Yaml $manifest.Installer -Key 'InstallerType'
+            if (-not $installerType -and $manifest.Installer -match '(?m)^\s+InstallerType:\s*(\S+)') { $installerType = $Matches[1] }
+            if ($installerType) { $infoItems['Installer'] = $installerType }
+        }
 
         # Calculate max key width for alignment
         $maxKeyLen = ($infoItems.Keys | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum
@@ -180,102 +220,38 @@ function Get-WingetPackageInfo {
             $color = switch ($key) {
                 'Update Available' { if ($value -eq 'Yes') { 'Yellow' } else { 'Green' } }
                 'Id' { 'Cyan' }
+                { $_ -in 'License URL', 'Homepage', 'Release Notes' } { 'Cyan' }
                 default { 'White' }
             }
             Write-Host "  $paddedKey" -ForegroundColor Gray -NoNewline
             Write-Host $value -ForegroundColor $color
         }
 
-        Write-Host ""
+        if ($ShowVersions -and $versionList) {
+            Write-Host ""
+            Write-Host "  Available Versions ($($versionList.Count)):" -ForegroundColor White
+            $showCount = [Math]::Min($versionList.Count, 15)
+            for ($i = 0; $i -lt $showCount; $i++) {
+                $v = $versionList[$i].Name
+                $isInstalled = $localPkg -and (Compare-WingetVersion -ReferenceVersion $localPkg.InstalledVersion -DifferenceVersion $v) -eq 0
+                $marker = if ($isInstalled) { ' * installed' } else { '' }
+                Write-Host "    - $v$marker" -ForegroundColor $(if ($isInstalled) { 'Green' } else { 'Gray' })
+            }
+            if ($versionList.Count -gt 15) {
+                Write-Host "    ... and $($versionList.Count - 15) more" -ForegroundColor DarkGray
+            }
+        }
 
-        # Fetch extended details from GitHub (manifest) if possible
-        if ($ShowManifest -or $ShowVersions) {
-            Write-Host "  Fetching extended details from winget-pkgs..." -ForegroundColor DarkGray
-
-            $token = $null
-            try { $token = Get-WingetBatchGitHubToken } catch {}
-
-            $headers = @{ 'User-Agent' = 'WingetBatch' }
-            if ($token) { $headers['Authorization'] = "Bearer $token" }
-
-            # Try to get the manifest from GitHub
-            $packageIdPath = $package.Id -replace '\.', '/'
-            $apiUrl = "https://api.github.com/repos/microsoft/winget-pkgs/contents/manifests/$($packageIdPath.Substring(0,1).ToLower())/$packageIdPath"
-
-            try {
-                $response = Invoke-RestMethod -Uri $apiUrl -Headers $headers -ErrorAction Stop
-                if ($response -is [array]) {
-                    # Find the installer manifest
-                    $installerManifest = $response | Where-Object { $_.name -match '\.installer\.yaml$' } | Select-Object -First 1
-                    $localeManifest = $response | Where-Object { $_.name -match '\.locale\.' } | Select-Object -First 1
-
-                    if ($localeManifest) {
-                        $localeContent = Invoke-RestMethod -Uri $localeManifest.download_url -Headers $headers -ErrorAction SilentlyContinue
-                        if ($localeContent) {
-                            # Parse useful fields
-                            $lines = $localeContent -split "`n"
-                            foreach ($line in $lines) {
-                                if ($line -match '^License:\s*(.+)') {
-                                    Write-Host "  $('License'.PadRight($maxKeyLen + 2))" -ForegroundColor Gray -NoNewline
-                                    Write-Host $Matches[1].Trim() -ForegroundColor White
-                                }
-                                if ($line -match '^LicenseUrl:\s*(.+)') {
-                                    Write-Host "  $('License URL'.PadRight($maxKeyLen + 2))" -ForegroundColor Gray -NoNewline
-                                    Write-Host $Matches[1].Trim() -ForegroundColor Cyan
-                                }
-                                if ($line -match '^PackageUrl:\s*(.+)') {
-                                    Write-Host "  $('Homepage'.PadRight($maxKeyLen + 2))" -ForegroundColor Gray -NoNewline
-                                    Write-Host $Matches[1].Trim() -ForegroundColor Cyan
-                                }
-                                if ($line -match '^ShortDescription:\s*(.+)') {
-                                    Write-Host "  $('Description'.PadRight($maxKeyLen + 2))" -ForegroundColor Gray -NoNewline
-                                    Write-Host $Matches[1].Trim() -ForegroundColor White
-                                }
-                                if ($line -match '^Moniker:\s*(.+)') {
-                                    Write-Host "  $('Moniker'.PadRight($maxKeyLen + 2))" -ForegroundColor Gray -NoNewline
-                                    Write-Host $Matches[1].Trim() -ForegroundColor DarkGray
-                                }
-                                if ($line -match '^- (\w+)$' -and $prevLine -match '^Tags:') {
-                                    # Collect tags
-                                }
-                            }
-                        }
-                    }
-
-                    if ($ShowVersions) {
-                        Write-Host ""
-                        Write-Host "  Available Versions:" -ForegroundColor White
-                        $versions = $response | Where-Object { $_.type -eq 'dir' } | Select-Object -ExpandProperty name | Sort-Object -Descending
-                        if ($versions) {
-                            $showCount = [Math]::Min($versions.Count, 15)
-                            for ($i = 0; $i -lt $showCount; $i++) {
-                                $marker = if ($localPkg -and $localPkg.InstalledVersion -eq $versions[$i]) { ' *' } else { '' }
-                                Write-Host "    - $($versions[$i])$marker" -ForegroundColor $(if ($marker) { 'Green' } else { 'Gray' })
-                            }
-                            if ($versions.Count -gt 15) {
-                                Write-Host "    ... and $($versions.Count - 15) more" -ForegroundColor DarkGray
-                            }
-                        }
-                    }
-
-                    if ($ShowManifest -and $installerManifest) {
-                        Write-Host ""
-                        Write-Host "  Raw Installer Manifest:" -ForegroundColor White
-                        Write-Host "  $('─' * 50)" -ForegroundColor DarkGray
-                        $manifestContent = Invoke-RestMethod -Uri $installerManifest.download_url -Headers $headers -ErrorAction SilentlyContinue
-                        if ($manifestContent) {
-                            $manifestLines = ($manifestContent -split "`n") | Select-Object -First 40
-                            foreach ($line in $manifestLines) {
-                                Write-Host "  $line" -ForegroundColor DarkGray
-                            }
-                            if (($manifestContent -split "`n").Count -gt 40) {
-                                Write-Host "  ... (truncated)" -ForegroundColor DarkGray
-                            }
-                        }
-                    }
-                }
-            } catch {
-                Write-Verbose "Could not fetch extended details from GitHub: $_"
+        if ($ShowManifest -and $manifest -and $manifest.Installer) {
+            Write-Host ""
+            Write-Host "  Installer Manifest (v$($manifest.Version)):" -ForegroundColor White
+            Write-Host "  $('─' * 50)" -ForegroundColor DarkGray
+            $manifestLines = $manifest.Installer -split "\r?\n"
+            foreach ($line in ($manifestLines | Select-Object -First 40)) {
+                Write-Host "  $line" -ForegroundColor DarkGray
+            }
+            if ($manifestLines.Count -gt 40) {
+                Write-Host "  ... (truncated)" -ForegroundColor DarkGray
             }
         }
 

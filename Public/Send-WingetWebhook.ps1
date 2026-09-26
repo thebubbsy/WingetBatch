@@ -8,8 +8,11 @@ function Send-WingetWebhook {
         updates available, maintenance completed, drift detected, installs finished,
         or compliance violations found.
 
-        Supports Discord embeds, Slack Block Kit, and Teams Adaptive Cards.
-        Configure once with Set-WingetBatchConfig, then use anywhere.
+        Supports Discord embeds, Slack Block Kit, and Teams Adaptive Cards (works with
+        Teams Workflows "When a Teams webhook request is received" URLs).
+
+        Save a URL once with -SaveConfig; Register-WingetMaintenance also uses saved
+        webhooks to report each run.
 
     .PARAMETER Platform
         Target platform: Discord, Slack, or Teams.
@@ -22,7 +25,7 @@ function Send-WingetWebhook {
         InstallComplete, ComplianceViolation, Custom.
 
     .PARAMETER Title
-        Notification title (for Custom events).
+        Notification title (defaults to a title for the event).
 
     .PARAMETER Message
         Notification body/message content.
@@ -62,7 +65,9 @@ function Send-WingetWebhook {
         [ValidateSet('Discord', 'Slack', 'Teams')]
         [string]$Platform,
 
-        [Parameter()]
+        [Parameter(ParameterSetName = 'Send')]
+        [Parameter(ParameterSetName = 'Test')]
+        [Parameter(ParameterSetName = 'Save', Mandatory)]
         [string]$WebhookUrl,
 
         [Parameter(ParameterSetName = 'Send', Mandatory)]
@@ -78,42 +83,42 @@ function Send-WingetWebhook {
         [Parameter(ParameterSetName = 'Send')]
         [hashtable]$Data,
 
+        [Parameter(ParameterSetName = 'Save', Mandatory)]
+        [Parameter(ParameterSetName = 'Test')]
         [switch]$SaveConfig,
 
         [Parameter(ParameterSetName = 'Test', Mandatory)]
         [switch]$Test
     )
 
+    $configKey = "webhook_$($Platform.ToLower())"
+    $config = Get-WingetBatchConfigData
+
+    # --- Save config ---
+    if ($SaveConfig) {
+        if (-not $WebhookUrl) {
+            Write-Error "-SaveConfig needs -WebhookUrl."
+            return
+        }
+        $config[$configKey] = $WebhookUrl
+        Save-WingetBatchConfigData -Config $config
+        Write-Host "  $Platform webhook URL saved to config." -ForegroundColor Green
+        if (-not $Test) { return }
+    }
+
     # --- Resolve webhook URL ---
-    $configDir = Get-WingetBatchConfigDir
-    $configPath = Join-Path $configDir "config.json"
-    $config = @{}
-    if (Test-Path $configPath) {
-        $config = Get-Content $configPath -Raw | ConvertFrom-Json -AsHashtable
-    }
-
     if (-not $WebhookUrl) {
-        $key = "webhook_$($Platform.ToLower())"
-        $WebhookUrl = $config[$key]
+        $WebhookUrl = $config[$configKey]
     }
-
     if (-not $WebhookUrl) {
         Write-Error "No webhook URL for $Platform. Provide -WebhookUrl or save one with -SaveConfig."
         return
     }
 
-    # --- Save config ---
-    if ($SaveConfig) {
-        $key = "webhook_$($Platform.ToLower())"
-        $config[$key] = $WebhookUrl
-        $config | ConvertTo-Json -Depth 5 | Set-Content -Path $configPath -Encoding UTF8
-        Write-Host "  ✓ $Platform webhook URL saved to config." -ForegroundColor Green
-        if ($Test) { } else { return }
-    }
-
     # --- Build notification content ---
     $hostname = $env:COMPUTERNAME
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $moduleVersion = (Get-Module WingetBatch).Version
 
     if ($Test) {
         $Event = 'Custom'
@@ -124,29 +129,28 @@ function Send-WingetWebhook {
 
     # Default titles/messages per event
     $eventDefaults = @{
-        'UpdatesAvailable' = @{ Title = "📦 Updates Available"; Color = 0xFFA500; Emoji = "📦" }
-        'MaintenanceComplete' = @{ Title = "🔧 Maintenance Complete"; Color = 0x00CC00; Emoji = "🔧" }
-        'DriftDetected' = @{ Title = "⚠️ Configuration Drift Detected"; Color = 0xFF4444; Emoji = "⚠️" }
-        'InstallComplete' = @{ Title = "✅ Installation Complete"; Color = 0x00AAFF; Emoji = "✅" }
-        'ComplianceViolation' = @{ Title = "🚨 Compliance Violation"; Color = 0xFF0000; Emoji = "🚨" }
-        'Custom' = @{ Title = "WingetBatch Notification"; Color = 0x7289DA; Emoji = "📋" }
+        'UpdatesAvailable'    = @{ Title = "Updates Available"; Color = 0xFFA500; Emoji = "📦" }
+        'MaintenanceComplete' = @{ Title = "Maintenance Complete"; Color = 0x00CC00; Emoji = "🔧" }
+        'DriftDetected'       = @{ Title = "Configuration Drift Detected"; Color = 0xFF4444; Emoji = "⚠️" }
+        'InstallComplete'     = @{ Title = "Installation Complete"; Color = 0x00AAFF; Emoji = "✅" }
+        'ComplianceViolation' = @{ Title = "Compliance Violation"; Color = 0xFF0000; Emoji = "🚨" }
+        'Custom'              = @{ Title = "WingetBatch Notification"; Color = 0x7289DA; Emoji = "📋" }
     }
 
     $defaults = $eventDefaults[$Event]
     if (-not $Title) { $Title = $defaults.Title }
     if (-not $Message) { $Message = "Event: $Event on $hostname at $timestamp" }
+    $fullTitle = "$($defaults.Emoji) $Title"
 
     # --- Format per platform ---
     $body = $null
-    $contentType = 'application/json'
 
     switch ($Platform) {
         'Discord' {
-            # Discord embed format
             $fields = @()
             if ($Data) {
                 foreach ($entry in $Data.GetEnumerator()) {
-                    $fields += @{ name = $entry.Key; value = "$($entry.Value)"; inline = $true }
+                    $fields += @{ name = [string]$entry.Key; value = "$($entry.Value)"; inline = $true }
                 }
             }
             $fields += @{ name = "Host"; value = $hostname; inline = $true }
@@ -154,20 +158,19 @@ function Send-WingetWebhook {
 
             $body = @{
                 username = "WingetBatch"
-                embeds = @(@{
-                    title = "$($defaults.Emoji) $Title"
+                embeds   = @(@{
+                    title       = $fullTitle
                     description = $Message
-                    color = $defaults.Color
-                    fields = $fields
-                    footer = @{ text = "WingetBatch v2.8.0 | $hostname" }
-                    timestamp = (Get-Date -ToString 'o')
+                    color       = $defaults.Color
+                    fields      = $fields
+                    footer      = @{ text = "WingetBatch v$moduleVersion | $hostname" }
+                    timestamp   = (Get-Date).ToUniversalTime().ToString('o')
                 })
-            } | ConvertTo-Json -Depth 10 -Compress
+            }
         }
         'Slack' {
-            # Slack Block Kit format
             $blocks = @(
-                @{ type = "header"; text = @{ type = "plain_text"; text = "$($defaults.Emoji) $Title" } }
+                @{ type = "header"; text = @{ type = "plain_text"; text = $fullTitle } }
                 @{ type = "section"; text = @{ type = "mrkdwn"; text = $Message } }
             )
 
@@ -176,54 +179,62 @@ function Send-WingetWebhook {
                 $blocks += @{ type = "section"; text = @{ type = "mrkdwn"; text = $dataText } }
             }
 
-            $blocks += @{ type = "context"; elements = @(@{ type = "mrkdwn"; text = "WingetBatch | $hostname | $timestamp" }) }
+            $blocks += @{ type = "context"; elements = @(@{ type = "mrkdwn"; text = "WingetBatch v$moduleVersion | $hostname | $timestamp" }) }
 
-            $body = @{ blocks = $blocks } | ConvertTo-Json -Depth 10 -Compress
+            # "text" is the fallback shown in notifications
+            $body = @{ text = "$fullTitle - $Message"; blocks = $blocks }
         }
         'Teams' {
-            # Teams Adaptive Card (MessageCard format for simplicity)
-            $sections = @(@{
-                activityTitle = $Title
-                activitySubtitle = "$hostname - $timestamp"
-                text = $Message
-                facts = @()
-            })
-
+            # Adaptive Card: accepted by Teams Workflows webhooks (Office 365 connectors,
+            # which used the old MessageCard format, have been retired)
+            $facts = @()
             if ($Data) {
                 foreach ($entry in $Data.GetEnumerator()) {
-                    $sections[0].facts += @{ name = $entry.Key; value = "$($entry.Value)" }
+                    $facts += @{ title = [string]$entry.Key; value = "$($entry.Value)" }
                 }
             }
-            $sections[0].facts += @{ name = "Host"; value = $hostname }
+            $facts += @{ title = "Host"; value = $hostname }
+            $facts += @{ title = "Time"; value = $timestamp }
 
             $body = @{
-                '@type' = "MessageCard"
-                '@context' = "http://schema.org/extensions"
-                themeColor = $defaults.Color.ToString("X6")
-                summary = $Title
-                sections = $sections
-            } | ConvertTo-Json -Depth 10 -Compress
+                type        = "message"
+                attachments = @(@{
+                    contentType = "application/vnd.microsoft.card.adaptive"
+                    content     = @{
+                        '$schema' = "http://adaptivecards.io/schemas/adaptive-card.json"
+                        type      = "AdaptiveCard"
+                        version   = "1.4"
+                        body      = @(
+                            @{ type = "TextBlock"; text = $fullTitle; weight = "Bolder"; size = "Medium"; wrap = $true }
+                            @{ type = "TextBlock"; text = $Message; wrap = $true }
+                            @{ type = "FactSet"; facts = $facts }
+                        )
+                    }
+                })
+            }
         }
     }
 
+    $json = $body | ConvertTo-Json -Depth 10 -Compress
+
     # --- Send ---
     try {
-        $response = Invoke-RestMethod -Uri $WebhookUrl -Method Post -Body $body -ContentType $contentType -ErrorAction Stop
-        Write-Host "  ✓ Notification sent to $Platform ($Event)" -ForegroundColor Green
+        Invoke-RestMethod -Uri $WebhookUrl -Method Post -Body ([System.Text.Encoding]::UTF8.GetBytes($json)) -ContentType 'application/json; charset=utf-8' -ErrorAction Stop | Out-Null
+        Write-Host "  Notification sent to $Platform ($Event)" -ForegroundColor Green
         return [PSCustomObject]@{
-            Success = $true
-            Platform = $Platform
-            Event = $Event
+            Success   = $true
+            Platform  = $Platform
+            Event     = $Event
             Timestamp = $timestamp
         }
     }
     catch {
         Write-Error "Failed to send $Platform webhook: $($_.Exception.Message)"
         return [PSCustomObject]@{
-            Success = $false
+            Success  = $false
             Platform = $Platform
-            Event = $Event
-            Error = $_.Exception.Message
+            Event    = $Event
+            Error    = $_.Exception.Message
         }
     }
 }

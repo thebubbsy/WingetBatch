@@ -11,6 +11,10 @@ function Get-WingetUpdates {
     .PARAMETER Force
         Skip the cache and force a fresh check for updates.
 
+    .PARAMETER ListOnly
+        Return the available updates as objects without prompting or installing.
+        Use this from scripts, scheduled tasks and the REST server.
+
     .EXAMPLE
         Get-WingetUpdates
         Shows available updates and allows you to select which to install.
@@ -18,12 +22,19 @@ function Get-WingetUpdates {
     .EXAMPLE
         Get-WingetUpdates -Force
         Forces a fresh check for updates.
+
+    .EXAMPLE
+        Get-WingetUpdates -ListOnly | Where-Object Source -eq 'winget'
+        Lists pending updates as objects for further processing.
     #>
 
     [CmdletBinding()]
     param(
         [Parameter()]
         [switch]$Force,
+
+        [Parameter()]
+        [switch]$ListOnly,
 
         [Parameter()]
         [switch]$IWantToLiterallyUpdateAllFuckingResults,
@@ -58,13 +69,6 @@ function Get-WingetUpdates {
         [switch]$AllowHashMismatch
     )
 
-    # Ensure PwshSpectreConsole is available
-    if (-not (Get-Module -Name PwshSpectreConsole)) {
-        if (Get-Module -ListAvailable -Name PwshSpectreConsole) {
-            Import-Module PwshSpectreConsole -ErrorAction SilentlyContinue
-        }
-    }
-
     # Ensure Microsoft.WinGet.Client is available
     if (-not (Get-Module -Name Microsoft.WinGet.Client)) {
         try {
@@ -76,24 +80,34 @@ function Get-WingetUpdates {
         }
     }
 
-    Write-Host "Checking for winget package updates..." -ForegroundColor Cyan
+    if (-not $ListOnly) {
+        Write-Host "Checking for winget package updates..." -ForegroundColor Cyan
+    }
 
     # Check cache first
-    $cacheFile = Join-Path (Get-WingetBatchConfigDir) "update_cache.json"
+    $configDir = Get-WingetBatchConfigDir
+    if (-not (Test-Path $configDir)) { New-Item -ItemType Directory -Path $configDir -Force | Out-Null }
+    $cacheFile = Join-Path $configDir "update_cache.json"
     $useCache = $false
+    $updatesAvailable = [System.Collections.Generic.List[PSCustomObject]]::new()
 
     if (-not $Force -and (Test-Path $cacheFile)) {
         try {
             $cache = Get-Content $cacheFile -Raw | ConvertFrom-Json
             $cacheAge = ((Get-Date) - [DateTime]::Parse($cache.LastChecked)).TotalMinutes
 
-            if ($cacheAge -lt 30 -and $cache.Updates.Count -gt 0) {
+            # Only trust caches written in the current format (they carry AvailableVersion)
+            if ($cacheAge -lt 30 -and @($cache.Updates).Count -gt 0 -and $null -ne @($cache.Updates)[0].AvailableVersion) {
                 $useCache = $true
-                $updatesAvailable = [System.Collections.Generic.List[Object]]::new()
                 foreach ($u in $cache.Updates) {
-                    $updatesAvailable.Add($u)
+                    $updatesAvailable.Add([PSCustomObject]@{
+                        Id = $u.Id; Name = $u.Name; InstalledVersion = $u.InstalledVersion
+                        AvailableVersion = $u.AvailableVersion; Source = $u.Source
+                    })
                 }
-                Write-Host "Using cached results (checked $([Math]::Round($cacheAge, 0)) minutes ago)" -ForegroundColor DarkGray
+                if (-not $ListOnly) {
+                    Write-Host "Using cached results (checked $([Math]::Round($cacheAge, 0)) minutes ago, -Force to refresh)" -ForegroundColor DarkGray
+                }
             }
         }
         catch {
@@ -102,34 +116,39 @@ function Get-WingetUpdates {
     }
 
     if (-not $useCache) {
-        # Use COM API to get packages with updates available
-        Write-Host "Querying installed packages via COM API..." -ForegroundColor DarkGray
-        $installed = Get-WinGetPackage -ErrorAction SilentlyContinue
-        $updatesAvailable = [System.Collections.Generic.List[Object]]::new()
+        if (-not $ListOnly) {
+            Write-Host "Querying installed packages via COM API..." -ForegroundColor DarkGray
+        }
+        $installed = Microsoft.WinGet.Client\Get-WinGetPackage -ErrorAction SilentlyContinue
 
         foreach ($pkg in $installed) {
             if ($pkg.IsUpdateAvailable) {
-                $updatesAvailable.Add(@{
-                    Id = $pkg.Id
-                    Name = $pkg.Name
-                    InstalledVersion = $pkg.Version
-                    Source = $pkg.Source
-                    DisplayLine = "$($pkg.Name) ($($pkg.Id)) $($pkg.Version)"
+                $updatesAvailable.Add([PSCustomObject]@{
+                    Id               = $pkg.Id
+                    Name             = $pkg.Name
+                    InstalledVersion = $pkg.InstalledVersion
+                    AvailableVersion = @($pkg.AvailableVersions)[0]
+                    Source           = $pkg.Source
                 })
             }
         }
 
-        # Save to cache
+        # Save to cache (also read by the profile update notification)
         try {
             $cacheData = @{
                 LastChecked = (Get-Date).ToString('o')
-                Updates = @($updatesAvailable)
+                UpdateCount = $updatesAvailable.Count
+                Updates     = @($updatesAvailable)
             } | ConvertTo-Json -Depth 5
             [System.IO.File]::WriteAllText($cacheFile, $cacheData, [System.Text.Encoding]::UTF8)
         }
         catch {
             Write-Verbose "Failed to save update cache: $_"
         }
+    }
+
+    if ($ListOnly) {
+        return $updatesAvailable.ToArray()
     }
 
     if ($updatesAvailable.Count -eq 0) {
@@ -147,13 +166,13 @@ function Get-WingetUpdates {
     if ($ExportHtml) {
         Write-Host "`n[HTML] Exporting HTML report..." -ForegroundColor Cyan
         $timestamp = (Get-Date).ToString("yyyyMMdd_HHmmss")
-        $defaultPath = "C:\temp\WingetBatch_Updates_$timestamp.html".Replace(' ', '_')
+        $defaultPath = "C:\temp\WingetBatch_Updates_$timestamp.html"
         $exportPath = Read-Host "Enter path for HTML report [Default: $defaultPath]"
         if (-not $exportPath) { $exportPath = $defaultPath }
         if (-not $exportPath.EndsWith(".html")) { $exportPath += ".html" }
 
         try {
-            Export-WingetHtmlReport -Data $updatesAvailable -ReportTitle "Updates" -FilePath $exportPath
+            Export-WingetHtmlReport -Data $updatesAvailable.ToArray() -ReportTitle "Updates" -FilePath $exportPath
             if (Test-Path $exportPath) {
                 Write-Host "[OK] Report successfully saved to $exportPath" -ForegroundColor Green
                 Invoke-Item $exportPath
@@ -165,14 +184,19 @@ function Get-WingetUpdates {
 
     # Interactive selection
     if ($IWantToLiterallyUpdateAllFuckingResults) {
-        $selectedPackages = $updatesAvailable | ForEach-Object { $_.Id }
+        $selectedPackages = @($updatesAvailable)
     }
-    elseif (Get-Module -Name PwshSpectreConsole) {
+    else {
         try {
-            $displayToId = @{}
-            $displayLines = $updatesAvailable | ForEach-Object {
-                $display = $_.DisplayLine
-                $displayToId[$display] = $_.Id
+            $displayToPkg = @{}
+            $displayLines = foreach ($u in $updatesAvailable) {
+                $name = ConvertTo-SpectreEscaped $u.Name
+                $id = ConvertTo-SpectreEscaped $u.Id
+                $from = ConvertTo-SpectreEscaped ([string]$u.InstalledVersion)
+                $to = ConvertTo-SpectreEscaped ([string]$u.AvailableVersion)
+                $display = "$name ($id) [grey]$from[/] -> [green]$to[/]"
+                if ($u.Source -and $u.Source -ne 'winget') { $display += " [magenta]$(ConvertTo-SpectreEscaped $u.Source)[/]" }
+                $displayToPkg[$display] = $u
                 $display
             }
 
@@ -181,36 +205,24 @@ function Get-WingetUpdates {
                 -PageSize 20 `
                 -Color "Green"
 
-            if ($selectedLines.Count -eq 0) {
+            if (@($selectedLines).Count -eq 0) {
                 Write-Host "No packages selected." -ForegroundColor Yellow
                 return
             }
 
-            $selectedPackages = $selectedLines | ForEach-Object { $displayToId[$_] }
+            $selectedPackages = @($selectedLines | ForEach-Object { $displayToPkg[$_] })
         }
         catch {
             Write-Warning "Interactive selection error: $_"
             Write-Host "Packages with updates available:" -ForegroundColor Cyan
             $updatesAvailable | ForEach-Object {
-                Write-Host "  - $($_.Id)" -ForegroundColor White
+                Write-Host "  - $($_.Id) ($($_.InstalledVersion) -> $($_.AvailableVersion))" -ForegroundColor White
             }
             Write-Host ""
-            Write-Host "Use 'Update-WinGetPackage -Id <PackageName>' to update manually." -ForegroundColor Yellow
+            Write-Host "To update all: " -ForegroundColor Cyan -NoNewline
+            Write-Host "Get-WingetUpdates -IWantToLiterallyUpdateAllFuckingResults" -ForegroundColor Yellow
             return
         }
-    }
-    else {
-        # Fallback without interactive selection
-        Write-Host "Packages with updates available:" -ForegroundColor Cyan
-        $updatesAvailable | ForEach-Object {
-            Write-Host "  - $($_.Id)" -ForegroundColor White
-        }
-        Write-Host ""
-        Write-Host "To update a package: " -ForegroundColor Cyan -NoNewline
-        Write-Host "Update-WinGetPackage -Id <PackageName>" -ForegroundColor Yellow
-        Write-Host "To update all: " -ForegroundColor Cyan -NoNewline
-        Write-Host "Get-WingetUpdates -IWantToLiterallyUpdateAllFuckingResults" -ForegroundColor Yellow
-        return
     }
 
     Write-Host ""
@@ -221,35 +233,38 @@ function Get-WingetUpdates {
 
     $successCount = 0
     $failCount = 0
+    $rebootNeeded = $false
+    $failures = [System.Collections.Generic.List[PSCustomObject]]::new()
 
-    foreach ($packageId in $selectedPackages) {
-        Write-Host ">>> Updating: " -ForegroundColor Magenta -NoNewline
-        Write-Host $packageId -ForegroundColor White
+    # Default to silent updates unless the caller chose a mode
+    $installOptions = @{
+        Mode = $(if ($Mode) { $Mode } else { 'Silent' })
+        Scope = $Scope; Architecture = $Architecture; Override = $Override; Location = $Location
+        Force = [bool]$ForceInstall; SkipDependencies = [bool]$SkipDependencies; AllowHashMismatch = [bool]$AllowHashMismatch
+    }
 
-        try {
-            $installParams = @{
-                Id = $packageId
-                ErrorAction = 'Stop'
-            }
-            if ($PSBoundParameters.ContainsKey('Mode')) { $installParams['Mode'] = $Mode }
-            else { $installParams['Mode'] = 'Silent' } # Maintain default silent update behavior
-            if ($PSBoundParameters.ContainsKey('Scope')) { $installParams['Scope'] = $Scope }
-            if ($PSBoundParameters.ContainsKey('Architecture')) { $installParams['Architecture'] = $Architecture }
-            if ($PSBoundParameters.ContainsKey('Override')) { $installParams['Override'] = $Override }
-            if ($PSBoundParameters.ContainsKey('Location')) { $installParams['Location'] = $Location }
-            if ($ForceInstall) { $installParams['Force'] = $true }
-            if ($SkipDependencies) { $installParams['SkipDependencies'] = $true }
-            if ($AllowHashMismatch) { $installParams['AllowHashMismatch'] = $true }
+    Invoke-WingetAutoSnapshot -Reason 'Get-WingetUpdates'
 
-            $result = Update-WinGetPackage @installParams
+    $i = 0
+    foreach ($pkg in $selectedPackages) {
+        $i++
+        Write-Host ">>> [$i/$($selectedPackages.Count)] Updating: " -ForegroundColor Magenta -NoNewline
+        Write-Host "$($pkg.Id) " -ForegroundColor White -NoNewline
+        Write-Host "$($pkg.InstalledVersion) -> $($pkg.AvailableVersion)" -ForegroundColor DarkGray
+
+        $result = Invoke-WingetPackageAction -Action Update -Id $pkg.Id -Source $pkg.Source -Options $installOptions
+
+        if ($result.Succeeded) {
             Write-Host "[OK] Successfully updated " -ForegroundColor Green -NoNewline
-            Write-Host $packageId -ForegroundColor White
+            Write-Host $pkg.Id -ForegroundColor White
+            if ($result.RebootRequired) { $rebootNeeded = $true }
             $successCount++
         }
-        catch {
+        else {
             Write-Host "[FAIL] Failed to update " -ForegroundColor Red -NoNewline
-            Write-Host $packageId -ForegroundColor White -NoNewline
-            Write-Host " ($_)" -ForegroundColor Red
+            Write-Host $pkg.Id -ForegroundColor White -NoNewline
+            Write-Host " ($($result.Message))" -ForegroundColor Red
+            $failures.Add($result)
             $failCount++
         }
         Write-Host ""
@@ -258,10 +273,16 @@ function Get-WingetUpdates {
     Write-Host ("=" * 60) -ForegroundColor Green
     Write-Host "Update Complete" -ForegroundColor Green
     Write-Host ("=" * 60) -ForegroundColor Green
-    Write-Host "  - " -ForegroundColor Green -NoNewline
+    Write-Host "Updated: " -ForegroundColor Green -NoNewline
     Write-Host $successCount -ForegroundColor White -NoNewline
     Write-Host " | Failed: " -ForegroundColor Red -NoNewline
     Write-Host $failCount -ForegroundColor White
+    foreach ($f in $failures) {
+        Write-Host "  - $($f.Id): $($f.Message)" -ForegroundColor DarkGray
+    }
+    if ($rebootNeeded) {
+        Write-Host "A restart is required to finish at least one update." -ForegroundColor Yellow
+    }
 
     # Clear cache after updates
     if (Test-Path $cacheFile) {

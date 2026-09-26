@@ -121,7 +121,7 @@ Get-WingetMachineState -Reconcile -Path ".\golden.json"  # On new PC
 ## Requirements
 
 - Windows 10/11 with winget
-- PowerShell 5.1+ (7+ recommended)
+- PowerShell 7.4+ (required by PwshSpectreConsole)
 - Auto-installed: Microsoft.WinGet.Client, PwshSpectreConsole, Pode (for API server)
 
 ## Architecture

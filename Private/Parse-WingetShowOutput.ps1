@@ -38,8 +38,38 @@
 
     # Optimized parsing: Replace sequential regex matching with O(1) string operations and switch
     # This significantly reduces CPU usage when parsing many packages in parallel
-    foreach ($line in $Output -split "`n") {
+    # Description, Release Notes and Tags can span several indented lines under
+    # their label ("Description:" followed by the text on the next lines)
+    $blockKey = $null
+    $blockLines = [System.Collections.Generic.List[string]]::new()
+    $flushBlock = {
+        if ($blockKey -and $blockLines.Count -gt 0) {
+            switch ($blockKey) {
+                'Description' { $info.Description = ($blockLines -join ' ').Trim() }
+                'Release Notes' { $info.ReleaseNotes = ($blockLines -join "`n").Trim() }
+                'Tags' { $info.Tags = @($blockLines | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
+            }
+        }
+        $blockLines.Clear()
+    }
+
+    foreach ($rawLine in $Output -split "`n") {
+        $line = $rawLine.TrimEnd("`r")
+
+        if ($blockKey) {
+            if ($line -match '^\s+\S') {
+                $blockLines.Add($line.Trim())
+                continue
+            }
+            & $flushBlock
+            $blockKey = $null
+        }
+
         $colonIndex = $line.IndexOf(':')
+        if ($colonIndex -gt 0 -and $line -match '^(Description|Release Notes|Tags):\s*$') {
+            $blockKey = $Matches[1]
+            continue
+        }
 
         if ($colonIndex -gt 0) {
             # Extract key and value efficiently
@@ -81,6 +111,7 @@
             }
         }
     }
+    if ($blockKey) { & $flushBlock }
 
     return $info
 }

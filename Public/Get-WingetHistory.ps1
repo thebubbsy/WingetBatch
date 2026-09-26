@@ -1,4 +1,4 @@
-function Get-WingetHistory {
+﻿function Get-WingetHistory {
     <#
     .SYNOPSIS
         Display package installation history as a timeline.
@@ -25,6 +25,9 @@ function Get-WingetHistory {
 
     .PARAMETER ExportJson
         Output raw history data as JSON for programmatic use.
+
+    .PARAMETER PassThru
+        Return the history entries as objects instead of printing the timeline.
 
     .EXAMPLE
         Get-WingetHistory
@@ -62,7 +65,10 @@ function Get-WingetHistory {
         [switch]$ExportHtml,
 
         [Parameter()]
-        [switch]$ExportJson
+        [switch]$ExportJson,
+
+        [Parameter()]
+        [switch]$PassThru
     )
 
     begin {
@@ -74,8 +80,10 @@ function Get-WingetHistory {
     }
 
     process {
-        Write-Host ""
-        Write-Host "  Scanning installation history..." -ForegroundColor Cyan
+        if (-not $PassThru) {
+            Write-Host ""
+            Write-Host "  Scanning installation history..." -ForegroundColor Cyan
+        }
 
         $history = [System.Collections.Generic.List[PSCustomObject]]::new()
         $cutoffDate = if ($All) { [DateTime]::MinValue } else { (Get-Date).AddDays(-$Days) }
@@ -175,6 +183,10 @@ function Get-WingetHistory {
             return
         }
 
+        if ($PassThru) {
+            return $history.ToArray()
+        }
+
         # JSON export
         if ($ExportJson) {
             $history | ConvertTo-Json -Depth 5
@@ -199,14 +211,14 @@ function Get-WingetHistory {
             Write-Host " ($dayOfWeek)" -ForegroundColor DarkGray
             Write-Host "  $('─' * 50)" -ForegroundColor DarkGray
 
-            foreach ($event in $dayGroup.Group) {
-                $actionColor = switch ($event.Action) {
+            foreach ($entry in $dayGroup.Group) {
+                $actionColor = switch ($entry.Action) {
                     'Installed' { 'Green' }
                     'Updated' { 'Yellow' }
                     'Removed' { 'Red' }
                     default { 'Gray' }
                 }
-                $actionIcon = switch ($event.Action) {
+                $actionIcon = switch ($entry.Action) {
                     'Installed' { '+' }
                     'Updated' { '~' }
                     'Removed' { '-' }
@@ -214,16 +226,16 @@ function Get-WingetHistory {
                 }
 
                 Write-Host "    [$actionIcon] " -ForegroundColor $actionColor -NoNewline
-                Write-Host $event.Name -ForegroundColor White -NoNewline
+                Write-Host $entry.Name -ForegroundColor White -NoNewline
 
-                if ($event.Version) {
-                    Write-Host " v$($event.Version)" -ForegroundColor Green -NoNewline
+                if ($entry.Version) {
+                    Write-Host " v$($entry.Version)" -ForegroundColor Green -NoNewline
                 }
-                if ($event.Publisher) {
-                    Write-Host " ($($event.Publisher))" -ForegroundColor DarkGray -NoNewline
+                if ($entry.Publisher) {
+                    Write-Host " ($($entry.Publisher))" -ForegroundColor DarkGray -NoNewline
                 }
-                if ($event.SizeMB) {
-                    Write-Host " [$($event.SizeMB) MB]" -ForegroundColor DarkGray -NoNewline
+                if ($entry.SizeMB) {
+                    Write-Host " [$($entry.SizeMB) MB]" -ForegroundColor DarkGray -NoNewline
                 }
                 Write-Host ""
             }

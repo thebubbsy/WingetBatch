@@ -1,4 +1,4 @@
-function Set-WingetBatchConfig {
+﻿function Set-WingetBatchConfig {
     <#
     .SYNOPSIS
         Configure WingetBatch global settings.
@@ -21,30 +21,12 @@ function Set-WingetBatchConfig {
         [string]$SearchMatchOption
     )
 
-    $configDir = Get-WingetBatchConfigDir
-    $configPath = Join-Path $configDir "config.json"
-    
-    if (-not (Test-Path $configDir)) {
-        New-Item -ItemType Directory -Path $configDir -Force | Out-Null
-    }
-
-    $config = @{}
-    if (Test-Path $configPath) {
-        try {
-            $config = Get-Content $configPath -Raw | ConvertFrom-Json
-            # Convert PSObject back to hashtable
-            $hash = @{}
-            $config.psobject.properties | ForEach-Object { $hash[$_.Name] = $_.Value }
-            $config = $hash
-        } catch {
-            Write-Warning "Existing config corrupt. Starting fresh."
-        }
-    }
+    $config = Get-WingetBatchConfigData
 
     if ($PSBoundParameters.ContainsKey('SearchMatchOption')) {
-        $config.SearchMatchOption = $SearchMatchOption
+        $config['SearchMatchOption'] = $SearchMatchOption
     }
 
-    $config | ConvertTo-Json -Depth 5 | Out-File $configPath -Encoding UTF8
+    Save-WingetBatchConfigData -Config $config
     Write-Host "WingetBatch configuration updated successfully." -ForegroundColor Green
 }

@@ -1,4 +1,4 @@
-function Install-WingetAll {
+﻿function Install-WingetAll {
     <#
     .SYNOPSIS
         Search for winget packages and install all results.
@@ -99,37 +99,17 @@ function Install-WingetAll {
             }
         }
 
-        # Check if PwshSpectreConsole is available
-        if (-not (Get-Module -ListAvailable -Name PwshSpectreConsole)) {
-            Write-Warning "PwshSpectreConsole module not found. Installing..."
-            try {
-                Install-Module -Name PwshSpectreConsole -Scope CurrentUser -Force -SkipPublisherCheck
-                Import-Module PwshSpectreConsole
-            }
-            catch {
-                Write-Error "Failed to install PwshSpectreConsole. Interactive selection will not be available."
-                Write-Error $_
-            }
+        # Check source index freshness
+        $dbAge = Get-WingetSourceIndexAge
+        if ($null -ne $dbAge -and $dbAge.TotalDays -gt 7) {
+            Write-Host ""
+            Write-Host " [!] Your Winget local index is $([Math]::Floor($dbAge.TotalDays)) days old." -ForegroundColor Yellow
+            Write-Host "     Searches may return stale results." -ForegroundColor Gray
+            Write-Host "     Recommendation: Run '" -ForegroundColor Gray -NoNewline
+            Write-Host "winget source update" -ForegroundColor White -NoNewline
+            Write-Host "' to refresh it." -ForegroundColor Gray
+            Write-Host ""
         }
-        else {
-            Import-Module PwshSpectreConsole -ErrorAction SilentlyContinue
-        }
-
-        # Check SQLite Index Health
-        $wingetDir = "$env:LOCALAPPDATA\Packages\Microsoft.DesktopAppInstaller_8wekyb3d8bbwe\LocalState\Microsoft.Winget.Source_8wekyb3d8bbwe\winget"
-        if (Test-Path "$wingetDir\source.db") {
-            $dbAge = (Get-Date) - (Get-Item "$wingetDir\source.db").LastWriteTime
-            if ($dbAge.TotalDays -gt 7) {
-                Write-Host ""
-                Write-Host " [!] Your Winget local index cache is outdated ($([Math]::Floor($dbAge.TotalDays)) days old) or fragmented." -ForegroundColor Yellow
-                Write-Host "     This can severely degrade search performance and return stale results." -ForegroundColor Gray
-                Write-Host "     Recommendation: Run '" -ForegroundColor Gray -NoNewline
-                Write-Host "winget source update --force" -ForegroundColor White -NoNewline
-                Write-Host "' to rebuild it." -ForegroundColor Gray
-                Write-Host ""
-            }
-        }
-
         # Determine MatchOption: Param overrides Config overrides Default
         $matchOptionEnum = "ContainsCaseInsensitive"
         if ($MatchOption) {
@@ -174,7 +154,8 @@ function Install-WingetAll {
                 Write-Host $i -ForegroundColor Yellow
 
                 try {
-                    $comArgs = @{ Id = $i; Count = $LimitResult; ErrorAction = 'Stop' }
+                    # -Id means this exact package, not every ID containing it (VideoLAN.VLC must not pull in VideoLAN.VLC.Nightly)
+                    $comArgs = @{ Id = $i; MatchOption = 'EqualsCaseInsensitive'; Count = $LimitResult; ErrorAction = 'Stop' }
                     if ($Source) { $comArgs.Source = $Source }
                     
                     $comResults = Microsoft.WinGet.Client\Find-WinGetPackage @comArgs
@@ -287,7 +268,7 @@ function Install-WingetAll {
         }
 
         if ($foundPackages.Count -eq 0) {
-            Write-Warning "No packages found matching '$($SearchTerms -join ", ")'"
+            Write-Warning "No packages found matching '$(@($Query) + @($Id) -join ", ")'"
             return
         }
 
@@ -430,7 +411,7 @@ function Install-WingetAll {
             }
         }
 
-        Write-Host "`n" + ("=" * 60) -ForegroundColor Cyan
+        Write-Host ("`n" + ("=" * 60)) -ForegroundColor Cyan
         Write-Host "Starting Installation Process" -ForegroundColor Cyan
         Write-Host ("=" * 60) -ForegroundColor Cyan
 
@@ -514,7 +495,7 @@ function Install-WingetAll {
                     $spectreList.Add([PSCustomObject]$obj)
                 }
 
-                $spectreList | Format-SpectreTable | Out-Host
+                $spectreList | Format-SpectreTable -AllowMarkup | Out-Host
             }
             else {
                 Write-Host "`nPackage Installation Summary ($($summaryList.Count) packages):" -ForegroundColor Cyan
@@ -540,98 +521,65 @@ function Install-WingetAll {
         }
 
         # Execute installations with progress tracking
-        $totalToInstall = $uniquePackagesToInstall.Count
+        $totalToInstall = @($uniquePackagesToInstall).Count
         $currentIdx = 0
+        $rebootNeeded = $false
+        $failures = [System.Collections.Generic.List[PSCustomObject]]::new()
 
-        if (Get-Module -Name PwshSpectreConsole) {
-            # Rich Spectre progress display
-            $uniquePackagesToInstall | ForEach-Object {
-                $packageId = $_
-                $currentIdx++
-                $pkgInfo = $pkgMap[$packageId]
-                $pkgName = if ($pkgInfo) { $pkgInfo.Name } else { $packageId }
-
-                Write-Host "`n>>> [$currentIdx/$totalToInstall] Installing: " -ForegroundColor Magenta -NoNewline
-                Write-Host "$pkgName ($packageId)" -ForegroundColor White
-
-                try {
-                    $installParams = @{
-                        Id = $packageId
-                        ErrorAction = 'Stop'
-                    }
-                    if ($PSBoundParameters.ContainsKey('Mode')) { $installParams['Mode'] = $Mode }
-                    if ($PSBoundParameters.ContainsKey('Scope')) { $installParams['Scope'] = $Scope }
-                    if ($PSBoundParameters.ContainsKey('Architecture')) { $installParams['Architecture'] = $Architecture }
-                    if ($PSBoundParameters.ContainsKey('Override')) { $installParams['Override'] = $Override }
-                    if ($PSBoundParameters.ContainsKey('Location')) { $installParams['Location'] = $Location }
-                    if ($Force) { $installParams['Force'] = $true }
-                    if ($SkipDependencies) { $installParams['SkipDependencies'] = $true }
-                    if ($AllowHashMismatch) { $installParams['AllowHashMismatch'] = $true }
-
-                    Microsoft.WinGet.Client\Install-WinGetPackage @installParams | Out-Null
-                    Write-Host "    [OK] " -ForegroundColor Green -NoNewline
-                    Write-Host "Successfully installed $packageId" -ForegroundColor White
-                    $successCount++
-                }
-                catch {
-                    Write-Host "    [FAIL] " -ForegroundColor Red -NoNewline
-                    Write-Host "$packageId - $_" -ForegroundColor Red
-                    $failCount++
-                }
-            }
+        $installOptions = @{
+            Mode = $Mode; Scope = $Scope; Architecture = $Architecture
+            Override = $Override; Location = $Location
+            Force = [bool]$Force; SkipDependencies = [bool]$SkipDependencies; AllowHashMismatch = [bool]$AllowHashMismatch
         }
-        else {
-            # Fallback: standard output
-            foreach ($packageId in $uniquePackagesToInstall) {
-                $currentIdx++
-                $pkgInfo = $pkgMap[$packageId]
-                $pkgName = if ($pkgInfo) { $pkgInfo.Name } else { $packageId }
-                $pkgVersion = if ($pkgInfo -and $pkgInfo.Version -ne "Unknown") { "v$($pkgInfo.Version)" } else { "" }
-                $pkgSource = if ($pkgInfo -and $pkgInfo.Source -ne "Unknown") { $pkgInfo.Source } else { "" }
 
-                Write-Host "`n>>> [$currentIdx/$totalToInstall] Installing: " -ForegroundColor Magenta -NoNewline
-                Write-Host "$pkgName ($packageId)" -ForegroundColor White -NoNewline
-                if ($pkgVersion) { Write-Host " $pkgVersion" -ForegroundColor Green -NoNewline }
-                if ($pkgSource) {
-                    $sColor = if ($pkgSource -match 'msstore') { "Magenta" } else { "Cyan" }
-                    Write-Host " from $pkgSource" -ForegroundColor $sColor
-                } else { Write-Host "" }
+        if ($totalToInstall -gt 0) { Invoke-WingetAutoSnapshot -Reason 'Install-WingetAll' }
 
-                try {
-                    $installParams = @{
-                        Id = $packageId
-                        ErrorAction = 'Stop'
-                    }
-                    if ($PSBoundParameters.ContainsKey('Mode')) { $installParams['Mode'] = $Mode }
-                    if ($PSBoundParameters.ContainsKey('Scope')) { $installParams['Scope'] = $Scope }
-                    if ($PSBoundParameters.ContainsKey('Architecture')) { $installParams['Architecture'] = $Architecture }
-                    if ($PSBoundParameters.ContainsKey('Override')) { $installParams['Override'] = $Override }
-                    if ($PSBoundParameters.ContainsKey('Location')) { $installParams['Location'] = $Location }
-                    if ($Force) { $installParams['Force'] = $true }
-                    if ($SkipDependencies) { $installParams['SkipDependencies'] = $true }
-                    if ($AllowHashMismatch) { $installParams['AllowHashMismatch'] = $true }
+        foreach ($packageId in $uniquePackagesToInstall) {
+            $currentIdx++
+            $pkgInfo = $pkgMap[$packageId]
+            $pkgName = if ($pkgInfo) { $pkgInfo.Name } else { $packageId }
+            $pkgVersion = if ($pkgInfo -and $pkgInfo.Version -ne "Unknown") { "v$($pkgInfo.Version)" } else { "" }
+            $pkgSource = if ($pkgInfo -and $pkgInfo.Source -ne "Unknown") { $pkgInfo.Source } else { $Source }
 
-                    Microsoft.WinGet.Client\Install-WinGetPackage @installParams | Out-Null
-                    Write-Host "[OK] Successfully installed " -ForegroundColor Green -NoNewline
-                    Write-Host $packageId -ForegroundColor White
-                    $successCount++
-                }
-                catch {
-                    Write-Host "[FAIL] Failed to install " -ForegroundColor Red -NoNewline
-                    Write-Host $packageId -ForegroundColor White -NoNewline
-                    Write-Host " ($_)" -ForegroundColor Red
-                    $failCount++
-                }
+            Write-Host "`n>>> [$currentIdx/$totalToInstall] Installing: " -ForegroundColor Magenta -NoNewline
+            Write-Host "$pkgName ($packageId)" -ForegroundColor White -NoNewline
+            if ($pkgVersion) { Write-Host " $pkgVersion" -ForegroundColor Green -NoNewline }
+            if ($pkgSource) {
+                $sColor = if ($pkgSource -match 'msstore') { "Magenta" } else { "Cyan" }
+                Write-Host " from $pkgSource" -ForegroundColor $sColor
+            } else { Write-Host "" }
+
+            # Pin the source the package was found in so an ID that exists in both
+            # winget and msstore installs the one the user picked
+            $result = Invoke-WingetPackageAction -Action Install -Id $packageId -Source $pkgSource -Options $installOptions
+
+            if ($result.Succeeded) {
+                Write-Host "    [OK] " -ForegroundColor Green -NoNewline
+                Write-Host "Successfully installed $packageId" -ForegroundColor White
+                if ($result.RebootRequired) { $rebootNeeded = $true }
+                $successCount++
+            }
+            else {
+                Write-Host "    [FAIL] " -ForegroundColor Red -NoNewline
+                Write-Host "$packageId - $($result.Message)" -ForegroundColor Red
+                $failures.Add($result)
+                $failCount++
             }
         }
 
-        Write-Host "`n" + ("=" * 60) -ForegroundColor Green
+        Write-Host ("`n" + ("=" * 60)) -ForegroundColor Green
         Write-Host "Installation Complete" -ForegroundColor Green
         Write-Host ("=" * 60) -ForegroundColor Green
         Write-Host "Success: " -ForegroundColor Green -NoNewline
         Write-Host $successCount -ForegroundColor White -NoNewline
         Write-Host " | Failed: " -ForegroundColor Red -NoNewline
         Write-Host $failCount -ForegroundColor White
+        foreach ($f in $failures) {
+            Write-Host "  - $($f.Id): $($f.Message)" -ForegroundColor DarkGray
+        }
+        if ($rebootNeeded) {
+            Write-Host "A restart is required to finish at least one installation." -ForegroundColor Yellow
+        }
     }
 }
 

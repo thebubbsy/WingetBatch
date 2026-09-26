@@ -1,4 +1,4 @@
-function Start-WingetServer {
+﻿function Start-WingetServer {
     <#
     .SYNOPSIS
         Start a REST API server for remote winget package management.
@@ -73,18 +73,33 @@ function Start-WingetServer {
     # Ensure Pode is available
     if (-not (Get-Module -ListAvailable -Name Pode)) {
         Write-Host "  Installing Pode module (REST API framework)..." -ForegroundColor Cyan
-        Install-Module -Name Pode -Force -Scope CurrentUser -SkipPublisherCheck
+        Install-WingetBatchDependency -Name Pode
     }
     Import-Module Pode -Force
 
     # Generate or validate API key
     if ([string]::IsNullOrEmpty($ApiKey)) {
-        $ApiKey = -join ((65..90) + (97..122) + (48..57) | Get-Random -Count 32 | ForEach-Object { [char]$_ })
+        # Cryptographically random key (Get-Random is predictable)
+        $bytes = [System.Security.Cryptography.RandomNumberGenerator]::GetBytes(24)
+        $ApiKey = [Convert]::ToBase64String($bytes).Replace('+', 'A').Replace('/', 'B').TrimEnd('=')
         Write-Host "  Generated API Key: " -NoNewline -ForegroundColor DarkGray
         Write-Host $ApiKey -ForegroundColor Yellow
         Write-Host "  (Use header: X-API-Key: $ApiKey)" -ForegroundColor DarkGray
     }
     $disableAuth = ($ApiKey -eq 'none')
+    if ($Hostname -notin 'localhost', '127.0.0.1', '::1' -and -not $Https) {
+        Write-Warning "Listening on $Hostname over plain HTTP: the API key and all traffic can be read on the network. Use -Https."
+    }
+    if ($Hostname -notin 'localhost', '127.0.0.1', '::1' -and $disableAuth) {
+        Write-Warning "Authentication is disabled on a network-reachable address. Anyone who can reach port $Port can install or remove software."
+    }
+
+    # Shared across Pode's worker runspaces. $using: hands each runspace its own copy,
+    # so the table lives in process-wide AppDomain data instead.
+    $rateKey = "WingetBatch.RateTable.$Port"
+    [System.AppDomain]::CurrentDomain.SetData($rateKey, [hashtable]::Synchronized(@{}))
+    $moduleVersion = [string](Get-Module WingetBatch).Version
+    $serverStart = Get-Date
 
     # Config
     $configDir = Get-WingetBatchConfigDir
@@ -112,16 +127,27 @@ function Start-WingetServer {
         Start-Process $baseUrl
     }
 
-    # Start Pode server
+    # Start Pode server. The main block runs in this scope (plain variables work there);
+    # route and middleware scriptblocks run in worker runspaces and need $using:.
     Start-PodeServer -Threads 4 {
         # Listener
-        Add-PodeEndpoint -Address $using:Hostname -Port $using:Port -Protocol $(if ($using:Https) { 'Https' } else { 'Http' })
+        if ($Https) {
+            Add-PodeEndpoint -Address $Hostname -Port $Port -Protocol Https -SelfSigned
+        } else {
+            Add-PodeEndpoint -Address $Hostname -Port $Port -Protocol Http
+        }
+
+        # Handler errors go to ~/.wingetbatch/server_errors_*.log instead of vanishing into a 500
+        New-PodeLoggingMethod -File -Name 'server_errors' -Path $configDir | Enable-PodeErrorLogging
 
         # Middleware: API Key auth
-        if (-not $using:disableAuth) {
-            Add-PodeRouteMiddleware -Name 'ApiAuth' -ScriptBlock {
-                $apiKey = $WebEvent.Headers['X-API-Key']
-                if ($apiKey -ne $using:ApiKey) {
+        if (-not $disableAuth) {
+            Add-PodeMiddleware -Name 'ApiAuth' -ScriptBlock {
+                $apiKey = [string](Get-PodeHeader -Name 'X-API-Key')
+                # Constant-time comparison so response timing does not leak the key
+                $given = [System.Text.Encoding]::UTF8.GetBytes($apiKey)
+                $expected = [System.Text.Encoding]::UTF8.GetBytes([string]$using:ApiKey)
+                if (-not [System.Security.Cryptography.CryptographicOperations]::FixedTimeEquals($given, $expected)) {
                     Set-PodeResponseStatus -Code 401
                     Write-PodeJsonResponse -Value @{ error = "Unauthorized"; message = "Invalid or missing X-API-Key header" }
                     return $false
@@ -131,30 +157,37 @@ function Start-WingetServer {
         }
 
         # Middleware: Rate limiting
-        if ($using:MaxRequestsPerMinute -gt 0) {
-            Add-PodeRouteMiddleware -Name 'RateLimit' -ScriptBlock {
+        if ($MaxRequestsPerMinute -gt 0) {
+            Add-PodeMiddleware -Name 'RateLimit' -ScriptBlock {
                 $clientIp = $WebEvent.Request.RemoteEndPoint.Address.IPAddressToString
                 $key = "rate_$clientIp"
                 $now = Get-Date
                 $window = $now.AddMinutes(-1)
 
-                if (-not $script:RateTable) { $script:RateTable = @{} }
-                if (-not $script:RateTable.ContainsKey($key)) { $script:RateTable[$key] = [System.Collections.Generic.List[datetime]]::new() }
-
-                $script:RateTable[$key].RemoveAll({ param($t) $t -lt $window })
-                if ($script:RateTable[$key].Count -ge $using:MaxRequestsPerMinute) {
-                    Set-PodeResponseStatus -Code 429
-                    Write-PodeJsonResponse -Value @{ error = "Rate limit exceeded"; retry_after_seconds = 60 }
-                    return $false
+                $table = [System.AppDomain]::CurrentDomain.GetData($using:rateKey)
+                [System.Threading.Monitor]::Enter($table.SyncRoot)
+                try {
+                    if (-not $table.ContainsKey($key)) { $table[$key] = [System.Collections.Generic.List[datetime]]::new() }
+                    $hits = $table[$key]
+                    [void]$hits.RemoveAll([Predicate[datetime]] { param($t) $t -lt $window })
+                    if ($hits.Count -ge $using:MaxRequestsPerMinute) {
+                        Set-PodeResponseStatus -Code 429
+                        Write-PodeJsonResponse -Value @{ error = "Rate limit exceeded"; retry_after_seconds = 60 }
+                        return $false
+                    }
+                    $hits.Add($now)
+                    Add-PodeHeader -Name 'X-RateLimit-Remaining' -Value ([string]($using:MaxRequestsPerMinute - $hits.Count))
                 }
-                $script:RateTable[$key].Add($now)
+                finally {
+                    [System.Threading.Monitor]::Exit($table.SyncRoot)
+                }
                 return $true
             }
         }
 
         # Middleware: Request logging
-        if ($using:logFile) {
-            Add-PodeRouteMiddleware -Name 'RequestLog' -ScriptBlock {
+        if ($logFile) {
+            Add-PodeMiddleware -Name 'RequestLog' -ScriptBlock {
                 $entry = "$(Get-Date -Format 'o') | $($WebEvent.Request.HttpMethod) $($WebEvent.Request.Url.PathAndQuery) | $($WebEvent.Request.RemoteEndPoint.Address)"
                 Add-Content -Path $using:logFile -Value $entry
                 return $true
@@ -167,7 +200,7 @@ function Start-WingetServer {
         Add-PodeRoute -Method Get -Path '/' -ScriptBlock {
             Write-PodeJsonResponse -Value @{
                 name = "WingetBatch API"
-                version = "2.8.0"
+                version = $using:moduleVersion
                 description = "REST API for remote winget package management"
                 endpoints = @(
                     @{ method = "GET"; path = "/api/health"; description = "Server health check" }
@@ -193,32 +226,32 @@ function Start-WingetServer {
             $comOk = $null -ne (Get-Module -ListAvailable Microsoft.WinGet.Client)
             Write-PodeJsonResponse -Value @{
                 status = "healthy"
-                timestamp = (Get-Date -ToString 'o')
+                timestamp = (Get-Date).ToString('o')
                 hostname = $env:COMPUTERNAME
                 winget_cli = $wingetOk
                 winget_com = $comOk
-                module_version = (Get-Module WingetBatch).Version.ToString()
-                uptime_seconds = ((Get-Date) - $PodeServer.StartTime).TotalSeconds
+                module_version = $using:moduleVersion
+                uptime_seconds = [int]((Get-Date) - $using:serverStart).TotalSeconds
             }
         }
 
         # GET /api/packages
         Add-PodeRoute -Method Get -Path '/api/packages' -ScriptBlock {
-            $source = $QueryData.source
+            $source = $WebEvent.Query['source']
             $packages = Microsoft.WinGet.Client\Get-WinGetPackage
             if ($source) { $packages = $packages | Where-Object { $_.Source -eq $source } }
             Write-PodeJsonResponse -Value @{
                 count = $packages.Count
                 packages = @($packages | ForEach-Object {
-                    @{ id = $_.Id; name = $_.Name; version = $_.InstalledVersion; source = $_.Source; available = $_.AvailableVersions }
+                    @{ id = $_.Id; name = $_.Name; version = $_.InstalledVersion; source = $_.Source; update_available = [bool]$_.IsUpdateAvailable; available = @($_.AvailableVersions)[0] }
                 })
             }
         }
 
         # GET /api/packages/:id
         Add-PodeRoute -Method Get -Path '/api/packages/:id' -ScriptBlock {
-            $id = $RouteParameters.id
-            $pkg = Microsoft.WinGet.Client\Get-WinGetPackage -Id $id
+            $id = $WebEvent.Parameters['id']
+            $pkg = Microsoft.WinGet.Client\Get-WinGetPackage -Id $id -MatchOption EqualsCaseInsensitive -ErrorAction SilentlyContinue | Select-Object -First 1
             if (-not $pkg) {
                 Set-PodeResponseStatus -Code 404
                 Write-PodeJsonResponse -Value @{ error = "Not found"; message = "Package '$id' is not installed" }
@@ -227,24 +260,24 @@ function Start-WingetServer {
             Write-PodeJsonResponse -Value @{
                 id = $pkg.Id; name = $pkg.Name; installed_version = $pkg.InstalledVersion
                 available_versions = $pkg.AvailableVersions; source = $pkg.Source
-                update_available = ($pkg.AvailableVersions -and $pkg.AvailableVersions[0] -ne $pkg.InstalledVersion)
+                update_available = [bool]$pkg.IsUpdateAvailable
             }
         }
 
         # GET /api/search
         Add-PodeRoute -Method Get -Path '/api/search' -ScriptBlock {
-            $query = $QueryData.q
+            $query = $WebEvent.Query['q']
             if (-not $query) {
                 Set-PodeResponseStatus -Code 400
                 Write-PodeJsonResponse -Value @{ error = "Bad request"; message = "Query parameter 'q' is required" }
                 return
             }
-            $limit = [int]($QueryData.limit ?? 25)
+            $limit = if ($WebEvent.Query['limit']) { [int]$WebEvent.Query['limit'] } else { 25 }
             $results = Microsoft.WinGet.Client\Find-WinGetPackage -Query $query -Count $limit
             Write-PodeJsonResponse -Value @{
                 query = $query; count = $results.Count
                 results = @($results | ForEach-Object {
-                    @{ id = $_.Id; name = $_.Name; version = $_.Version; source = $_.Source; publisher = $_.Publisher }
+                    @{ id = $_.Id; name = $_.Name; version = $_.Version; source = $_.Source }
                 })
             }
         }
@@ -252,7 +285,7 @@ function Start-WingetServer {
         # POST /api/packages/install
         Add-PodeRoute -Method Post -Path '/api/packages/install' -ScriptBlock {
             $body = $WebEvent.Data
-            $ids = $body.packages ?? @($body.id)
+            $ids = @(if ($body.packages) { $body.packages } elseif ($body.id) { $body.id })
             if (-not $ids -or $ids.Count -eq 0) {
                 Set-PodeResponseStatus -Code 400
                 Write-PodeJsonResponse -Value @{ error = "Bad request"; message = "Provide 'packages' array or 'id' field" }
@@ -261,19 +294,20 @@ function Start-WingetServer {
             $results = @()
             foreach ($id in $ids) {
                 try {
-                    Microsoft.WinGet.Client\Install-WinGetPackage -Id $id -Mode Silent | Out-Null
-                    $results += @{ id = $id; status = "installed" }
+                    $r = @(Microsoft.WinGet.Client\Install-WinGetPackage -Id $id -MatchOption EqualsCaseInsensitive -Mode Silent -ErrorAction Stop)[-1]
+                    if ([string]$r.Status -eq 'Ok') { $results += @{ id = $id; status = "installed"; reboot_required = [bool]$r.RebootRequired } }
+                    else { $results += @{ id = $id; status = "failed"; error = [string]$r.Status } }
                 } catch {
                     $results += @{ id = $id; status = "failed"; error = $_.Exception.Message }
                 }
             }
-            Write-PodeJsonResponse -Value @{ installed = ($results | Where-Object status -eq 'installed').Count; failed = ($results | Where-Object status -eq 'failed').Count; results = $results }
+            Write-PodeJsonResponse -Value @{ installed = @($results | Where-Object { $_.status -eq 'installed' }).Count; failed = @($results | Where-Object { $_.status -eq 'failed' }).Count; results = $results }
         }
 
         # POST /api/packages/uninstall
         Add-PodeRoute -Method Post -Path '/api/packages/uninstall' -ScriptBlock {
             $body = $WebEvent.Data
-            $ids = $body.packages ?? @($body.id)
+            $ids = @(if ($body.packages) { $body.packages } elseif ($body.id) { $body.id })
             if (-not $ids -or $ids.Count -eq 0) {
                 Set-PodeResponseStatus -Code 400
                 Write-PodeJsonResponse -Value @{ error = "Bad request"; message = "Provide 'packages' array or 'id' field" }
@@ -282,20 +316,21 @@ function Start-WingetServer {
             $results = @()
             foreach ($id in $ids) {
                 try {
-                    Microsoft.WinGet.Client\Uninstall-WinGetPackage -Id $id -Mode Silent | Out-Null
-                    $results += @{ id = $id; status = "uninstalled" }
+                    $r = @(Microsoft.WinGet.Client\Uninstall-WinGetPackage -Id $id -MatchOption EqualsCaseInsensitive -Mode Silent -ErrorAction Stop)[-1]
+                    if ([string]$r.Status -eq 'Ok') { $results += @{ id = $id; status = "uninstalled" } }
+                    else { $results += @{ id = $id; status = "failed"; error = [string]$r.Status } }
                 } catch {
                     $results += @{ id = $id; status = "failed"; error = $_.Exception.Message }
                 }
             }
-            Write-PodeJsonResponse -Value @{ uninstalled = ($results | Where-Object status -eq 'uninstalled').Count; failed = ($results | Where-Object status -eq 'failed').Count; results = $results }
+            Write-PodeJsonResponse -Value @{ uninstalled = @($results | Where-Object { $_.status -eq 'uninstalled' }).Count; failed = @($results | Where-Object { $_.status -eq 'failed' }).Count; results = $results }
         }
 
         # GET /api/updates
         Add-PodeRoute -Method Get -Path '/api/updates' -ScriptBlock {
-            $updates = Get-WingetUpdates
+            $updates = @(Get-WingetUpdates -ListOnly -Force)
             Write-PodeJsonResponse -Value @{
-                count = ($updates ?? @()).Count
+                count = $updates.Count
                 updates = @($updates | ForEach-Object {
                     @{ id = $_.Id; name = $_.Name; installed = $_.InstalledVersion; available = $_.AvailableVersion; source = $_.Source }
                 })
@@ -306,19 +341,22 @@ function Start-WingetServer {
         Add-PodeRoute -Method Post -Path '/api/updates/apply' -ScriptBlock {
             $body = $WebEvent.Data
             $ids = $body.packages  # Optional: specific packages, else all
-            $updates = Get-WingetUpdates
-            if ($ids) { $updates = $updates | Where-Object { $_.Id -in $ids } }
+            $updates = @(Get-WingetUpdates -ListOnly -Force)
+            if ($ids) { $updates = @($updates | Where-Object { $_.Id -in $ids }) }
 
             $results = @()
             foreach ($pkg in $updates) {
                 try {
-                    Microsoft.WinGet.Client\Update-WinGetPackage -Id $pkg.Id -Mode Silent | Out-Null
-                    $results += @{ id = $pkg.Id; status = "updated"; version = $pkg.AvailableVersion }
+                    $upd = @{ Id = $pkg.Id; MatchOption = 'EqualsCaseInsensitive'; Mode = 'Silent'; ErrorAction = 'Stop' }
+                    if ($pkg.Source) { $upd['Source'] = $pkg.Source }
+                    $r = @(Microsoft.WinGet.Client\Update-WinGetPackage @upd)[-1]
+                    if ([string]$r.Status -eq 'Ok') { $results += @{ id = $pkg.Id; status = "updated"; version = $pkg.AvailableVersion; reboot_required = [bool]$r.RebootRequired } }
+                    else { $results += @{ id = $pkg.Id; status = "failed"; error = [string]$r.Status } }
                 } catch {
                     $results += @{ id = $pkg.Id; status = "failed"; error = $_.Exception.Message }
                 }
             }
-            Write-PodeJsonResponse -Value @{ updated = ($results | Where-Object status -eq 'updated').Count; failed = ($results | Where-Object status -eq 'failed').Count; results = $results }
+            Write-PodeJsonResponse -Value @{ updated = @($results | Where-Object { $_.status -eq 'updated' }).Count; failed = @($results | Where-Object { $_.status -eq 'failed' }).Count; results = $results }
         }
 
         # GET /api/state
@@ -326,7 +364,7 @@ function Start-WingetServer {
             $packages = Microsoft.WinGet.Client\Get-WinGetPackage
             Write-PodeJsonResponse -Value @{
                 hostname = $env:COMPUTERNAME
-                timestamp = (Get-Date -ToString 'o')
+                timestamp = (Get-Date).ToString('o')
                 total_packages = $packages.Count
                 by_source = ($packages | Group-Object Source | ForEach-Object { @{ source = $_.Name; count = $_.Count } })
                 packages = @($packages | ForEach-Object { @{ id = $_.Id; name = $_.Name; version = $_.InstalledVersion } })
@@ -336,13 +374,14 @@ function Start-WingetServer {
         # POST /api/state/export
         Add-PodeRoute -Method Post -Path '/api/state/export' -ScriptBlock {
             $body = $WebEvent.Data
-            $format = $body.format ?? 'json'
-            $tempPath = Join-Path $env:TEMP "wingetbatch_state_$(Get-Random).$format"
+            $format = if ($body.format -eq 'yaml') { 'YAML' } else { 'JSON' }
+            $tempPath = Join-Path $env:TEMP "wingetbatch_state_$([guid]::NewGuid().ToString('N')).$($format.ToLower())"
             try {
-                Get-WingetMachineState -Export -Path $tempPath -Format $format
+                Get-WingetMachineState -Export -Path $tempPath -Format $format 6>$null
                 $content = Get-Content $tempPath -Raw
                 Remove-Item $tempPath -Force -ErrorAction SilentlyContinue
-                Write-PodeJsonResponse -Value @{ status = "exported"; format = $format; content = ($content | ConvertFrom-Json) }
+                $parsed = if ($format -eq 'JSON') { $content | ConvertFrom-Json } else { $content }
+                Write-PodeJsonResponse -Value @{ status = "exported"; format = $format; content = $parsed }
             } catch {
                 Set-PodeResponseStatus -Code 500
                 Write-PodeJsonResponse -Value @{ error = "Export failed"; message = $_.Exception.Message }
@@ -351,23 +390,22 @@ function Start-WingetServer {
 
         # GET /api/history
         Add-PodeRoute -Method Get -Path '/api/history' -ScriptBlock {
-            $days = [int]($QueryData.days ?? 30)
-            $history = Get-WingetHistory -Days $days
+            $days = if ($WebEvent.Query['days']) { [int]$WebEvent.Query['days'] } else { 30 }
+            $history = @(Get-WingetHistory -Days $days -PassThru)
             Write-PodeJsonResponse -Value @{
                 days = $days; count = $history.Count
                 entries = @($history | ForEach-Object {
-                    @{ name = $_.Name; publisher = $_.Publisher; version = $_.Version; date = $_.InstallDate; action = $_.Action }
+                    @{ name = $_.Name; publisher = $_.Publisher; version = $_.Version; date = $_.Date.ToString('yyyy-MM-dd'); action = $_.Action; scope = $_.Scope }
                 })
             }
         }
 
         # GET /api/stats
         Add-PodeRoute -Method Get -Path '/api/stats' -ScriptBlock {
-            $packages = Microsoft.WinGet.Client\Get-WinGetPackage
-            $updates = Get-WingetUpdates
+            $packages = @(Microsoft.WinGet.Client\Get-WinGetPackage)
             Write-PodeJsonResponse -Value @{
                 total_installed = $packages.Count
-                updates_available = ($updates ?? @()).Count
+                updates_available = @($packages | Where-Object { $_.IsUpdateAvailable }).Count
                 sources = @($packages | Group-Object Source | ForEach-Object { @{ name = $_.Name; count = $_.Count } })
                 top_publishers = @($packages | Group-Object { ($_.Id -split '\.')[0] } | Sort-Object Count -Descending | Select-Object -First 10 | ForEach-Object { @{ publisher = $_.Name; count = $_.Count } })
             }

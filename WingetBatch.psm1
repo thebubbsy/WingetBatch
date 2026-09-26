@@ -26,15 +26,3 @@ try {
 } catch {
     # Non-critical: completers are a nice-to-have
 }
-
-# Module import banner (only in interactive sessions)
-if ([Environment]::UserInteractive -and -not [Console]::IsOutputRedirected) {
-    $moduleVersion = (Get-Module -Name WingetBatch -ErrorAction SilentlyContinue).Version
-    if (-not $moduleVersion) {
-        $manifestPath = Join-Path $PSScriptRoot "WingetBatch.psd1"
-        if (Test-Path $manifestPath) {
-            $manifest = Import-PowerShellDataFile $manifestPath -ErrorAction SilentlyContinue
-            $moduleVersion = $manifest.ModuleVersion
-        }
-    }
-}

@@ -1,4 +1,4 @@
-function Watch-WingetPackages {
+﻿function Watch-WingetPackages {
     <#
     .SYNOPSIS
         Live terminal dashboard for monitoring winget package state.
@@ -67,7 +67,7 @@ function Watch-WingetPackages {
 
             # Winget version
             try {
-                $data['WingetVersion'] = (Get-WinGetVersion -ErrorAction Stop).ToString()
+                $data['WingetVersion'] = (Microsoft.WinGet.Client\Get-WinGetVersion -ErrorAction Stop).ToString()
                 $data['WingetHealthy'] = $true
             } catch {
                 $data['WingetVersion'] = 'N/A'
@@ -75,7 +75,7 @@ function Watch-WingetPackages {
             }
 
             # Installed packages
-            $installed = Get-WinGetPackage -ErrorAction SilentlyContinue
+            $installed = @(Microsoft.WinGet.Client\Get-WinGetPackage -ErrorAction SilentlyContinue)
             $data['TotalPackages'] = if ($installed) { $installed.Count } else { 0 }
 
             # Updates available
@@ -84,7 +84,7 @@ function Watch-WingetPackages {
                 $updates = @($installed | Where-Object { $_.IsUpdateAvailable })
             }
             $data['UpdatesAvailable'] = $updates.Count
-            $data['UpdateList'] = $updates | Select-Object -First 10 Id, Name, InstalledVersion, AvailableVersion
+            $data['UpdateList'] = $updates | Select-Object -First 10 Id, Name, InstalledVersion, @{ Name = 'AvailableVersion'; Expression = { @($_.AvailableVersions)[0] } }
 
             # Source breakdown
             $sourceGroups = @{}
@@ -120,16 +120,14 @@ function Watch-WingetPackages {
             $data['RecentInstalls'] = $recentCount
 
             # Winget source index age
-            $wingetDir = "$env:LOCALAPPDATA\Packages\Microsoft.DesktopAppInstaller_8wekyb3d8bbwe\LocalState\Microsoft.Winget.Source_8wekyb3d8bbwe\winget"
-            if (Test-Path "$wingetDir\source.db") {
-                $dbAge = (Get-Date) - (Get-Item "$wingetDir\source.db").LastWriteTime
-                $data['IndexAge'] = "$([Math]::Floor($dbAge.TotalHours))h ago"
-                $data['IndexStale'] = $dbAge.TotalDays -gt 7
+            $indexAge = Get-WingetSourceIndexAge
+            if ($null -ne $indexAge) {
+                $data['IndexAge'] = if ($indexAge.TotalHours -lt 48) { "$([Math]::Floor($indexAge.TotalHours))h ago" } else { "$([Math]::Floor($indexAge.TotalDays))d ago" }
+                $data['IndexStale'] = $indexAge.TotalDays -gt 7
             } else {
                 $data['IndexAge'] = 'Unknown'
-                $data['IndexStale'] = $false
+                $data['IndexStale'] = $null
             }
-
             # GitHub token status
             $data['GitHubAuth'] = $false
             try {
@@ -144,156 +142,79 @@ function Watch-WingetPackages {
         function Show-Dashboard {
             param($data)
 
-            # Clear screen
-            [Console]::Clear()
+            # Clear screen between refreshes (not possible when output is redirected, e.g. -Once in CI)
+            if (-not $Once -and -not [Console]::IsOutputRedirected) {
+                try { [Console]::Clear() } catch { }
+            }
 
-            $border = '═' * 62
-            $thinBorder = '─' * 62
+            $width = 62
+            $border = '═' * $width
 
-            Write-Host ""
-            Write-Host "  ╔$border╗" -ForegroundColor Cyan
-            Write-Host "  ║" -ForegroundColor Cyan -NoNewline
-            Write-Host "  WINGETBATCH LIVE DASHBOARD" -ForegroundColor White -NoNewline
-            $padRight = 62 - 30
-            Write-Host (" " * $padRight) -NoNewline
-            Write-Host "║" -ForegroundColor Cyan
-            Write-Host "  ║" -ForegroundColor Cyan -NoNewline
-            $timeStr = "  Last refresh: $($data.Timestamp.ToString('HH:mm:ss'))"
-            Write-Host $timeStr -ForegroundColor DarkGray -NoNewline
-            $padRight2 = 62 - $timeStr.Length
-            Write-Host (" " * $padRight2) -NoNewline
-            Write-Host "║" -ForegroundColor Cyan
-            Write-Host "  ╠$border╣" -ForegroundColor Cyan
-
-            # System Health Row
-            Write-Host "  ║" -ForegroundColor Cyan -NoNewline
-            Write-Host "  SYSTEM HEALTH" -ForegroundColor Yellow -NoNewline
-            Write-Host (" " * (62 - 15)) -NoNewline
-            Write-Host "║" -ForegroundColor Cyan
-
-            $wingetStatus = if ($data.WingetHealthy) { "[OK]" } else { "[!!]" }
-            $wingetColor = if ($data.WingetHealthy) { 'Green' } else { 'Red' }
-            Write-Host "  ║" -ForegroundColor Cyan -NoNewline
-            Write-Host "    Winget Engine:    " -ForegroundColor Gray -NoNewline
-            Write-Host "$wingetStatus v$($data.WingetVersion)" -ForegroundColor $wingetColor -NoNewline
-            Write-Host (" " * (62 - 23 - $wingetStatus.Length - $data.WingetVersion.ToString().Length - 2)) -NoNewline
-            Write-Host "║" -ForegroundColor Cyan
-
-            $indexStatus = if ($data.IndexStale) { "[STALE]" } else { "[FRESH]" }
-            $indexColor = if ($data.IndexStale) { 'Yellow' } else { 'Green' }
-            Write-Host "  ║" -ForegroundColor Cyan -NoNewline
-            Write-Host "    Source Index:     " -ForegroundColor Gray -NoNewline
-            Write-Host "$indexStatus ($($data.IndexAge))" -ForegroundColor $indexColor -NoNewline
-            $idxLen = 23 + $indexStatus.Length + $data.IndexAge.Length + 3
-            Write-Host (" " * [Math]::Max(0, 62 - $idxLen)) -NoNewline
-            Write-Host "║" -ForegroundColor Cyan
-
-            $authStatus = if ($data.GitHubAuth) { "[AUTHENTICATED]" } else { "[ANONYMOUS]" }
-            $authColor = if ($data.GitHubAuth) { 'Green' } else { 'DarkGray' }
-            Write-Host "  ║" -ForegroundColor Cyan -NoNewline
-            Write-Host "    GitHub API:       " -ForegroundColor Gray -NoNewline
-            Write-Host $authStatus -ForegroundColor $authColor -NoNewline
-            $authLen = 23 + $authStatus.Length
-            Write-Host (" " * [Math]::Max(0, 62 - $authLen)) -NoNewline
-            Write-Host "║" -ForegroundColor Cyan
-
-            Write-Host "  ║" -ForegroundColor Cyan -NoNewline
-            Write-Host (" " * 62) -NoNewline
-            Write-Host "║" -ForegroundColor Cyan
-
-            # Package Stats Row
-            Write-Host "  ║" -ForegroundColor Cyan -NoNewline
-            Write-Host "  PACKAGE STATISTICS" -ForegroundColor Yellow -NoNewline
-            Write-Host (" " * (62 - 20)) -NoNewline
-            Write-Host "║" -ForegroundColor Cyan
-
-            Write-Host "  ║" -ForegroundColor Cyan -NoNewline
-            Write-Host "    Total Installed:  " -ForegroundColor Gray -NoNewline
-            Write-Host "$($data.TotalPackages)" -ForegroundColor White -NoNewline
-            $totalLen = 23 + $data.TotalPackages.ToString().Length
-            Write-Host (" " * [Math]::Max(0, 62 - $totalLen)) -NoNewline
-            Write-Host "║" -ForegroundColor Cyan
-
-            $updateColor = if ($data.UpdatesAvailable -gt 0) { 'Yellow' } else { 'Green' }
-            Write-Host "  ║" -ForegroundColor Cyan -NoNewline
-            Write-Host "    Updates Pending:  " -ForegroundColor Gray -NoNewline
-            Write-Host "$($data.UpdatesAvailable)" -ForegroundColor $updateColor -NoNewline
-            $updLen = 23 + $data.UpdatesAvailable.ToString().Length
-            Write-Host (" " * [Math]::Max(0, 62 - $updLen)) -NoNewline
-            Write-Host "║" -ForegroundColor Cyan
-
-            Write-Host "  ║" -ForegroundColor Cyan -NoNewline
-            Write-Host "    Recent (7 days):  " -ForegroundColor Gray -NoNewline
-            Write-Host "$($data.RecentInstalls)" -ForegroundColor White -NoNewline
-            $recLen = 23 + $data.RecentInstalls.ToString().Length
-            Write-Host (" " * [Math]::Max(0, 62 - $recLen)) -NoNewline
-            Write-Host "║" -ForegroundColor Cyan
-
-            Write-Host "  ║" -ForegroundColor Cyan -NoNewline
-            Write-Host (" " * 62) -NoNewline
-            Write-Host "║" -ForegroundColor Cyan
-
-            # Source Breakdown
-            Write-Host "  ║" -ForegroundColor Cyan -NoNewline
-            Write-Host "  SOURCE BREAKDOWN" -ForegroundColor Yellow -NoNewline
-            Write-Host (" " * (62 - 18)) -NoNewline
-            Write-Host "║" -ForegroundColor Cyan
-
-            foreach ($src in $data.Sources.Keys | Sort-Object) {
-                $count = $data.Sources[$src]
-                $srcColor = if ($src -eq 'msstore') { 'Magenta' } elseif ($src -eq 'winget') { 'Cyan' } else { 'Gray' }
-                $line = "    $($src): $($count)"
+            # One boxed row made of colored segments, padded to the box width
+            function Write-Row {
+                param([object[]]$Parts = @())
                 Write-Host "  ║" -ForegroundColor Cyan -NoNewline
-                Write-Host "    " -NoNewline
-                Write-Host "$src" -ForegroundColor $srcColor -NoNewline
-                Write-Host ": $count" -ForegroundColor White -NoNewline
-                Write-Host (" " * [Math]::Max(0, 62 - $line.Length - 4)) -NoNewline
+                $len = 0
+                for ($i = 0; $i -lt $Parts.Count; $i += 2) {
+                    $text = [string]$Parts[$i]
+                    $room = $width - $len
+                    if ($room -le 0) { break }
+                    if ($text.Length -gt $room) { $text = $text.Substring(0, [Math]::Max(0, $room - 3)) + '...' }
+                    Write-Host $text -ForegroundColor $Parts[$i + 1] -NoNewline
+                    $len += $text.Length
+                }
+                Write-Host (' ' * [Math]::Max(0, $width - $len)) -NoNewline
                 Write-Host "║" -ForegroundColor Cyan
             }
 
-            Write-Host "  ║" -ForegroundColor Cyan -NoNewline
-            Write-Host (" " * 62) -NoNewline
-            Write-Host "║" -ForegroundColor Cyan
+            Write-Host ""
+            Write-Host "  ╔$border╗" -ForegroundColor Cyan
+            Write-Row @('  WINGETBATCH LIVE DASHBOARD', 'White')
+            Write-Row @("  Last refresh: $($data.Timestamp.ToString('HH:mm:ss'))", 'DarkGray')
+            Write-Host "  ╠$border╣" -ForegroundColor Cyan
+
+            # System Health
+            Write-Row @('  SYSTEM HEALTH', 'Yellow')
+            $ver = ([string]$data.WingetVersion).TrimStart('v')
+            if ($data.WingetHealthy) { Write-Row @('    Winget Engine:    ', 'Gray', "[OK] v$ver", 'Green') }
+            else { Write-Row @('    Winget Engine:    ', 'Gray', '[!!] unavailable', 'Red') }
+            $indexStatus = if ($null -eq $data.IndexStale) { "[?]" } elseif ($data.IndexStale) { "[STALE]" } else { "[FRESH]" }
+            Write-Row @('    Source Index:     ', 'Gray', "$indexStatus ($($data.IndexAge))", $(if ($data.IndexStale) { 'Yellow' } else { 'Green' }))
+            Write-Row @('    GitHub API:       ', 'Gray', $(if ($data.GitHubAuth) { '[AUTHENTICATED]' } else { '[ANONYMOUS]' }), $(if ($data.GitHubAuth) { 'Green' } else { 'DarkGray' }))
+            Write-Row
+
+            # Package Stats
+            Write-Row @('  PACKAGE STATISTICS', 'Yellow')
+            Write-Row @('    Total Installed:  ', 'Gray', "$($data.TotalPackages)", 'White')
+            Write-Row @('    Updates Pending:  ', 'Gray', "$($data.UpdatesAvailable)", $(if ($data.UpdatesAvailable -gt 0) { 'Yellow' } else { 'Green' }))
+            Write-Row @('    Recent (7 days):  ', 'Gray', "$($data.RecentInstalls)", 'White')
+            Write-Row
+
+            # Source Breakdown
+            Write-Row @('  SOURCE BREAKDOWN', 'Yellow')
+            foreach ($src in $data.Sources.Keys | Sort-Object) {
+                $srcColor = if ($src -eq 'msstore') { 'Magenta' } elseif ($src -eq 'winget') { 'Cyan' } else { 'Gray' }
+                $label = if ($src -eq 'unknown') { 'no source (ARP/MSIX)' } else { $src }
+                Write-Row @('    ', 'Gray', $label, $srcColor, ": $($data.Sources[$src])", 'White')
+            }
+            Write-Row
 
             # Pending Updates (top 5)
             if ($data.UpdatesAvailable -gt 0) {
-                Write-Host "  ║" -ForegroundColor Cyan -NoNewline
-                Write-Host "  PENDING UPDATES (top 5)" -ForegroundColor Yellow -NoNewline
-                Write-Host (" " * (62 - 25)) -NoNewline
-                Write-Host "║" -ForegroundColor Cyan
-
-                $shown = 0
-                foreach ($upd in $data.UpdateList) {
-                    if ($shown -ge 5) { break }
-                    $line = "    $($upd.Id): $($upd.InstalledVersion) -> $($upd.AvailableVersion)"
-                    if ($line.Length -gt 60) { $line = $line.Substring(0, 57) + "..." }
-                    Write-Host "  ║" -ForegroundColor Cyan -NoNewline
-                    Write-Host $line -ForegroundColor DarkGray -NoNewline
-                    Write-Host (" " * [Math]::Max(0, 62 - $line.Length)) -NoNewline
-                    Write-Host "║" -ForegroundColor Cyan
-                    $shown++
+                Write-Row @('  PENDING UPDATES (top 5)', 'Yellow')
+                foreach ($upd in @($data.UpdateList) | Select-Object -First 5) {
+                    Write-Row @("    $($upd.Id): $($upd.InstalledVersion) -> $($upd.AvailableVersion)", 'DarkGray')
                 }
-
                 if ($data.UpdatesAvailable -gt 5) {
-                    Write-Host "  ║" -ForegroundColor Cyan -NoNewline
-                    Write-Host "    ... and $($data.UpdatesAvailable - 5) more" -ForegroundColor DarkGray -NoNewline
-                    $moreLine = "    ... and $($data.UpdatesAvailable - 5) more"
-                    Write-Host (" " * [Math]::Max(0, 62 - $moreLine.Length)) -NoNewline
-                    Write-Host "║" -ForegroundColor Cyan
+                    Write-Row @("    ... and $($data.UpdatesAvailable - 5) more", 'DarkGray')
                 }
-
-                Write-Host "  ║" -ForegroundColor Cyan -NoNewline
-                Write-Host (" " * 62) -NoNewline
-                Write-Host "║" -ForegroundColor Cyan
+                Write-Row
             }
 
             # Footer
             Write-Host "  ╠$border╣" -ForegroundColor Cyan
-            Write-Host "  ║" -ForegroundColor Cyan -NoNewline
-            $footer = "  Refresh: ${RefreshInterval}s | Ctrl+C to exit | Get-WingetUpdates to update"
-            Write-Host $footer -ForegroundColor DarkGray -NoNewline
-            Write-Host (" " * [Math]::Max(0, 62 - $footer.Length)) -NoNewline
-            Write-Host "║" -ForegroundColor Cyan
+            $footer = if ($Once) { "  Get-WingetUpdates to install updates" } else { "  Refresh: ${RefreshInterval}s | Ctrl+C to exit | Get-WingetUpdates" }
+            Write-Row @($footer, 'DarkGray')
             Write-Host "  ╚$border╝" -ForegroundColor Cyan
             Write-Host ""
         }

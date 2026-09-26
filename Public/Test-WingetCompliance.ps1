@@ -1,4 +1,4 @@
-function Test-WingetCompliance {
+﻿function Test-WingetCompliance {
     <#
     .SYNOPSIS
         Test machine package compliance against policy definitions.
@@ -59,7 +59,7 @@ function Test-WingetCompliance {
     [CmdletBinding(DefaultParameterSetName = 'Inline')]
     param(
         [Parameter(ParameterSetName = 'File', Mandatory)]
-        [ValidateScript({ Test-Path $_ })]
+        [Parameter(ParameterSetName = 'Generate')]
         [string]$PolicyPath,
 
         [Parameter(ParameterSetName = 'Inline')]
@@ -89,14 +89,14 @@ function Test-WingetCompliance {
         $policy = @{
             name = "Machine Baseline Policy"
             version = "1.0"
-            created = (Get-Date -ToString 'o')
+            created = (Get-Date).ToString('o')
             description = "Generated from $($env:COMPUTERNAME) on $(Get-Date -Format 'yyyy-MM-dd')"
-            required = @($packages | ForEach-Object { $_.Id } | Sort-Object)
+            required = @($packages | Where-Object { $_.Source } | ForEach-Object { $_.Id } | Sort-Object)
             banned = @()
             version_floors = @{}
         }
 
-        $outPath = $PolicyPath ?? (Join-Path $configDir "compliance_policy.json")
+        $outPath = if ($PolicyPath) { $PolicyPath } else { Join-Path $configDir "compliance_policy.json" }
         $policy | ConvertTo-Json -Depth 5 | Set-Content -Path $outPath -Encoding UTF8
         Write-Host ""
         Write-Host "  ✓ Policy template generated: $outPath" -ForegroundColor Green
@@ -112,12 +112,19 @@ function Test-WingetCompliance {
     $floors = @{}
 
     if ($PolicyPath) {
-        $raw = Get-Content -Path $PolicyPath -Raw
-        $policy = $raw | ConvertFrom-Json -AsHashtable
-        $required = $policy.required ?? @()
-        $banned = $policy.banned ?? @()
-        $floors = $policy.version_floors ?? @{}
-        $policyName = $policy.name ?? (Split-Path $PolicyPath -Leaf)
+        if (-not (Test-Path $PolicyPath)) {
+            Write-Error "Policy file not found: $PolicyPath"
+            return
+        }
+        # Plain PSCustomObject: property access is case-insensitive ('required' or 'Required')
+        $policy = Get-Content -Path $PolicyPath -Raw | ConvertFrom-Json
+        $required = @($policy.required | Where-Object { $_ })
+        $banned = @($policy.banned | Where-Object { $_ })
+        $floors = @{}
+        if ($policy.version_floors) {
+            foreach ($prop in $policy.version_floors.PSObject.Properties) { $floors[$prop.Name] = [string]$prop.Value }
+        }
+        $policyName = if ($policy.name) { $policy.name } else { Split-Path $PolicyPath -Leaf }
     } else {
         $required = $RequiredPackages ?? @()
         $banned = $BannedPackages ?? @()
@@ -133,8 +140,10 @@ function Test-WingetCompliance {
     # --- GET INSTALLED PACKAGES ---
     $installed = Microsoft.WinGet.Client\Get-WinGetPackage -ErrorAction SilentlyContinue
     $installedMap = @{}
+    $sourceMap = @{}
     foreach ($pkg in $installed) {
         $installedMap[$pkg.Id] = $pkg.InstalledVersion
+        $sourceMap[$pkg.Id] = $pkg.Source
     }
 
     # --- EVALUATE COMPLIANCE ---
@@ -167,11 +176,7 @@ function Test-WingetCompliance {
             $violations.Add(@{ Rule = 'VersionFloor'; PackageId = $id; Status = 'Fail'; Detail = "Not installed (requires >= $minVersion)"; Remediation = 'Install' })
         } else {
             $currentVer = $installedMap[$id]
-            try {
-                $isCompliant = [version]($currentVer -replace '[^0-9.]', '') -ge [version]($minVersion -replace '[^0-9.]', '')
-            } catch {
-                $isCompliant = $currentVer -ge $minVersion  # String fallback
-            }
+            $isCompliant = (Compare-WingetVersion -ReferenceVersion $currentVer -DifferenceVersion $minVersion) -ge 0
             if ($isCompliant) {
                 $compliant.Add(@{ Rule = 'VersionFloor'; PackageId = $id; Status = 'Pass'; Detail = "$currentVer >= $minVersion" })
             } else {
@@ -226,37 +231,21 @@ function Test-WingetCompliance {
         Write-Host "  Remediating $($violations.Count) violations..." -ForegroundColor Cyan
         Write-Host ""
 
+        Invoke-WingetAutoSnapshot -Reason 'Test-WingetCompliance -Remediate'
+        $fixed = 0
         foreach ($v in $violations) {
-            switch ($v.Remediation) {
-                'Install' {
-                    Write-Host "    + Installing $($v.PackageId)..." -NoNewline -ForegroundColor Green
-                    try {
-                        Microsoft.WinGet.Client\Install-WinGetPackage -Id $v.PackageId -Mode Silent | Out-Null
-                        Write-Host " ✓" -ForegroundColor Green
-                    } catch {
-                        Write-Host " ✗ ($($_.Exception.Message))" -ForegroundColor Red
-                    }
-                }
-                'Uninstall' {
-                    Write-Host "    - Uninstalling $($v.PackageId)..." -NoNewline -ForegroundColor Red
-                    try {
-                        Microsoft.WinGet.Client\Uninstall-WinGetPackage -Id $v.PackageId -Mode Silent | Out-Null
-                        Write-Host " ✓" -ForegroundColor Green
-                    } catch {
-                        Write-Host " ✗ ($($_.Exception.Message))" -ForegroundColor Red
-                    }
-                }
-                'Update' {
-                    Write-Host "    ↑ Updating $($v.PackageId)..." -NoNewline -ForegroundColor Yellow
-                    try {
-                        Microsoft.WinGet.Client\Update-WinGetPackage -Id $v.PackageId -Mode Silent | Out-Null
-                        Write-Host " ✓" -ForegroundColor Green
-                    } catch {
-                        Write-Host " ✗ ($($_.Exception.Message))" -ForegroundColor Red
-                    }
-                }
+            $label = switch ($v.Remediation) { 'Install' { '+ Installing' } 'Uninstall' { '- Uninstalling' } 'Update' { '^ Updating' } }
+            Write-Host "    $label $($v.PackageId)..." -NoNewline -ForegroundColor Cyan
+            $r = Invoke-WingetPackageAction -Action $v.Remediation -Id $v.PackageId -Source $sourceMap[$v.PackageId] -Options @{ Mode = 'Silent' }
+            if ($r.Succeeded) {
+                Write-Host " [OK]" -ForegroundColor Green
+                $fixed++
+            } else {
+                Write-Host " [FAIL] $($r.Message)" -ForegroundColor Red
             }
         }
+        Write-Host ""
+        Write-Host "  Fixed $fixed of $($violations.Count) violation(s)." -ForegroundColor $(if ($fixed -eq $violations.Count) { 'Green' } else { 'Yellow' })
         Write-Host ""
         Write-Host "  Remediation complete. Re-run to verify compliance." -ForegroundColor Cyan
         Write-Host ""
@@ -265,7 +254,7 @@ function Test-WingetCompliance {
     # --- EXPORT ---
     if ($ExportReport) {
         $report = @{
-            Timestamp = (Get-Date -ToString 'o')
+            Timestamp = (Get-Date).ToString('o')
             Hostname = $env:COMPUTERNAME
             Policy = $policyName
             Compliant = $isCompliant

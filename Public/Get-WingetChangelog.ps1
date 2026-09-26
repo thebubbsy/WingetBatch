@@ -1,4 +1,4 @@
-function Get-WingetChangelog {
+﻿function Get-WingetChangelog {
     <#
     .SYNOPSIS
         Show what changed between package versions (release notes diff).
@@ -61,182 +61,159 @@ function Get-WingetChangelog {
         [switch]$OpenInBrowser
     )
 
-    # --- Resolve versions ---
-    $installedVersion = $null
-    $latestVersion = $null
+    process {
 
-    try {
-        $pkg = Microsoft.WinGet.Client\Get-WinGetPackage -Id $PackageId -ErrorAction SilentlyContinue
-        if ($pkg) {
-            $installedVersion = $pkg.InstalledVersion
-            if ($pkg.AvailableVersions -and $pkg.AvailableVersions.Count -gt 0) {
-                $latestVersion = $pkg.AvailableVersions[0]
+        # --- Resolve versions ---
+        $installedVersion = $null
+        $latestVersion = $null
+
+        try {
+            $pkg = Microsoft.WinGet.Client\Get-WinGetPackage -Id $PackageId -MatchOption EqualsCaseInsensitive -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($pkg) {
+                $installedVersion = $pkg.InstalledVersion
+                if ($pkg.AvailableVersions -and $pkg.AvailableVersions.Count -gt 0) {
+                    $latestVersion = $pkg.AvailableVersions[0]
+                }
             }
+        } catch { }
+
+        # Default to "what changed since my version" only when there is something newer;
+        # otherwise show the most recent $Limit versions
+        if (-not $FromVersion -and $installedVersion -and $pkg.IsUpdateAvailable) { $FromVersion = $installedVersion }
+
+        Write-Host ""
+        Write-Host "  Package Changelog" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "  Package:  " -NoNewline -ForegroundColor DarkGray; Write-Host $PackageId -ForegroundColor White
+        if ($installedVersion) {
+            Write-Host "  Installed:" -NoNewline -ForegroundColor DarkGray; Write-Host " $installedVersion" -ForegroundColor Yellow
         }
-    } catch { }
+        if ($latestVersion) {
+            Write-Host "  Latest:   " -NoNewline -ForegroundColor DarkGray; Write-Host " $latestVersion" -ForegroundColor Green
+        }
+        Write-Host ""
 
-    if (-not $FromVersion) { $FromVersion = $installedVersion }
-    if (-not $ToVersion) { $ToVersion = $latestVersion }
+        $packagePath = Get-WingetPkgsPackagePath -PackageId $PackageId
+        $repoUrl = "https://github.com/microsoft/winget-pkgs/tree/master/$packagePath"
 
-    # --- Fetch version history from winget-pkgs ---
-    $headers = @{ 'User-Agent' = 'WingetBatch-Changelog' }
-    $token = Get-WingetBatchGitHubToken -ErrorAction SilentlyContinue
-    if ($token) { $headers['Authorization'] = "Bearer $token" }
+        try {
+            $sortedVersions = @(Get-WingetPkgsVersions -PackageId $PackageId)
+            if ($sortedVersions.Count -eq 0) { throw "No versions found in winget-pkgs." }
+            if (-not $latestVersion) { $latestVersion = $sortedVersions[0].Name }
 
-    $idParts = $PackageId.Split('.')
-    $publisher = $idParts[0]
-    $firstLetter = $publisher[0].ToString().ToLower()
-    $packagePath = $idParts -join '/'
-    $apiBase = "https://api.github.com/repos/microsoft/winget-pkgs/contents"
-    $manifestDir = "$apiBase/manifests/$firstLetter/$packagePath"
+            # Keep versions inside the requested range (either bound may be omitted)
+            $inRange = @($sortedVersions | Where-Object {
+                (-not $FromVersion -or (Compare-WingetVersion -ReferenceVersion $_.Name -DifferenceVersion $FromVersion) -ge 0) -and
+                (-not $ToVersion -or (Compare-WingetVersion -ReferenceVersion $_.Name -DifferenceVersion $ToVersion) -le 0)
+            })
+            if ($inRange.Count -eq 0) { $inRange = $sortedVersions }
 
-    Write-Host ""
-    Write-Host "  ╔══════════════════════════════════════════════════════╗" -ForegroundColor Cyan
-    Write-Host "  ║           Package Changelog                         ║" -ForegroundColor Cyan
-    Write-Host "  ╚══════════════════════════════════════════════════════╝" -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "  Package:  " -NoNewline -ForegroundColor DarkGray; Write-Host $PackageId -ForegroundColor White
-    if ($installedVersion) {
-        Write-Host "  Installed:" -NoNewline -ForegroundColor DarkGray; Write-Host " $installedVersion" -ForegroundColor Yellow
-    }
-    if ($latestVersion) {
-        Write-Host "  Latest:   " -NoNewline -ForegroundColor DarkGray; Write-Host " $latestVersion" -ForegroundColor Green
-    }
-    Write-Host ""
+            $displayVersions = @($inRange | Select-Object -First $Limit)
 
-    try {
-        $versions = Invoke-RestMethod -Uri $manifestDir -Headers $headers -ErrorAction Stop
+            if (-not (Get-WingetBatchGitHubToken) -and $displayVersions.Count -gt 10) {
+                Write-Warning "Showing $($displayVersions.Count) versions uses about $($displayVersions.Count + 1) GitHub API requests (60/hour without a token)."
+            }
 
-        # Sort versions
-        $sortedVersions = $versions | Sort-Object { 
-            try { [version]($_.name -replace '[^0-9.]', '') } catch { [version]'0.0.0' }
-        } -Descending
+            Write-Host "  Version History ($($displayVersions.Count) of $($sortedVersions.Count) total):" -ForegroundColor White
+            Write-Host "  $('─' * 55)" -ForegroundColor DarkGray
 
-        # Filter to range if specified
-        $inRange = $sortedVersions
-        if ($FromVersion -and $ToVersion) {
-            $inRange = $sortedVersions | Where-Object {
+            $prevManifest = $null
+            # Oldest first when diffing so each entry shows what it changed
+            foreach ($ver in $displayVersions) {
+                $versionName = $ver.Name
+                $isInstalled = $installedVersion -and (Compare-WingetVersion -ReferenceVersion $versionName -DifferenceVersion $installedVersion) -eq 0
+                $isLatest = $latestVersion -and (Compare-WingetVersion -ReferenceVersion $versionName -DifferenceVersion $latestVersion) -eq 0
+
+                $marker = if ($isInstalled -and $isLatest) { "◆ " }
+                          elseif ($isInstalled) { "● " }
+                          elseif ($isLatest) { "★ " }
+                          else { "  " }
+
+                $color = if ($isInstalled) { 'Yellow' } elseif ($isLatest) { 'Green' } else { 'White' }
+                Write-Host "  $marker" -NoNewline -ForegroundColor $color
+                Write-Host "v$versionName" -NoNewline -ForegroundColor $color
+                if ($isInstalled) { Write-Host " (installed)" -NoNewline -ForegroundColor DarkYellow }
+                if ($isLatest) { Write-Host " (latest)" -NoNewline -ForegroundColor DarkGreen }
+                Write-Host ""
+
+                $manifest = $null
                 try {
-                    $v = [version]($_.name -replace '[^0-9.]', '')
-                    $from = [version]($FromVersion -replace '[^0-9.]', '')
-                    $to = [version]($ToVersion -replace '[^0-9.]', '')
-                    $v -ge $from -and $v -le $to
-                } catch { $true }
+                    $manifest = Get-WingetPkgsManifest -PackageId $PackageId -Version $versionName
+                } catch {
+                    $status = [int]$_.Exception.Response.StatusCode
+                    if ($status -in 403, 429) {
+                        Write-Warning "GitHub rate limit reached. Run New-WingetBatchGitHubToken for 5,000 requests/hour."
+                        break
+                    }
+                    Write-Verbose "Could not fetch details for ${versionName}: $_"
+                }
+
+                if ($manifest) {
+                    # Release notes live in the locale manifest
+                    $notes = Get-WingetYamlValue -Yaml $manifest.Locale -Key 'ReleaseNotes'
+                    $notesUrl = Get-WingetYamlValue -Yaml $manifest.Locale -Key 'ReleaseNotesUrl'
+                    if ($notes) {
+                        $notes = ($notes -replace '\s+', ' ').Trim()
+                        if ($notes.Length -gt 160) { $notes = $notes.Substring(0, 157) + "..." }
+                        Write-Host "      $notes" -ForegroundColor DarkGray
+                    }
+                    if ($notesUrl) {
+                        Write-Host "      Notes: $notesUrl" -ForegroundColor DarkGray
+                    }
+
+                    # Manifest diff against the next-older displayed version
+                    if ($ShowManifestDiff -and $prevManifest -and $manifest.Installer -and $prevManifest.Installer) {
+                        $diffChanges = @()
+                        $urlsNew = @([regex]::Matches($manifest.Installer, 'InstallerUrl:\s*(\S+)') | ForEach-Object { $_.Groups[1].Value })
+                        $urlsOld = @([regex]::Matches($prevManifest.Installer, 'InstallerUrl:\s*(\S+)') | ForEach-Object { $_.Groups[1].Value })
+                        $hostsNew = @($urlsNew | ForEach-Object { ([uri]$_).Host } | Select-Object -Unique)
+                        $hostsOld = @($urlsOld | ForEach-Object { ([uri]$_).Host } | Select-Object -Unique)
+                        if (Compare-Object $hostsNew $hostsOld) { $diffChanges += "Download host changed: $($hostsOld -join ', ') -> $($hostsNew -join ', ')" }
+
+                        $typesNew = @([regex]::Matches($manifest.Installer, 'InstallerType:\s*(\w+)') | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique)
+                        $typesOld = @([regex]::Matches($prevManifest.Installer, 'InstallerType:\s*(\w+)') | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique)
+                        if (Compare-Object $typesNew $typesOld) { $diffChanges += "Installer type: $($typesOld -join ', ') -> $($typesNew -join ', ')" }
+
+                        $archNew = @([regex]::Matches($manifest.Installer, 'Architecture:\s*(\w+)') | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique)
+                        $archOld = @([regex]::Matches($prevManifest.Installer, 'Architecture:\s*(\w+)') | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique)
+                        $added = @($archNew | Where-Object { $_ -notin $archOld })
+                        $dropped = @($archOld | Where-Object { $_ -notin $archNew })
+                        if ($added) { $diffChanges += "Architectures added: $($added -join ', ')" }
+                        if ($dropped) { $diffChanges += "Architectures dropped: $($dropped -join ', ')" }
+
+                        $depsNew = @([regex]::Matches($manifest.Installer, 'PackageIdentifier:\s*(\S+)') | ForEach-Object { $_.Groups[1].Value } | Where-Object { $_ -ne $PackageId })
+                        $depsOld = @([regex]::Matches($prevManifest.Installer, 'PackageIdentifier:\s*(\S+)') | ForEach-Object { $_.Groups[1].Value } | Where-Object { $_ -ne $PackageId })
+                        if (Compare-Object $depsNew $depsOld) { $diffChanges += "Dependencies: $(@($depsOld) -join ', ') -> $(@($depsNew) -join ', ')" }
+
+                        foreach ($change in $diffChanges) {
+                            # Changes are relative to the next-newer version shown above
+                            Write-Host "      Δ (vs newer) $change" -ForegroundColor DarkCyan
+                        }
+                    }
+                    $prevManifest = $manifest
+                }
             }
-        }
 
-        $displayVersions = $inRange | Select-Object -First $Limit
-
-        Write-Host "  Version History ($($displayVersions.Count) of $($sortedVersions.Count) total):" -ForegroundColor White
-        Write-Host "  $('─' * 55)" -ForegroundColor DarkGray
-
-        $prevVersion = $null
-        foreach ($ver in $displayVersions) {
-            $versionName = $ver.name
-            $isInstalled = ($versionName -eq $installedVersion)
-            $isLatest = ($versionName -eq $latestVersion)
-
-            # Version line
-            $marker = if ($isInstalled -and $isLatest) { "◆ " }
-                      elseif ($isInstalled) { "● " }
-                      elseif ($isLatest) { "★ " }
-                      else { "  " }
-
-            $color = if ($isInstalled) { 'Yellow' } elseif ($isLatest) { 'Green' } else { 'White' }
-            Write-Host "  $marker" -NoNewline -ForegroundColor $color
-            Write-Host "v$versionName" -NoNewline -ForegroundColor $color
-            if ($isInstalled) { Write-Host " (installed)" -NoNewline -ForegroundColor DarkYellow }
-            if ($isLatest) { Write-Host " (latest)" -NoNewline -ForegroundColor DarkGreen }
+            Write-Host ""
+            Write-Host "  Legend: ◆ installed+latest | ● installed | ★ latest" -ForegroundColor DarkGray
+            Write-Host "  Source: $repoUrl" -ForegroundColor DarkGray
             Write-Host ""
 
-            # Fetch commit info for this version (date + author)
-            try {
-                $versionUrl = "$manifestDir/$versionName"
-                $versionFiles = Invoke-RestMethod -Uri $versionUrl -Headers $headers -ErrorAction SilentlyContinue
-                if ($versionFiles -and $versionFiles.Count -gt 0) {
-                    # Get the default manifest for release notes
-                    $defaultManifest = $versionFiles | Where-Object { $_.name -match '\.yaml$' -and $_.name -notmatch 'installer|locale' } | Select-Object -First 1
-                    if (-not $defaultManifest) { $defaultManifest = $versionFiles | Where-Object { $_.name -match 'locale.*en-US' } | Select-Object -First 1 }
-                    if (-not $defaultManifest) { $defaultManifest = $versionFiles | Select-Object -First 1 }
-
-                    if ($defaultManifest) {
-                        $content = Invoke-RestMethod -Uri $defaultManifest.url -Headers $headers -ErrorAction SilentlyContinue
-                        $rawContent = $content.content
-                        if ($content.encoding -eq 'base64') {
-                            $rawContent = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($rawContent))
-                        }
-
-                        # Extract release notes
-                        if ($rawContent -match 'ReleaseNotes:\s*(.+?)(?:\n\S|\n\s*\w+:|\z)') {
-                            $notes = $Matches[1].Trim() -replace '\s+', ' '
-                            if ($notes.Length -gt 120) { $notes = $notes.Substring(0, 117) + "..." }
-                            Write-Host "      $notes" -ForegroundColor DarkGray
-                        }
-                        elseif ($rawContent -match 'ReleaseNotesUrl:\s*(.+)') {
-                            Write-Host "      Notes: $($Matches[1].Trim())" -ForegroundColor DarkGray
-                        }
-                    }
-                }
-            } catch {
-                Write-Verbose "Could not fetch details for $versionName"
+            if ($OpenInBrowser) {
+                Start-Process $repoUrl
             }
-
-            # Manifest diff
-            if ($ShowManifestDiff -and $prevVersion) {
-                try {
-                    $diffChanges = @()
-                    # Compare installer manifests between versions
-                    $prevFiles = Invoke-RestMethod -Uri "$manifestDir/$($prevVersion.name)" -Headers $headers -ErrorAction SilentlyContinue
-                    $currFiles = $versionFiles
-
-                    $prevInstaller = $prevFiles | Where-Object { $_.name -match 'installer' } | Select-Object -First 1
-                    $currInstaller = $currFiles | Where-Object { $_.name -match 'installer' } | Select-Object -First 1
-
-                    if ($prevInstaller -and $currInstaller) {
-                        $prevContent = Invoke-RestMethod -Uri $prevInstaller.url -Headers $headers -ErrorAction SilentlyContinue
-                        $currContent = Invoke-RestMethod -Uri $currInstaller.url -Headers $headers -ErrorAction SilentlyContinue
-
-                        $prevRaw = if ($prevContent.encoding -eq 'base64') { [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($prevContent.content)) } else { $prevContent.content }
-                        $currRaw = if ($currContent.encoding -eq 'base64') { [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($currContent.content)) } else { $currContent.content }
-
-                        # Check for installer URL changes
-                        $prevUrl = if ($prevRaw -match 'InstallerUrl:\s*(.+)') { $Matches[1].Trim() } else { '' }
-                        $currUrl = if ($currRaw -match 'InstallerUrl:\s*(.+)') { $Matches[1].Trim() } else { '' }
-                        if ($prevUrl -ne $currUrl -and $prevUrl -and $currUrl) {
-                            $diffChanges += "Installer URL changed"
-                        }
-
-                        # Check for new installer types
-                        $prevTypes = [regex]::Matches($prevRaw, 'InstallerType:\s*(\w+)') | ForEach-Object { $_.Groups[1].Value }
-                        $currTypes = [regex]::Matches($currRaw, 'InstallerType:\s*(\w+)') | ForEach-Object { $_.Groups[1].Value }
-                        $newTypes = $currTypes | Where-Object { $_ -notin $prevTypes }
-                        if ($newTypes) { $diffChanges += "New installer type: $($newTypes -join ', ')" }
-                    }
-
-                    if ($diffChanges.Count -gt 0) {
-                        foreach ($change in $diffChanges) {
-                            Write-Host "      Δ $change" -ForegroundColor DarkCyan
-                        }
-                    }
-                } catch { }
+        }
+        catch {
+            $status = [int]$_.Exception.Response.StatusCode
+            if ($status -eq 404) {
+                Write-Error "$PackageId was not found in winget-pkgs (it may come from another source)."
             }
-
-            $prevVersion = $ver
+            elseif ($status -in 403, 429) {
+                Write-Error "GitHub rate limit reached. Run New-WingetBatchGitHubToken for 5,000 requests/hour."
+            }
+            else {
+                Write-Error "Could not fetch version history for ${PackageId}: $($_.Exception.Message)"
+            }
         }
-
-        Write-Host ""
-        Write-Host "  Legend: ◆ installed+latest | ● installed | ★ latest" -ForegroundColor DarkGray
-
-        # GitHub releases link
-        $repoUrl = "https://github.com/microsoft/winget-pkgs/tree/master/manifests/$firstLetter/$packagePath"
-        Write-Host "  Source: $repoUrl" -ForegroundColor DarkGray
-        Write-Host ""
-
-        if ($OpenInBrowser) {
-            Start-Process $repoUrl
-        }
-    }
-    catch {
-        Write-Error "Could not fetch version history for ${PackageId}: $($_.Exception.Message)"
     }
 }

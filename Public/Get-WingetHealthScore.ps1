@@ -1,4 +1,4 @@
-function Get-WingetHealthScore {
+﻿function Get-WingetHealthScore {
     <#
     .SYNOPSIS
         Rate package trustworthiness and maintenance health.
@@ -78,6 +78,7 @@ function Get-WingetHealthScore {
             }
             $details = @{
                 LastModified = $null
+                LatestVersion = $null
                 PublisherRepo = $null
                 VersionCount = 0
                 HasLicense = $false
@@ -89,102 +90,86 @@ function Get-WingetHealthScore {
 
             # --- Fetch manifest data from GitHub ---
             try {
-                $idParts = $Id.Split('.')
-                $publisher = $idParts[0]
-                $firstLetter = $publisher[0].ToString().ToLower()
-                $packagePath = $idParts -join '/'
-
-                $headers = @{ 'User-Agent' = 'WingetBatch-HealthCheck' }
-                $token = Get-WingetBatchGitHubToken -ErrorAction SilentlyContinue
-                if ($token) { $headers['Authorization'] = "Bearer $token" }
-
-                $apiBase = "https://api.github.com/repos/microsoft/winget-pkgs/contents"
-                $manifestDir = "$apiBase/manifests/$firstLetter/$packagePath"
-
-                $versions = Invoke-RestMethod -Uri $manifestDir -Headers $headers -ErrorAction Stop
+                $versions = @(Get-WingetPkgsVersions -PackageId $Id)
+                if ($versions.Count -eq 0) { throw "No versions found" }
                 $details.VersionCount = $versions.Count
+                $latestVersion = $versions[0].Name
+                $details.LatestVersion = $latestVersion
 
-                # FRESHNESS: Check last commit date
-                $latestVersion = $versions | Sort-Object { [version]($_.name -replace '[^0-9.]', '') } -ErrorAction SilentlyContinue | Select-Object -Last 1
-                if ($latestVersion) {
-                    # Get commit info for the latest version
-                    $commitInfo = Invoke-RestMethod -Uri "$apiBase/manifests/$firstLetter/$packagePath/$($latestVersion.name)" -Headers $headers -ErrorAction SilentlyContinue
-                    # Use the response headers or file metadata for date
-                    $details.LastModified = Get-Date  # Approximate
+                # FRESHNESS: date of the most recent commit touching this package
+                $path = Get-WingetPkgsPackagePath -PackageId $Id
+                $commits = Invoke-RestMethod -Uri "https://api.github.com/repos/microsoft/winget-pkgs/commits?path=$path&per_page=1" -Headers (Get-WingetPkgsHeaders) -ErrorAction SilentlyContinue
+                Update-GitHubApiRequestCount -RequestCount 1 | Out-Null
+                if ($commits -and $commits[0].commit.committer.date) {
+                    $details.LastModified = [datetime]$commits[0].commit.committer.date
+                    $age = ((Get-Date) - $details.LastModified).TotalDays
+                    $score.Freshness = if ($age -le 30) { 25 } elseif ($age -le 90) { 20 } elseif ($age -le 180) { 15 } elseif ($age -le 365) { 10 } elseif ($age -le 730) { 5 } else { 2 }
+                }
+                else {
+                    $score.Freshness = 10  # unknown: neutral
                 }
 
-                # Score freshness based on version count (proxy for activity)
-                if ($versions.Count -ge 20) { $score.Freshness = 25 }
-                elseif ($versions.Count -ge 10) { $score.Freshness = 20 }
-                elseif ($versions.Count -ge 5) { $score.Freshness = 15 }
-                elseif ($versions.Count -ge 2) { $score.Freshness = 10 }
-                else { $score.Freshness = 5 }
+                # MANIFEST QUALITY: the descriptive fields live in the locale manifest
+                $manifest = Get-WingetPkgsManifest -PackageId $Id -Version $latestVersion
+                $locale = $manifest.Locale
+                $details.HasLicense = [bool](Get-WingetYamlValue -Yaml $locale -Key 'License')
+                $details.HasHomepage = [bool]((Get-WingetYamlValue -Yaml $locale -Key 'PackageUrl') -or (Get-WingetYamlValue -Yaml $locale -Key 'PublisherUrl'))
+                $details.HasDescription = [bool]((Get-WingetYamlValue -Yaml $locale -Key 'ShortDescription') -or (Get-WingetYamlValue -Yaml $locale -Key 'Description'))
+                $details.PublisherRepo = Get-WingetYamlValue -Yaml $locale -Key 'PublisherUrl'
+                if (-not $details.PublisherRepo) { $details.PublisherRepo = Get-WingetYamlValue -Yaml $locale -Key 'PackageUrl' }
 
-                # MANIFEST QUALITY: Fetch latest manifest and check fields
-                if ($latestVersion) {
-                    $versionFiles = Invoke-RestMethod -Uri $latestVersion.url -Headers $headers -ErrorAction SilentlyContinue
-                    $defaultManifest = $versionFiles | Where-Object { $_.name -match '\.yaml$' -and $_.name -notmatch 'installer|locale' } | Select-Object -First 1
-                    if (-not $defaultManifest) { $defaultManifest = $versionFiles | Select-Object -First 1 }
+                $qualityScore = 0
+                if ($details.HasLicense) { $qualityScore += 7 }
+                if ($details.HasHomepage) { $qualityScore += 7 }
+                if ($details.HasDescription) { $qualityScore += 6 }
+                $score.ManifestQuality = $qualityScore
 
-                    if ($defaultManifest) {
-                        $content = Invoke-RestMethod -Uri $defaultManifest.url -Headers $headers -ErrorAction SilentlyContinue
-                        $rawContent = $content.content
-                        if ($content.encoding -eq 'base64') {
-                            $rawContent = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($rawContent))
-                        }
-
-                        $details.HasLicense = $rawContent -match 'License:'
-                        $details.HasHomepage = $rawContent -match '(Homepage|PackageUrl|PublisherUrl):'
-                        $details.HasDescription = $rawContent -match '(Description|ShortDescription):'
-                        $details.IsPreRelease = $rawContent -match '(alpha|beta|preview|rc|nightly)' -or $latestVersion.name -match '(alpha|beta|preview|rc)'
-
-                        # Publisher repo
-                        if ($rawContent -match 'PublisherUrl:\s*(.+)') { $details.PublisherRepo = $Matches[1].Trim() }
-                        elseif ($rawContent -match 'PackageUrl:\s*(.+)') { $details.PublisherRepo = $Matches[1].Trim() }
-
-                        # Score manifest quality
-                        $qualityScore = 0
-                        if ($details.HasLicense) { $qualityScore += 7 }
-                        if ($details.HasHomepage) { $qualityScore += 7 }
-                        if ($details.HasDescription) { $qualityScore += 6 }
-                        $score.ManifestQuality = $qualityScore
-                    }
-                }
-
-                # VERSION MATURITY
+                # VERSION MATURITY: judge the version string and package ID only
+                # (searching the whole manifest matched words like "Source")
+                $details.IsPreRelease = ($latestVersion -match '(?i)(alpha|beta|preview|nightly|canary|insider|dev|\brc\d*\b|-rc)') -or
+                                        ($Id -match '(?i)\.(Preview|Beta|Nightly|Canary|Insiders?|Dev)$')
                 if ($details.IsPreRelease) {
                     $score.VersionMaturity = 8
+                } elseif ((Compare-WingetVersion -ReferenceVersion $latestVersion -DifferenceVersion '1.0') -lt 0) {
+                    $score.VersionMaturity = 12  # 0.x releases
                 } elseif ($versions.Count -ge 3) {
-                    $score.VersionMaturity = 20  # Multiple stable versions = mature
-                } elseif ($versions.Count -ge 1) {
+                    $score.VersionMaturity = 20
+                } else {
                     $score.VersionMaturity = 15
                 }
 
-                # UPDATE CADENCE (based on version count as proxy)
+                # UPDATE CADENCE: how many releases have been published to winget
                 if ($versions.Count -ge 30) { $score.UpdateCadence = 15 }
                 elseif ($versions.Count -ge 15) { $score.UpdateCadence = 12 }
                 elseif ($versions.Count -ge 5) { $score.UpdateCadence = 9 }
                 elseif ($versions.Count -ge 2) { $score.UpdateCadence = 6 }
                 else { $score.UpdateCadence = 3 }
 
-                # PUBLISHER ACTIVITY (heuristic from version history)
-                if ($versions.Count -ge 25) { $score.PublisherActivity = 20 }
-                elseif ($versions.Count -ge 10) { $score.PublisherActivity = 15 }
-                elseif ($versions.Count -ge 5) { $score.PublisherActivity = 10 }
-                else { $score.PublisherActivity = 5 }
+                # PUBLISHER ACTIVITY: recent commit + sustained release history
+                $activity = 0
+                if ($details.LastModified -and ((Get-Date) - $details.LastModified).TotalDays -le 180) { $activity += 10 }
+                elseif ($details.LastModified -and ((Get-Date) - $details.LastModified).TotalDays -le 365) { $activity += 5 }
+                if ($versions.Count -ge 10) { $activity += 10 } elseif ($versions.Count -ge 3) { $activity += 5 }
+                $score.PublisherActivity = $activity
 
-                $details.SourceTrust = 'winget-pkgs (official)'
+                $details.SourceTrust = 'winget-pkgs (community repository)'
             }
             catch {
-                # Package not found on GitHub - low trust
+                $status = [int]$_.Exception.Response.StatusCode
+                if ($status -in 403, 429) {
+                    Write-Warning "GitHub rate limit reached while scoring $Id. Run New-WingetBatchGitHubToken for 5,000 requests/hour."
+                    $details.SourceTrust = 'Unknown (rate limited)'
+                }
+                else {
+                    # Package not found on GitHub - low trust
+                    $details.SourceTrust = 'Not found in winget-pkgs'
+                }
                 $score.Freshness = 3
                 $score.PublisherActivity = 3
                 $score.VersionMaturity = 5
                 $score.ManifestQuality = 3
                 $score.UpdateCadence = 2
-                $details.SourceTrust = 'Not found in winget-pkgs'
             }
-
             # --- Composite Score ---
             $total = $score.Freshness + $score.PublisherActivity + $score.VersionMaturity + $score.ManifestQuality + $score.UpdateCadence
 
@@ -214,8 +199,12 @@ function Get-WingetHealthScore {
     process {
         $ids = @()
         if ($AllInstalled) {
-            $installed = Microsoft.WinGet.Client\Get-WinGetPackage -ErrorAction SilentlyContinue
+            # Only winget-sourced packages have winget-pkgs manifests
+            $installed = Microsoft.WinGet.Client\Get-WinGetPackage -ErrorAction SilentlyContinue | Where-Object { $_.Source -eq 'winget' }
             $ids = @($installed | ForEach-Object { $_.Id })
+            if (-not (Get-WingetBatchGitHubToken) -and $ids.Count -gt 15) {
+                Write-Warning "Scoring $($ids.Count) packages needs about $($ids.Count * 3) GitHub API requests; without a token the limit is 60/hour. Run New-WingetBatchGitHubToken first."
+            }
             Write-Host "`n  Scoring $($ids.Count) installed packages...`n" -ForegroundColor Cyan
         } else {
             $ids = $PackageId
@@ -258,6 +247,9 @@ function Get-WingetHealthScore {
                     Write-Host "      Manifest Quality: $($health.Breakdown.ManifestQuality)/20" -ForegroundColor DarkGray
                     Write-Host "      Update Cadence:   $($health.Breakdown.UpdateCadence)/15" -ForegroundColor DarkGray
                     Write-Host "      Source: $($health.Details.SourceTrust)" -ForegroundColor DarkGray
+                    if ($health.Details.LastModified) {
+                        Write-Host "      Last updated: $($health.Details.LastModified.ToString('yyyy-MM-dd')) (v$($health.Details.LatestVersion))" -ForegroundColor DarkGray
+                    }
                     if ($health.Details.PublisherRepo) {
                         Write-Host "      URL: $($health.Details.PublisherRepo)" -ForegroundColor DarkGray
                     }
@@ -282,7 +274,7 @@ function Get-WingetHealthScore {
         # Export
         if ($ExportReport) {
             $report = @{
-                Timestamp = (Get-Date -ToString 'o')
+                Timestamp = (Get-Date).ToString('o')
                 Hostname = $env:COMPUTERNAME
                 PackageCount = $results.Count
                 AverageScore = [Math]::Round(($results | Measure-Object Score -Average).Average, 1)

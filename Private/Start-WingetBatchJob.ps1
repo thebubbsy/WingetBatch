@@ -10,9 +10,9 @@
     )
 
     if (Get-Command Start-ThreadJob -ErrorAction SilentlyContinue) {
-        return Start-ThreadJob -ScriptBlock $ScriptBlock -ArgumentList $ArgumentList
+        return Start-ThreadJob -Name 'WingetBatchDetails' -ScriptBlock $ScriptBlock -ArgumentList $ArgumentList
     }
     else {
-        return Start-Job -ScriptBlock $ScriptBlock -ArgumentList $ArgumentList
+        return Start-Job -Name 'WingetBatchDetails' -ScriptBlock $ScriptBlock -ArgumentList $ArgumentList
     }
 }

@@ -1,4 +1,4 @@
-function Install-WingetProfile {
+﻿function Install-WingetProfile {
     <#
     .SYNOPSIS
         Install packages from shareable community setup profiles.
@@ -29,6 +29,9 @@ function Install-WingetProfile {
 
     .PARAMETER SkipInstalled
         Skip packages already installed. Default: true.
+
+    .PARAMETER Force
+        Install without asking for confirmation.
 
     .PARAMETER Export
         Export your current installed packages as a shareable profile.
@@ -76,6 +79,8 @@ function Install-WingetProfile {
 
         [bool]$SkipInstalled = $true,
 
+        [switch]$Force,
+
         [Parameter(ParameterSetName = 'Export', Mandatory)]
         [switch]$Export,
 
@@ -91,8 +96,8 @@ function Install-WingetProfile {
             Author = "WingetBatch"
             Packages = @(
                 'Git.Git', 'Microsoft.VisualStudioCode', 'OpenJS.NodeJS.LTS',
-                'Python.Python.3.12', 'Docker.DockerDesktop', 'Microsoft.DotNet.SDK.8',
-                'GoLang.Go', 'PostgreSQL.PostgreSQL', 'Redis.Redis',
+                'Python.Python.3.13', 'Docker.DockerDesktop', 'Microsoft.DotNet.SDK.10',
+                'GoLang.Go', 'PostgreSQL.PostgreSQL.17', 'Redis.Redis',
                 'Postman.Postman', 'Microsoft.WindowsTerminal', '7zip.7zip'
             )
         }
@@ -111,10 +116,10 @@ function Install-WingetProfile {
             Description = "Python, R, Jupyter, and visualization tools"
             Author = "WingetBatch"
             Packages = @(
-                'Python.Python.3.12', 'Anaconda.Anaconda3', 'RProject.R',
-                'RStudio.RStudio.OpenSource', 'Microsoft.VisualStudioCode',
-                'Git.Git', 'Docker.DockerDesktop', 'PostgreSQL.PostgreSQL',
-                'Julia.Julia', 'Microsoft.PowerBI'
+                'Python.Python.3.13', 'Anaconda.Anaconda3', 'RProject.R',
+                'Posit.RStudio', 'Microsoft.VisualStudioCode',
+                'Git.Git', 'Docker.DockerDesktop', 'PostgreSQL.PostgreSQL.17',
+                'Julialang.Julia', 'Microsoft.PowerBI'
             )
         }
         'DevOps' = @{
@@ -124,8 +129,8 @@ function Install-WingetProfile {
             Packages = @(
                 'Git.Git', 'Docker.DockerDesktop', 'Kubernetes.kubectl',
                 'Hashicorp.Terraform', 'Helm.Helm', 'Microsoft.AzureCLI',
-                'Amazon.AWSCLI', 'Python.Python.3.12', 'Microsoft.VisualStudioCode',
-                'Grafana.Grafana', 'WiresharkFoundation.Wireshark', 'PuTTY.PuTTY'
+                'Amazon.AWSCLI', 'Python.Python.3.13', 'Microsoft.VisualStudioCode',
+                'GrafanaLabs.Grafana.OSS', 'WiresharkFoundation.Wireshark', 'PuTTY.PuTTY'
             )
         }
         'Designer' = @{
@@ -134,7 +139,7 @@ function Install-WingetProfile {
             Author = "WingetBatch"
             Packages = @(
                 'Figma.Figma', 'GIMP.GIMP', 'Inkscape.Inkscape',
-                'BlenderFoundation.Blender', 'DaVinciResolve.DaVinciResolve',
+                'BlenderFoundation.Blender', 'KDE.Kdenlive',
                 'Audacity.Audacity', 'OBSProject.OBSStudio', 'VideoLAN.VLC',
                 'Git.Git', '7zip.7zip'
             )
@@ -144,10 +149,10 @@ function Install-WingetProfile {
             Description = "Network analysis, RE tools, and lab infrastructure"
             Author = "WingetBatch"
             Packages = @(
-                'WiresharkFoundation.Wireshark', 'Nmap.Nmap', 'Python.Python.3.12',
-                'Oracle.VirtualBox', 'Ghidra.Ghidra', 'GnuPG.GnuPG',
+                'WiresharkFoundation.Wireshark', 'Insecure.Nmap', 'Python.Python.3.13',
+                'Oracle.VirtualBox', 'x64dbg.x64dbg', 'GnuPG.GnuPG',
                 'KeePassXCTeam.KeePassXC', 'Git.Git', 'Microsoft.VisualStudioCode',
-                'Docker.DockerDesktop', 'Tor.TorBrowser'
+                'Docker.DockerDesktop', 'TorProject.TorBrowser'
             )
         }
         'Productivity' = @{
@@ -156,8 +161,8 @@ function Install-WingetProfile {
             Author = "WingetBatch"
             Packages = @(
                 'Mozilla.Firefox', 'Obsidian.Obsidian', 'Microsoft.Teams',
-                'Slack.Slack', 'Zoom.Zoom', 'ShareX.ShareX',
-                '7zip.7zip', 'VideoLAN.VLC', 'Notion.Notion', 'Todoist.Todoist'
+                'SlackTechnologies.Slack', 'Zoom.Zoom', 'ShareX.ShareX',
+                '7zip.7zip', 'VideoLAN.VLC', 'Notion.Notion', 'Doist.Todoist'
             )
         }
         'Minimal' = @{
@@ -178,11 +183,11 @@ function Install-WingetProfile {
         Write-Host "  ║           Built-in Setup Profiles                   ║" -ForegroundColor Cyan
         Write-Host "  ╚══════════════════════════════════════════════════════╝" -ForegroundColor Cyan
         Write-Host ""
-        foreach ($profile in $builtInProfiles.GetEnumerator() | Sort-Object Key) {
-            Write-Host "  $($profile.Key.PadRight(14))" -NoNewline -ForegroundColor Yellow
-            Write-Host " $($profile.Value.Name)" -NoNewline -ForegroundColor White
-            Write-Host " ($($profile.Value.Packages.Count) pkgs)" -ForegroundColor DarkGray
-            Write-Host "  $(''.PadRight(14)) $($profile.Value.Description)" -ForegroundColor DarkGray
+        foreach ($profileData in $builtInProfiles.GetEnumerator() | Sort-Object Key) {
+            Write-Host "  $($profileData.Key.PadRight(14))" -NoNewline -ForegroundColor Yellow
+            Write-Host " $($profileData.Value.Name)" -NoNewline -ForegroundColor White
+            Write-Host " ($($profileData.Value.Packages.Count) pkgs)" -ForegroundColor DarkGray
+            Write-Host "  $(''.PadRight(14)) $($profileData.Value.Description)" -ForegroundColor DarkGray
         }
         Write-Host ""
         Write-Host "  Usage: Install-WingetProfile -Name <ProfileName>" -ForegroundColor DarkGray
@@ -194,55 +199,57 @@ function Install-WingetProfile {
     # --- EXPORT ---
     if ($Export) {
         $installed = Microsoft.WinGet.Client\Get-WinGetPackage -ErrorAction SilentlyContinue
-        $profile = @{
+        $profileData = @{
             name = "My Setup - $env:COMPUTERNAME"
             description = "Exported from $($env:COMPUTERNAME) on $(Get-Date -Format 'yyyy-MM-dd')"
             author = $env:USERNAME
-            created = (Get-Date -ToString 'o')
-            packages = @($installed | ForEach-Object { $_.Id } | Sort-Object)
+            created = (Get-Date).ToString('o')
+            packages = @($installed | Where-Object { $_.Source } | ForEach-Object { $_.Id } | Sort-Object)
         }
-        $profile | ConvertTo-Json -Depth 5 | Set-Content -Path $ExportPath -Encoding UTF8
+        $profileData | ConvertTo-Json -Depth 5 | Set-Content -Path $ExportPath -Encoding UTF8
         Write-Host ""
         Write-Host "  ✓ Profile exported: $ExportPath" -ForegroundColor Green
-        Write-Host "    $($profile.packages.Count) packages | Share this file or host it on GitHub." -ForegroundColor DarkGray
+        Write-Host "    $($profileData.packages.Count) packages | Share this file or host it on GitHub." -ForegroundColor DarkGray
         Write-Host ""
         return
     }
 
     # --- LOAD PROFILE ---
-    $profile = $null
+    $profileData = $null
 
     if ($Url) {
         Write-Host "  Fetching profile from: $Url" -ForegroundColor DarkGray
         try {
             $raw = Invoke-RestMethod -Uri $Url -ErrorAction Stop
-            $profile = if ($raw -is [string]) { $raw | ConvertFrom-Json -AsHashtable } else { $raw }
+            $profileData = if ($raw -is [string]) { $raw | ConvertFrom-Json } else { $raw }
         } catch {
             Write-Error "Failed to fetch profile: $($_.Exception.Message)"
             return
         }
     }
     elseif ($Path) {
-        $profile = Get-Content -Path $Path -Raw | ConvertFrom-Json -AsHashtable
+        # PSCustomObject property access is case-insensitive, so "packages" and "Packages" both work
+        $profileData = Get-Content -Path $Path -Raw | ConvertFrom-Json
     }
     else {
-        $profile = $builtInProfiles[$Name]
+        $profileData = $builtInProfiles[$Name]
     }
 
-    if (-not $profile -or -not $profile.Packages) {
+    if (-not $profileData -or -not $profileData.Packages) {
         Write-Error "Invalid profile: no 'packages' array found."
         return
     }
 
-    $profileName = $profile.Name ?? $profile.name ?? "Custom Profile"
-    $packageList = $profile.Packages ?? $profile.packages
+    $profileName = if ($profileData.Name) { [string]$profileData.Name } else { "Custom Profile" }
+    # Entries may be plain IDs or objects with an id (e.g. a Get-WingetMachineState export)
+    $packageList = @($profileData.Packages | ForEach-Object { if ($_ -is [string]) { $_ } elseif ($_.id) { [string]$_.id } } | Where-Object { $_ })
 
     # --- Filter installed ---
     $toInstall = $packageList
     if ($SkipInstalled) {
         $installed = Microsoft.WinGet.Client\Get-WinGetPackage -ErrorAction SilentlyContinue
         $installedIds = @($installed | ForEach-Object { $_.Id })
-        $toInstall = $packageList | Where-Object { $_ -notin $installedIds }
+        $toInstall = @($packageList | Where-Object { $_ -notin $installedIds })
         $skippedCount = $packageList.Count - $toInstall.Count
     }
 
@@ -254,8 +261,8 @@ function Install-WingetProfile {
     Write-Host "║" -ForegroundColor Magenta
     Write-Host "  ╚══════════════════════════════════════════════════════╝" -ForegroundColor Magenta
     Write-Host ""
-    if ($profile.Description -or $profile.description) {
-        Write-Host "  $($profile.Description ?? $profile.description)" -ForegroundColor DarkGray
+    if ($profileData.Description) {
+        Write-Host "  $($profileData.Description)" -ForegroundColor DarkGray
         Write-Host ""
     }
     Write-Host "  Total: $($packageList.Count) | To install: $($toInstall.Count)" -NoNewline -ForegroundColor White
@@ -284,11 +291,12 @@ function Install-WingetProfile {
     }
 
     # --- INSTALL ---
-    $confirm = $PSCmdlet.ShouldContinue("Install $($toInstall.Count) packages from '$profileName'?", "Confirm Profile Install")
-    if (-not $confirm) {
+    if (-not $Force -and -not $PSCmdlet.ShouldContinue("Install $($toInstall.Count) packages from '$profileName'?", "Confirm Profile Install")) {
         Write-Host "  Cancelled." -ForegroundColor Yellow
         return
     }
+
+    Invoke-WingetAutoSnapshot -Reason "Install-WingetProfile $profileName"
 
     $success = 0; $failed = 0
     $j = 0
@@ -296,16 +304,15 @@ function Install-WingetProfile {
         $j++
         Write-Host "  [$j/$($toInstall.Count)] $pkgId" -NoNewline -ForegroundColor Cyan
         Write-Host "..." -NoNewline
-        try {
-            Microsoft.WinGet.Client\Install-WinGetPackage -Id $pkgId -Mode Silent | Out-Null
-            Write-Host " ✓" -ForegroundColor Green
+        $r = Invoke-WingetPackageAction -Action Install -Id $pkgId -Options @{ Mode = 'Silent' }
+        if ($r.Succeeded) {
+            Write-Host " OK" -ForegroundColor Green
             $success++
-        } catch {
-            Write-Host " ✗ ($($_.Exception.Message))" -ForegroundColor Red
+        } else {
+            Write-Host " FAILED ($($r.Message))" -ForegroundColor Red
             $failed++
         }
     }
-
     Write-Host ""
     Write-Host "  Profile '$profileName' complete: $success installed, $failed failed." -ForegroundColor $(if ($failed -eq 0) { 'Green' } else { 'Yellow' })
     Write-Host ""

@@ -42,12 +42,16 @@ $Catalog = New-Object -ComObject "Microsoft.WinGet.Client"
 
 This allows direct querying of the local SQLite index and package sources with strongly-typed outputs.
 
-#### B. Split-Phase Concurrency (RunspacePools)
+#### B. Serialized, Result-Checked Installation
 
-To bypass Windows Installer (MSI/MSIX) execution mutex locks, the execution cycle is split into two asynchronous phases:
+Windows Installer (MSI/MSIX) holds a machine-wide mutex, so packages are installed one at a time.
+Each change goes through one private helper (`Invoke-WingetPackageAction`) that:
 
-1. **Phase 1: Parallel Downloads** - Uses a RunspacePool to parallelize network fetch requests, pre-caching setup packages locally
-2. **Phase 2: Serialized Installation Queue** - Dynamically consumes the cache and fires installations sequentially, preventing mutex collision
+1. Calls `Microsoft.WinGet.Client\*-WinGetPackage` by its module-qualified name (other modules, such as Cobalt, export commands with the same names)
+2. Matches the package ID exactly (`-MatchOption EqualsCaseInsensitive`) and pins the source the package was found in
+3. Reads the returned `Status` (the cmdlets do not throw when an installer fails) and reports reboot requirements
+
+Earlier versions pre-downloaded installers in parallel, but the install step never used those files, so that phase was removed in v2.10.0.
 
 #### C. Declarative State Management
 
@@ -95,16 +99,10 @@ Check Local State (Idempotency)
     └── Missing/Outdated → Add to Execution Queue
                               │
                               ▼
-                    Initialize RunspacePool
+                    Serialized Installation
                               │
                               ▼
-                    Phase 1: Parallel Downloads
-                              │
-                              ▼
-                    Phase 2: Serialized Installation
-                              │
-                              ▼
-                    Capture Exit Codes
+                    Check WinGet Result Status
                               │
                     ┌─────────┼─────────┐
                     ▼         ▼         ▼
@@ -146,7 +144,7 @@ WingetBatch/
 ## Design Decisions
 
 1. **COM over CLI**: Eliminates the #1 support issue (winget.exe not in PATH after Windows updates)
-2. **Split-phase over full parallel**: MSI/MSIX mutex locks make fully parallel installation unreliable
+2. **Serialized installs**: MSI/MSIX mutex locks make parallel installation unreliable
 3. **CliXml over plaintext**: DPAPI-bound encryption provides hardware-level security without external dependencies
 4. **GitHub API over winget source**: The winget-pkgs repository is the canonical source of truth for new package additions
 5. **30-day cache TTL**: Balances freshness with API rate limit conservation

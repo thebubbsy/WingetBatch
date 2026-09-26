@@ -1,4 +1,4 @@
-function Start-PackageDetailJobs {
+﻿function Start-PackageDetailJobs {
     param(
         [string[]]$PackageIds,
         [string]$ConfigDir
@@ -99,7 +99,7 @@ function Start-PackageDetailJobs {
                 # Fallback: Use COM API (limited fields but always works)
                 try {
                     Import-Module Microsoft.WinGet.Client -ErrorAction SilentlyContinue
-                    $comResult = Find-WinGetPackage -Id $packageId -Exact -ErrorAction SilentlyContinue | Select-Object -First 1
+                    $comResult = Microsoft.WinGet.Client\Find-WinGetPackage -Id $packageId -MatchOption EqualsCaseInsensitive -ErrorAction SilentlyContinue | Select-Object -First 1
                     if ($comResult) {
                         $info = @{
                             Id = $packageId
@@ -151,7 +151,7 @@ function Start-PackageDetailJobs {
 
         $packageBatch = $PackageIds[$startIndex..$endIndex]
 
-        $job = Start-WingetBatchJob -ScriptBlock $jobScript -ArgumentList (,$packageBatch), $ConfigDir, $function:Parse-WingetShowOutput, $wingetExe
+        $job = Start-WingetBatchJob -ScriptBlock $jobScript -ArgumentList (,$packageBatch), $ConfigDir, ${function:Parse-WingetShowOutput}, $wingetExe
         $jobs.Add($job)
         $jobPackageMap[$job.Id] = $packageBatch
     }

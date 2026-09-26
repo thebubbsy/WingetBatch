@@ -1,15 +1,17 @@
-function Restore-WingetSnapshot {
+﻿function Restore-WingetSnapshot {
     <#
     .SYNOPSIS
         Package-level rollback: undo installs, updates, and uninstalls.
 
     .DESCRIPTION
         Maintains a timeline of package state snapshots and enables rollback
-        to any previous point. Automatically captures state before operations,
-        or manually snapshot at any time.
+        to any previous point. Snapshots are taken manually (-Take) or automatically
+        before every WingetBatch install/update/uninstall once -AutoSnapshot $true is set.
 
-        Supports: "undo last N changes", "restore to Tuesday's state",
-        "what changed since yesterday", and full reconciliation rollback.
+        A rollback reinstalls packages removed since the snapshot (at the snapshot's
+        version) and uninstalls WinGet-sourced packages added since. With
+        -RestoreVersions it also moves updated packages back to their snapshot version.
+        Programs without a WinGet source are never uninstalled.
 
     .PARAMETER Take
         Capture a snapshot of the current package state right now.
@@ -21,25 +23,35 @@ function Restore-WingetSnapshot {
         Show all available snapshots with timestamps and labels.
 
     .PARAMETER Restore
-        Roll back to a specific snapshot (by ID or index).
+        Roll back to a specific snapshot (use with -SnapshotId).
 
     .PARAMETER UndoLast
-        Undo the last N operations by restoring to the snapshot before them.
+        Roll back to the Nth most recent snapshot. With auto-snapshots on,
+        -UndoLast 1 undoes the most recent WingetBatch operation.
 
     .PARAMETER Since
-        Restore to the state at a specific date/time.
+        Restore to the latest snapshot taken at or before this date/time.
 
     .PARAMETER Diff
-        Show what changed between two snapshots (or since last snapshot).
+        Show what changed since a snapshot (the most recent one by default).
 
     .PARAMETER SnapshotId
-        Target snapshot identifier for Restore/Diff operations.
+        Target snapshot identifier for Restore operations.
+
+    .PARAMETER DiffSnapshotId
+        Snapshot to compare against for -Diff.
+
+    .PARAMETER RestoreVersions
+        Also install the snapshot's version of packages that were updated or downgraded since.
+
+    .PARAMETER Force
+        Skip the confirmation prompt.
 
     .PARAMETER PruneOld
-        Remove snapshots older than N days. Default retention: 30 days.
+        Remove snapshots older than N days.
 
     .PARAMETER AutoSnapshot
-        Enable automatic snapshots before every install/uninstall/update.
+        Enable or disable automatic snapshots before every install/uninstall/update.
 
     .EXAMPLE
         Restore-WingetSnapshot -Take -Label "before-big-update"
@@ -50,20 +62,20 @@ function Restore-WingetSnapshot {
         Shows all snapshots: ID, date, label, package count.
 
     .EXAMPLE
-        Restore-WingetSnapshot -UndoLast 3
-        Rolls back the last 3 package changes.
+        Restore-WingetSnapshot -UndoLast 1 -RestoreVersions
+        Rolls back to the most recent snapshot, including version changes.
 
     .EXAMPLE
         Restore-WingetSnapshot -Since "2025-01-15"
         Restores to the state as of January 15th.
 
     .EXAMPLE
-        Restore-WingetSnapshot -Diff -SnapshotId "snap_20250115_143022"
+        Restore-WingetSnapshot -Diff -DiffSnapshotId "snap_20250115_143022"
         Shows what changed since that snapshot.
 
     .NOTES
         Author: Matthew Bubb
-        Snapshots stored in ~/.wingetbatch/snapshots/ as compressed JSON.
+        Snapshots stored in ~/.wingetbatch/snapshots/ as JSON.
     #>
     [CmdletBinding(DefaultParameterSetName = 'Take')]
     param(
@@ -79,14 +91,25 @@ function Restore-WingetSnapshot {
         [Parameter(ParameterSetName = 'Restore', Mandatory)]
         [switch]$Restore,
 
-        [Parameter(ParameterSetName = 'Restore')]
+        [Parameter(ParameterSetName = 'Restore', Mandatory)]
         [string]$SnapshotId,
 
         [Parameter(ParameterSetName = 'Undo', Mandatory)]
+        [ValidateRange(1, 1000)]
         [int]$UndoLast,
 
         [Parameter(ParameterSetName = 'Since', Mandatory)]
         [datetime]$Since,
+
+        [Parameter(ParameterSetName = 'Restore')]
+        [Parameter(ParameterSetName = 'Undo')]
+        [Parameter(ParameterSetName = 'Since')]
+        [switch]$RestoreVersions,
+
+        [Parameter(ParameterSetName = 'Restore')]
+        [Parameter(ParameterSetName = 'Undo')]
+        [Parameter(ParameterSetName = 'Since')]
+        [switch]$Force,
 
         [Parameter(ParameterSetName = 'Diff', Mandatory)]
         [switch]$Diff,
@@ -95,6 +118,7 @@ function Restore-WingetSnapshot {
         [string]$DiffSnapshotId,
 
         [Parameter(ParameterSetName = 'Prune', Mandatory)]
+        [ValidateRange(1, 3650)]
         [int]$PruneOld,
 
         [Parameter(ParameterSetName = 'Auto', Mandatory)]
@@ -109,58 +133,33 @@ function Restore-WingetSnapshot {
     }
     $autoConfigPath = Join-Path $configDir "snapshot_config.json"
 
-    # --- Helper: Capture current state ---
-    function Take-SnapshotInternal {
-        param([string]$SnapLabel)
-
-        $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-        $id = "snap_$timestamp"
-        $packages = Microsoft.WinGet.Client\Get-WinGetPackage -ErrorAction SilentlyContinue
-
-        $snapshot = @{
-            Id = $id
-            Timestamp = (Get-Date -ToString 'o')
-            Label = $SnapLabel ?? "manual"
-            Hostname = $env:COMPUTERNAME
-            PackageCount = $packages.Count
-            Packages = @($packages | ForEach-Object {
-                @{ Id = $_.Id; Name = $_.Name; Version = $_.InstalledVersion; Source = $_.Source }
-            })
-        }
-
-        $filePath = Join-Path $snapshotDir "$id.json"
-        $snapshot | ConvertTo-Json -Depth 5 -Compress | Set-Content -Path $filePath -Encoding UTF8
-        return $snapshot
-    }
-
     # --- Helper: Load snapshot ---
     function Get-SnapshotFile {
         param([string]$Id)
         $path = Join-Path $snapshotDir "$Id.json"
         if (Test-Path $path) {
-            return (Get-Content $path -Raw | ConvertFrom-Json -AsHashtable)
+            return (Get-Content $path -Raw | ConvertFrom-Json)
         }
         return $null
     }
 
-    # --- Helper: Get all snapshots sorted ---
+    # --- Helper: All snapshots, newest first ---
     function Get-AllSnapshots {
-        Get-ChildItem -Path $snapshotDir -Filter "snap_*.json" -ErrorAction SilentlyContinue |
-            Sort-Object LastWriteTime -Descending |
-            ForEach-Object {
-                $data = Get-Content $_.FullName -Raw | ConvertFrom-Json -AsHashtable
-                $data
-            }
+        $all = foreach ($file in (Get-ChildItem -Path $snapshotDir -Filter "snap_*.json" -ErrorAction SilentlyContinue)) {
+            try { Get-Content $file.FullName -Raw | ConvertFrom-Json } catch { }
+        }
+        @($all | Sort-Object { [datetime]$_.Timestamp } -Descending)
     }
 
     # --- AUTO SNAPSHOT CONFIG ---
     if ($PSCmdlet.ParameterSetName -eq 'Auto') {
-        $config = @{ AutoSnapshot = $AutoSnapshot; Enabled = (Get-Date -ToString 'o') }
+        $config = @{ AutoSnapshot = $AutoSnapshot; Updated = (Get-Date).ToString('o') }
         $config | ConvertTo-Json | Set-Content -Path $autoConfigPath -Encoding UTF8
         if ($AutoSnapshot) {
-            Write-Host "  ✓ Auto-snapshot enabled. State captured before every install/uninstall/update." -ForegroundColor Green
+            Write-Host "  Auto-snapshot enabled. State is captured before every WingetBatch install/update/uninstall." -ForegroundColor Green
+            Write-Host "  Undo the last operation with: Restore-WingetSnapshot -UndoLast 1" -ForegroundColor DarkGray
         } else {
-            Write-Host "  ✓ Auto-snapshot disabled." -ForegroundColor Yellow
+            Write-Host "  Auto-snapshot disabled." -ForegroundColor Yellow
         }
         return
     }
@@ -168,223 +167,200 @@ function Restore-WingetSnapshot {
     # --- LIST ---
     if ($List) {
         $snapshots = Get-AllSnapshots
-        if (-not $snapshots -or $snapshots.Count -eq 0) {
+        if ($snapshots.Count -eq 0) {
             Write-Host "`n  No snapshots found. Take one with: Restore-WingetSnapshot -Take`n" -ForegroundColor Yellow
             return
         }
 
         Write-Host ""
-        Write-Host "  ╔══════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
-        Write-Host "  ║              Package State Snapshots                    ║" -ForegroundColor Cyan
-        Write-Host "  ╚══════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+        Write-Host "  Package State Snapshots" -ForegroundColor Cyan
         Write-Host ""
-        Write-Host "  $("ID".PadRight(24)) $("Date".PadRight(22)) $("Pkgs".PadLeft(5))  Label" -ForegroundColor DarkGray
-        Write-Host "  $('─' * 70)" -ForegroundColor DarkGray
+        Write-Host "  $("#".PadLeft(3))  $("ID".PadRight(28)) $("Date".PadRight(20)) $("Pkgs".PadLeft(5))  Label" -ForegroundColor DarkGray
+        Write-Host "  $('─' * 76)" -ForegroundColor DarkGray
 
         $i = 0
         foreach ($snap in $snapshots) {
             $i++
-            $date = [datetime]::Parse($snap.Timestamp).ToString("yyyy-MM-dd HH:mm:ss")
-            Write-Host "  $($snap.Id.PadRight(24)) " -NoNewline -ForegroundColor White
-            Write-Host "$($date.PadRight(22)) " -NoNewline -ForegroundColor DarkGray
-            Write-Host "$($snap.PackageCount.ToString().PadLeft(5))  " -NoNewline -ForegroundColor Cyan
+            $date = ([datetime]$snap.Timestamp).ToString("yyyy-MM-dd HH:mm:ss")
+            Write-Host "  $($i.ToString().PadLeft(3))  " -NoNewline -ForegroundColor DarkGray
+            Write-Host "$($snap.Id.PadRight(28)) " -NoNewline -ForegroundColor White
+            Write-Host "$($date.PadRight(20)) " -NoNewline -ForegroundColor DarkGray
+            Write-Host "$(([string]$snap.PackageCount).PadLeft(5))  " -NoNewline -ForegroundColor Cyan
             Write-Host $snap.Label -ForegroundColor Yellow
         }
         Write-Host ""
-        Write-Host "  $i snapshots | Restore: Restore-WingetSnapshot -Restore -SnapshotId <id>" -ForegroundColor DarkGray
+        Write-Host "  $i snapshots | Undo to #N: Restore-WingetSnapshot -UndoLast N" -ForegroundColor DarkGray
         Write-Host ""
         return
     }
 
     # --- TAKE ---
-    if ($Take -or $PSCmdlet.ParameterSetName -eq 'Take') {
-        $snap = Take-SnapshotInternal -SnapLabel $Label
+    if ($PSCmdlet.ParameterSetName -eq 'Take') {
+        $snap = New-WingetSnapshot -Label $(if ($Label) { $Label } else { 'manual' })
         Write-Host ""
-        Write-Host "  ✓ Snapshot captured: " -NoNewline -ForegroundColor Green
+        Write-Host "  Snapshot captured: " -NoNewline -ForegroundColor Green
         Write-Host $snap.Id -ForegroundColor Cyan
         Write-Host "    Packages: $($snap.PackageCount) | Label: $($snap.Label)" -ForegroundColor DarkGray
-        Write-Host "    Path: $snapshotDir\$($snap.Id).json" -ForegroundColor DarkGray
+        Write-Host "    Path: $(Join-Path $snapshotDir "$($snap.Id).json")" -ForegroundColor DarkGray
         Write-Host ""
         return [PSCustomObject]$snap
     }
 
-    # --- DIFF ---
-    if ($Diff) {
-        $snapshots = Get-AllSnapshots
-        if (-not $snapshots -or $snapshots.Count -eq 0) {
-            Write-Host "  No snapshots to diff against." -ForegroundColor Yellow
-            return
-        }
-
-        # Get target snapshot (specified or most recent)
-        $targetSnap = if ($DiffSnapshotId) { Get-SnapshotFile -Id $DiffSnapshotId }
-                      else { $snapshots | Select-Object -First 1 }
-
-        if (-not $targetSnap) {
-            Write-Error "Snapshot '$DiffSnapshotId' not found."
-            return
-        }
-
-        # Current state
-        $currentPkgs = Microsoft.WinGet.Client\Get-WinGetPackage -ErrorAction SilentlyContinue
-        $currentIds = @{}
-        foreach ($p in $currentPkgs) { $currentIds[$p.Id] = $p.InstalledVersion }
-
-        $snapshotIds = @{}
-        foreach ($p in $targetSnap.Packages) { $snapshotIds[$p.Id] = $p.Version }
-
-        # Compute diff
-        $added = $currentIds.Keys | Where-Object { -not $snapshotIds.ContainsKey($_) }
-        $removed = $snapshotIds.Keys | Where-Object { -not $currentIds.ContainsKey($_) }
-        $updated = $currentIds.Keys | Where-Object { $snapshotIds.ContainsKey($_) -and $currentIds[$_] -ne $snapshotIds[$_] }
-
-        Write-Host ""
-        Write-Host "  Diff: $($targetSnap.Id) → NOW" -ForegroundColor Cyan
-        Write-Host "  Snapshot: $([datetime]::Parse($targetSnap.Timestamp).ToString('yyyy-MM-dd HH:mm')) ($($targetSnap.PackageCount) pkgs)" -ForegroundColor DarkGray
-        Write-Host "  Current:  $($currentPkgs.Count) packages" -ForegroundColor DarkGray
-        Write-Host ""
-
-        if ($added.Count -gt 0) {
-            Write-Host "  + Added ($($added.Count)):" -ForegroundColor Green
-            foreach ($id in $added | Select-Object -First 20) {
-                Write-Host "    + $id ($($currentIds[$id]))" -ForegroundColor Green
-            }
-        }
-        if ($removed.Count -gt 0) {
-            Write-Host "  - Removed ($($removed.Count)):" -ForegroundColor Red
-            foreach ($id in $removed | Select-Object -First 20) {
-                Write-Host "    - $id (was $($snapshotIds[$id]))" -ForegroundColor Red
-            }
-        }
-        if ($updated.Count -gt 0) {
-            Write-Host "  ~ Updated ($($updated.Count)):" -ForegroundColor Yellow
-            foreach ($id in $updated | Select-Object -First 20) {
-                Write-Host "    ~ $id : $($snapshotIds[$id]) → $($currentIds[$id])" -ForegroundColor Yellow
-            }
-        }
-        if ($added.Count -eq 0 -and $removed.Count -eq 0 -and $updated.Count -eq 0) {
-            Write-Host "  No changes since this snapshot." -ForegroundColor Green
-        }
-        Write-Host ""
-        return
-    }
-
-    # --- UNDO LAST N ---
-    if ($UndoLast -gt 0) {
-        $snapshots = Get-AllSnapshots
-        if (-not $snapshots -or $snapshots.Count -le $UndoLast) {
-            Write-Error "Not enough snapshots to undo $UndoLast operations. Available: $($snapshots.Count)"
-            return
-        }
-
-        # Target is the snapshot N positions back
-        $targetSnap = $snapshots[$UndoLast]
-        Write-Host ""
-        Write-Host "  Rolling back to: $($targetSnap.Id) ($([datetime]::Parse($targetSnap.Timestamp).ToString('yyyy-MM-dd HH:mm')))" -ForegroundColor Cyan
-        Write-Host "  Label: $($targetSnap.Label)" -ForegroundColor DarkGray
-    }
-
-    # --- SINCE DATE ---
-    if ($PSCmdlet.ParameterSetName -eq 'Since') {
-        $snapshots = Get-AllSnapshots
-        $targetSnap = $snapshots | Where-Object { [datetime]::Parse($_.Timestamp) -le $Since } | Select-Object -First 1
-        if (-not $targetSnap) {
-            Write-Error "No snapshot found at or before $($Since.ToString('yyyy-MM-dd HH:mm'))."
-            return
-        }
-        Write-Host ""
-        Write-Host "  Restoring to state at: $([datetime]::Parse($targetSnap.Timestamp).ToString('yyyy-MM-dd HH:mm:ss'))" -ForegroundColor Cyan
-    }
-
-    # --- RESTORE (by ID) ---
-    if ($PSCmdlet.ParameterSetName -eq 'Restore' -and $SnapshotId) {
-        $targetSnap = Get-SnapshotFile -Id $SnapshotId
-        if (-not $targetSnap) {
-            Write-Error "Snapshot '$SnapshotId' not found. Use -List to see available snapshots."
-            return
-        }
-    }
-
-    # --- PERFORM ROLLBACK ---
-    if ($targetSnap) {
-        # Compute what needs to change
-        $currentPkgs = Microsoft.WinGet.Client\Get-WinGetPackage -ErrorAction SilentlyContinue
-        $currentIds = @{}
-        foreach ($p in $currentPkgs) { $currentIds[$p.Id] = $p.InstalledVersion }
-
-        $snapshotIds = @{}
-        foreach ($p in $targetSnap.Packages) { $snapshotIds[$p.Id] = $p.Version }
-
-        $toInstall = $snapshotIds.Keys | Where-Object { -not $currentIds.ContainsKey($_) }
-        $toUninstall = $currentIds.Keys | Where-Object { -not $snapshotIds.ContainsKey($_) }
-
-        Write-Host ""
-        Write-Host "  Rollback Plan:" -ForegroundColor White
-        Write-Host "    Install:   $($toInstall.Count) packages (were removed since snapshot)" -ForegroundColor Green
-        Write-Host "    Uninstall: $($toUninstall.Count) packages (added since snapshot)" -ForegroundColor Red
-        Write-Host ""
-
-        if ($toInstall.Count -eq 0 -and $toUninstall.Count -eq 0) {
-            Write-Host "  ✓ Already at target state. Nothing to do." -ForegroundColor Green
-            return
-        }
-
-        $confirm = $PSCmdlet.ShouldContinue(
-            "Install $($toInstall.Count) and uninstall $($toUninstall.Count) packages to restore snapshot?",
-            "Confirm Rollback")
-        if (-not $confirm) {
-            Write-Host "  Rollback cancelled." -ForegroundColor Yellow
-            return
-        }
-
-        # Take a safety snapshot before rollback
-        Take-SnapshotInternal -SnapLabel "pre-rollback-safety" | Out-Null
-
-        $successCount = 0
-        $failCount = 0
-
-        # Install missing
-        foreach ($id in $toInstall) {
-            Write-Host "  + Installing $id..." -NoNewline -ForegroundColor Green
-            try {
-                Microsoft.WinGet.Client\Install-WinGetPackage -Id $id -Mode Silent | Out-Null
-                Write-Host " ✓" -ForegroundColor Green
-                $successCount++
-            } catch {
-                Write-Host " ✗" -ForegroundColor Red
-                $failCount++
-            }
-        }
-
-        # Uninstall extraneous
-        foreach ($id in $toUninstall) {
-            Write-Host "  - Uninstalling $id..." -NoNewline -ForegroundColor Red
-            try {
-                Microsoft.WinGet.Client\Uninstall-WinGetPackage -Id $id -Mode Silent | Out-Null
-                Write-Host " ✓" -ForegroundColor Green
-                $successCount++
-            } catch {
-                Write-Host " ✗" -ForegroundColor Red
-                $failCount++
-            }
-        }
-
-        Write-Host ""
-        Write-Host "  Rollback complete: $successCount succeeded, $failCount failed." -ForegroundColor $(if ($failCount -eq 0) { 'Green' } else { 'Yellow' })
-        Write-Host "  (Safety snapshot saved in case you need to undo this rollback)" -ForegroundColor DarkGray
-        Write-Host ""
-    }
-
     # --- PRUNE ---
-    if ($PruneOld -gt 0) {
+    if ($PSCmdlet.ParameterSetName -eq 'Prune') {
         $cutoff = (Get-Date).AddDays(-$PruneOld)
-        $oldSnaps = Get-ChildItem -Path $snapshotDir -Filter "snap_*.json" | Where-Object { $_.LastWriteTime -lt $cutoff }
+        $oldSnaps = @(Get-ChildItem -Path $snapshotDir -Filter "snap_*.json" | Where-Object { $_.LastWriteTime -lt $cutoff })
         if ($oldSnaps.Count -eq 0) {
             Write-Host "  No snapshots older than $PruneOld days." -ForegroundColor Green
         } else {
             $oldSnaps | Remove-Item -Force
-            Write-Host "  ✓ Pruned $($oldSnaps.Count) snapshots older than $PruneOld days." -ForegroundColor Green
+            Write-Host "  Pruned $($oldSnaps.Count) snapshots older than $PruneOld days." -ForegroundColor Green
         }
         return
     }
+
+    # Current state, used by Diff and rollback
+    $currentPkgs = @(Microsoft.WinGet.Client\Get-WinGetPackage -ErrorAction SilentlyContinue)
+    $current = @{}
+    foreach ($p in $currentPkgs) { if ($p.Id) { $current[$p.Id] = $p } }
+
+    # --- DIFF ---
+    if ($Diff) {
+        $targetSnap = if ($DiffSnapshotId) { Get-SnapshotFile -Id $DiffSnapshotId } else { Get-AllSnapshots | Select-Object -First 1 }
+        if (-not $targetSnap) {
+            if ($DiffSnapshotId) { Write-Error "Snapshot '$DiffSnapshotId' not found." }
+            else { Write-Host "  No snapshots to diff against." -ForegroundColor Yellow }
+            return
+        }
+
+        $snapshotIds = @{}
+        foreach ($p in $targetSnap.Packages) { $snapshotIds[$p.Id] = $p.Version }
+
+        $added = @($current.Keys | Where-Object { -not $snapshotIds.ContainsKey($_) } | Sort-Object)
+        $removed = @($snapshotIds.Keys | Where-Object { -not $current.ContainsKey($_) } | Sort-Object)
+        $updated = @($current.Keys | Where-Object { $snapshotIds.ContainsKey($_) -and [string]$current[$_].InstalledVersion -ne [string]$snapshotIds[$_] } | Sort-Object)
+
+        Write-Host ""
+        Write-Host "  Diff: $($targetSnap.Id) -> now" -ForegroundColor Cyan
+        Write-Host "  Snapshot: $(([datetime]$targetSnap.Timestamp).ToString('yyyy-MM-dd HH:mm')) ($($targetSnap.PackageCount) pkgs, $($targetSnap.Label))" -ForegroundColor DarkGray
+        Write-Host "  Current:  $($currentPkgs.Count) packages" -ForegroundColor DarkGray
+        Write-Host ""
+
+        foreach ($id in $added | Select-Object -First 20) { Write-Host "    + $id ($($current[$id].InstalledVersion))" -ForegroundColor Green }
+        foreach ($id in $removed | Select-Object -First 20) { Write-Host "    - $id (was $($snapshotIds[$id]))" -ForegroundColor Red }
+        foreach ($id in $updated | Select-Object -First 20) { Write-Host "    ~ $id : $($snapshotIds[$id]) -> $($current[$id].InstalledVersion)" -ForegroundColor Yellow }
+        if (($added.Count + $removed.Count + $updated.Count) -eq 0) {
+            Write-Host "  No changes since this snapshot." -ForegroundColor Green
+        }
+        elseif ([Math]::Max([Math]::Max($added.Count, $removed.Count), $updated.Count) -gt 20) {
+            Write-Host "  (first 20 of each shown) Added: $($added.Count) Removed: $($removed.Count) Changed: $($updated.Count)" -ForegroundColor DarkGray
+        }
+        Write-Host ""
+        return [PSCustomObject]@{ SnapshotId = $targetSnap.Id; Added = $added; Removed = $removed; Changed = $updated }
+    }
+
+    # --- Resolve rollback target ---
+    $targetSnap = $null
+    switch ($PSCmdlet.ParameterSetName) {
+        'Undo' {
+            $snapshots = Get-AllSnapshots
+            if ($snapshots.Count -lt $UndoLast) {
+                Write-Error "Not enough snapshots to undo $UndoLast operation(s). Available: $($snapshots.Count)"
+                return
+            }
+            $targetSnap = $snapshots[$UndoLast - 1]
+        }
+        'Since' {
+            $targetSnap = Get-AllSnapshots | Where-Object { [datetime]$_.Timestamp -le $Since } | Select-Object -First 1
+            if (-not $targetSnap) {
+                Write-Error "No snapshot found at or before $($Since.ToString('yyyy-MM-dd HH:mm'))."
+                return
+            }
+        }
+        'Restore' {
+            $targetSnap = Get-SnapshotFile -Id $SnapshotId
+            if (-not $targetSnap) {
+                Write-Error "Snapshot '$SnapshotId' not found. Use -List to see available snapshots."
+                return
+            }
+        }
+    }
+
+    Write-Host ""
+    Write-Host "  Rolling back to: $($targetSnap.Id) ($(([datetime]$targetSnap.Timestamp).ToString('yyyy-MM-dd HH:mm')))" -ForegroundColor Cyan
+    Write-Host "  Label: $($targetSnap.Label)" -ForegroundColor DarkGray
+
+    # --- Plan ---
+    $snapshotPkgs = @{}
+    foreach ($p in $targetSnap.Packages) { $snapshotPkgs[$p.Id] = $p }
+
+    $toInstall = @($snapshotPkgs.Values | Where-Object { -not $current.ContainsKey($_.Id) -and $_.Source } | Sort-Object Id)
+    $toUninstall = @($current.Values | Where-Object { -not $snapshotPkgs.ContainsKey($_.Id) -and $_.Source } | Sort-Object Id)
+    $skipped = @($current.Values | Where-Object { -not $snapshotPkgs.ContainsKey($_.Id) -and -not $_.Source })
+    $toRevert = @()
+    if ($RestoreVersions) {
+        $toRevert = @($current.Values | Where-Object {
+            $_.Source -and $snapshotPkgs.ContainsKey($_.Id) -and $snapshotPkgs[$_.Id].Version -and
+            [string]$_.InstalledVersion -ne [string]$snapshotPkgs[$_.Id].Version
+        } | Sort-Object Id)
+    }
+
+    Write-Host ""
+    Write-Host "  Rollback Plan:" -ForegroundColor White
+    foreach ($p in $toInstall) { Write-Host "    + reinstall $($p.Id) v$($p.Version)" -ForegroundColor Green }
+    foreach ($p in $toUninstall) { Write-Host "    - uninstall $($p.Id) ($($p.InstalledVersion))" -ForegroundColor Red }
+    foreach ($p in $toRevert) { Write-Host "    ~ revert    $($p.Id) $($p.InstalledVersion) -> $($snapshotPkgs[$p.Id].Version)" -ForegroundColor Yellow }
+    if ($skipped.Count -gt 0) {
+        Write-Host "    ($($skipped.Count) newly added program(s) have no WinGet source and will be left alone)" -ForegroundColor DarkGray
+    }
+    Write-Host ""
+
+    $totalActions = $toInstall.Count + $toUninstall.Count + $toRevert.Count
+    if ($totalActions -eq 0) {
+        Write-Host "  Already at target state. Nothing to do." -ForegroundColor Green
+        if (-not $RestoreVersions) {
+            Write-Host "  (Version changes are only rolled back with -RestoreVersions.)" -ForegroundColor DarkGray
+        }
+        return
+    }
+
+    if (-not $Force) {
+        $confirm = $PSCmdlet.ShouldContinue("Apply $totalActions change(s) to restore snapshot $($targetSnap.Id)?", "Confirm Rollback")
+        if (-not $confirm) {
+            Write-Host "  Rollback cancelled." -ForegroundColor Yellow
+            return
+        }
+    }
+
+    # Safety snapshot so the rollback itself can be undone
+    New-WingetSnapshot -Label "pre-rollback-safety" | Out-Null
+
+    $successCount = 0
+    $failCount = 0
+    $run = {
+        param($label, $result)
+        Write-Host "  $label" -NoNewline
+        if ($result.Succeeded) { Write-Host " [OK]" -ForegroundColor Green; return $true }
+        Write-Host " [FAIL] $($result.Message)" -ForegroundColor Red
+        return $false
+    }
+
+    foreach ($p in $toInstall) {
+        $r = Invoke-WingetPackageAction -Action Install -Id $p.Id -Version $p.Version -Source $p.Source -Options @{ Mode = 'Silent' }
+        if (& $run "+ Installing $($p.Id) v$($p.Version)..." $r) { $successCount++ } else { $failCount++ }
+    }
+    foreach ($p in $toUninstall) {
+        $r = Invoke-WingetPackageAction -Action Uninstall -Id $p.Id -Source $p.Source -Options @{ Mode = 'Silent' }
+        if (& $run "- Uninstalling $($p.Id)..." $r) { $successCount++ } else { $failCount++ }
+    }
+    foreach ($p in $toRevert) {
+        $ver = $snapshotPkgs[$p.Id].Version
+        $r = Set-WingetPackageVersion -Id $p.Id -Version $ver -Source $p.Source
+        if (& $run "~ Reverting $($p.Id) to $ver..." $r) { $successCount++ } else { $failCount++ }
+    }
+
+    Write-Host ""
+    Write-Host "  Rollback complete: $successCount succeeded, $failCount failed." -ForegroundColor $(if ($failCount -eq 0) { 'Green' } else { 'Yellow' })
+    Write-Host "  (Safety snapshot saved: undo this rollback with Restore-WingetSnapshot -UndoLast 1)" -ForegroundColor DarkGray
+    Write-Host ""
 }
