@@ -258,6 +258,11 @@ Describe "Source hygiene" {
         $hits | Should -BeNullOrEmpty
     }
 
+    It "keeps release notes under the PowerShell Gallery's 10,600 character limit" {
+        $manifest = Import-PowerShellDataFile (Join-Path $PSScriptRoot ".." "WingetBatch.psd1")
+        $manifest.PrivateData.PSData.ReleaseNotes.Length | Should -BeLessOrEqual 10600
+    }
+
     It "declares the PowerShell version its dependencies actually need" {
         $manifest = Import-PowerShellDataFile (Join-Path $PSScriptRoot ".." "WingetBatch.psd1")
         [version]$manifest.PowerShellVersion | Should -BeGreaterOrEqual ([version]'7.4')
