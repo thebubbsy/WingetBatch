@@ -386,15 +386,18 @@ exit `$(if (`$report.FailedCount -gt 0 -or `$report.Errors.Count -gt 0) { 1 } el
     $scriptPath = Join-Path $configDir "maintenance_task.ps1"
     $maintenanceScript | Set-Content -Path $scriptPath -Encoding UTF8
 
-    # Build scheduled task
-    $pwshPath = (Get-Command pwsh -ErrorAction SilentlyContinue).Source
-    if (-not $pwshPath) {
-        Write-Error "pwsh.exe (PowerShell 7) was not found in PATH. The maintenance task requires PowerShell 7."
+    # Build scheduled task (prefer pwsh if installed, fall back to powershell.exe)
+    $psExe = (Get-Command pwsh -ErrorAction SilentlyContinue).Source
+    if (-not $psExe) {
+        $psExe = (Get-Command powershell -ErrorAction SilentlyContinue).Source
+    }
+    if (-not $psExe) {
+        Write-Error "Neither pwsh.exe nor powershell.exe was found in PATH."
         return
     }
 
     $taskAction = New-ScheduledTaskAction `
-        -Execute $pwshPath `
+        -Execute $psExe `
         -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$scriptPath`""
 
     # Trigger

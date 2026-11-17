@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     WingetBatch Standalone Script
     
@@ -7,6 +7,12 @@
     from the WingetBatch module. You can dot-source this script directly if you don't
     want to install the module.
 #>
+
+if ($PSVersionTable.PSVersion.Major -lt 6) {
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    } catch { }
+}
 
 # Region: Private/Compare-WingetVersion.ps1
 function Compare-WingetVersion {
@@ -153,6 +159,53 @@ function ConvertTo-WingetActionResult {
         Status         = $(if ($status) { $status } else { 'Unknown' })
         RebootRequired = [bool]$r.RebootRequired
         Message        = $message
+    }
+}
+
+# EndRegion
+
+# Region: Private/ConvertTo-WingetHashtable.ps1
+function ConvertTo-WingetHashtable {
+    <#
+    .SYNOPSIS
+        Recursively convert PSCustomObject values (such as ConvertFrom-Json output) into hashtables.
+
+    .DESCRIPTION
+        Windows PowerShell 5.1 does not support ConvertFrom-Json -AsHashtable.
+        This helper normalizes parsed JSON objects into hashtables across PS 5.1 and 7+.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(ValueFromPipeline)]
+        [object]$InputObject
+    )
+
+    process {
+        if ($null -eq $InputObject) {
+            return $null
+        }
+        if ($InputObject -is [System.Collections.IDictionary]) {
+            $ht = @{}
+            foreach ($key in $InputObject.Keys) {
+                $ht[$key] = ConvertTo-WingetHashtable -InputObject $InputObject[$key]
+            }
+            return $ht
+        }
+        if ($InputObject -is [PSCustomObject]) {
+            $ht = @{}
+            foreach ($prop in $InputObject.PSObject.Properties) {
+                $ht[$prop.Name] = ConvertTo-WingetHashtable -InputObject $prop.Value
+            }
+            return $ht
+        }
+        if ($InputObject -is [System.Collections.IEnumerable] -and $InputObject -isnot [string]) {
+            $list = [System.Collections.Generic.List[object]]::new()
+            foreach ($item in $InputObject) {
+                $list.Add((ConvertTo-WingetHashtable -InputObject $item))
+            }
+            return ,$list.ToArray()
+        }
+        return $InputObject
     }
 }
 
@@ -509,10 +562,11 @@ function Get-PackageDetailsCache {
     }
 
     try {
-        $cache = Get-Content $cacheFile -Raw | ConvertFrom-Json
-        $packageCache = $cache.PSObject.Properties[$PackageId]
+        $cache = Get-Content $cacheFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        $packageProp = $cache.PSObject.Properties[$PackageId]
 
-        if ($packageCache) {
+        if ($packageProp -and $packageProp.Value) {
+            $packageCache = $packageProp.Value
             $cachedDate = [DateTime]$packageCache.CachedDate
             $daysSinceCached = ((Get-Date) - $cachedDate).TotalDays
 
@@ -846,6 +900,74 @@ function Get-WingetSourceIndexAge {
 
 # EndRegion
 
+# Region: Private/Import-WingetBatchSpectre.ps1
+function Import-WingetBatchSpectre {
+    <#
+    .SYNOPSIS
+        Safely import PwshSpectreConsole on PowerShell 7.4+ without triggering encoding warnings.
+
+    .DESCRIPTION
+        PwshSpectreConsole requires PowerShell 7.4+ (Core edition) and prints a large
+        warning banner at import time if the host output encoding is not UTF-8.
+        This helper skips import on Windows PowerShell 5.1, enables UTF-8 console
+        encoding when supported, suppresses the import-time warning if UTF-8 cannot
+        be applied, and returns $true when PwshSpectreConsole is loaded.
+    #>
+    [CmdletBinding()]
+    param(
+        [switch]$Force
+    )
+
+    $isSupportedPs = ($PSVersionTable.PSEdition -eq 'Core') -and (
+        $PSVersionTable.PSVersion.Major -gt 7 -or
+        ($PSVersionTable.PSVersion.Major -eq 7 -and $PSVersionTable.PSVersion.Minor -ge 4)
+    )
+    if (-not $isSupportedPs) {
+        return $false
+    }
+
+    if (Get-Module -Name PwshSpectreConsole) {
+        return $true
+    }
+
+    if (-not $Force -and $script:WingetBatchSpectreChecked) {
+        return $false
+    }
+    $script:WingetBatchSpectreChecked = $true
+
+    if (-not (Get-Module -ListAvailable -Name PwshSpectreConsole)) {
+        return $false
+    }
+
+    # Enable UTF-8 before Spectre initializes AnsiConsole.Profile so Unicode rendering works
+    $utf8 = [System.Text.UTF8Encoding]::new($false)
+    try { $global:OutputEncoding = $utf8 } catch { }
+    try { [Console]::InputEncoding = $utf8 } catch { }
+    try { [Console]::OutputEncoding = $utf8 } catch { }
+
+    # Guard against environments where the host ignores encoding changes (e.g. redirected/ISE)
+    $hadIgnore = Test-Path 'env:IgnoreSpectreEncoding'
+    $prevIgnore = $env:IgnoreSpectreEncoding
+    try {
+        if (-not $hadIgnore) {
+            $env:IgnoreSpectreEncoding = 'True'
+        }
+        Import-Module PwshSpectreConsole -ErrorAction SilentlyContinue
+    }
+    finally {
+        if (-not $hadIgnore) {
+            Remove-Item 'env:IgnoreSpectreEncoding' -ErrorAction SilentlyContinue
+        }
+        else {
+            $env:IgnoreSpectreEncoding = $prevIgnore
+        }
+    }
+
+    return [bool](Get-Module -Name PwshSpectreConsole)
+}
+
+# EndRegion
+
 # Region: Private/Install-WingetBatchDependency.ps1
 function Install-WingetBatchDependency {
     <#
@@ -872,10 +994,17 @@ function Install-WingetBatchDependency {
         }
     }
     elseif ($Update) {
-        Update-Module -Name $Name -Force -AcceptLicense -ErrorAction Stop
+        $cmd = Get-Command Update-Module -ErrorAction Stop
+        $params = @{ Name = $Name; Force = $true; ErrorAction = 'Stop' }
+        if ($cmd.Parameters.ContainsKey('AcceptLicense')) { $params['AcceptLicense'] = $true }
+        Update-Module @params
     }
     else {
-        Install-Module -Name $Name -Scope CurrentUser -Force -SkipPublisherCheck -AllowClobber -ErrorAction Stop
+        $cmd = Get-Command Install-Module -ErrorAction Stop
+        $params = @{ Name = $Name; Scope = 'CurrentUser'; Force = $true; ErrorAction = 'Stop' }
+        if ($cmd.Parameters.ContainsKey('SkipPublisherCheck')) { $params['SkipPublisherCheck'] = $true }
+        if ($cmd.Parameters.ContainsKey('AllowClobber')) { $params['AllowClobber'] = $true }
+        Install-Module @params
     }
 }
 
@@ -1211,6 +1340,135 @@ function Parse-WingetShowOutput {
 
 # EndRegion
 
+# Region: Private/Read-WingetConsoleSelection.ps1
+function Read-WingetConsoleSelection {
+    <#
+    .SYNOPSIS
+        Interactive numbered console prompt used when PwshSpectreConsole is unavailable.
+
+    .DESCRIPTION
+        Displays numbered choices and accepts single selections, comma/space lists,
+        numeric ranges (e.g. 1-3), 'all', or empty input to cancel.
+        Returns selected 0-based indices (with -ReturnIndex) or choice strings.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Title,
+
+        [Parameter(Mandatory)]
+        [string[]]$Choices,
+
+        [switch]$MultiSelect,
+
+        [switch]$ReturnIndex
+    )
+
+    if (-not $Choices -or $Choices.Count -eq 0) {
+        return @()
+    }
+
+    Write-Host ""
+    Write-Host "  $Title" -ForegroundColor Cyan
+    Write-Host ""
+    for ($i = 0; $i -lt $Choices.Count; $i++) {
+        Write-Host ("  [{0}] " -f ($i + 1)) -ForegroundColor Cyan -NoNewline
+        Write-Host $Choices[$i] -ForegroundColor White
+    }
+    Write-Host ""
+
+    $selectedIndices = [System.Collections.Generic.List[int]]::new()
+    $seen = [System.Collections.Generic.HashSet[int]]::new()
+
+    while ($true) {
+        $prompt = if ($MultiSelect) {
+            if ($Choices.Count -eq 1) {
+                "  Enter 1 (or 'y') to select, or Enter to cancel"
+            }
+            else {
+                "  Enter numbers (e.g. 1, 1-3, 'all', or Enter to cancel)"
+            }
+        }
+        else {
+            "  Enter number (1-$($Choices.Count), or Enter to cancel)"
+        }
+
+        $answer = Read-Host $prompt
+        if ($null -eq $answer) {
+            break
+        }
+        $trimmed = $answer.Trim()
+        if ($trimmed -eq '' -or $trimmed -match '^(q|quit|cancel|n|no|none)$') {
+            break
+        }
+
+        $selectedIndices.Clear()
+        $seen.Clear()
+        $invalid = $false
+
+        if ($MultiSelect -and $trimmed -match '^(a|all|\*)$') {
+            for ($i = 0; $i -lt $Choices.Count; $i++) {
+                if ($seen.Add($i)) { $selectedIndices.Add($i) }
+            }
+            break
+        }
+        elseif ($Choices.Count -eq 1 -and $trimmed -match '^(y|yes)$') {
+            $selectedIndices.Add(0)
+            break
+        }
+
+        $tokens = $trimmed -split '[,\s]+' | Where-Object { $_ -ne '' }
+        foreach ($tok in $tokens) {
+            if ($MultiSelect -and $tok -match '^(\d+)-(\d+)$') {
+                $start = [int]$Matches[1]
+                $end = [int]$Matches[2]
+                if ($start -lt 1 -or $end -lt 1 -or $start -gt $Choices.Count -or $end -gt $Choices.Count) {
+                    $invalid = $true
+                    break
+                }
+                $step = if ($start -le $end) { 1 } else { -1 }
+                for ($n = $start; ($step -gt 0 -and $n -le $end) -or ($step -lt 0 -and $n -ge $end); $n += $step) {
+                    $idx = $n - 1
+                    if ($seen.Add($idx)) { $selectedIndices.Add($idx) }
+                }
+            }
+            elseif ($tok -match '^\d+$') {
+                $n = [int]$tok
+                if ($n -lt 1 -or $n -gt $Choices.Count) {
+                    $invalid = $true
+                    break
+                }
+                $idx = $n - 1
+                if ($seen.Add($idx)) { $selectedIndices.Add($idx) }
+                if (-not $MultiSelect) { break }
+            }
+            else {
+                $invalid = $true
+                break
+            }
+        }
+
+        if (-not $invalid -and $selectedIndices.Count -gt 0) {
+            break
+        }
+
+        Write-Host "  Invalid selection. Choose between 1 and $($Choices.Count), or press Enter to cancel." -ForegroundColor Yellow
+    }
+
+    if ($ReturnIndex) {
+        return $selectedIndices.ToArray()
+    }
+
+    $result = @($selectedIndices | ForEach-Object { $Choices[$_] })
+    if (-not $MultiSelect) {
+        if ($result.Count -gt 0) { return $result[0] }
+        return $null
+    }
+    return $result
+}
+
+# EndRegion
+
 # Region: Private/Register-WingetBatchCompleters.ps1
 function Register-WingetBatchCompleters {
     <#
@@ -1314,7 +1572,7 @@ function Set-PackageDetailsCache {
         [string]$PackageId,
 
         [Parameter(Mandatory=$true)]
-        [hashtable]$Details
+        [object]$Details
     )
 
     $configDir = Get-WingetBatchConfigDir
@@ -1329,7 +1587,7 @@ function Set-PackageDetailsCache {
     $cache = @{}
     if (Test-Path $cacheFile) {
         try {
-            $cacheJson = Get-Content $cacheFile -Raw | ConvertFrom-Json
+            $cacheJson = Get-Content $cacheFile -Raw -Encoding UTF8 | ConvertFrom-Json
             # Convert PSCustomObject to hashtable
             $cacheJson.PSObject.Properties | ForEach-Object {
                 $cache[$_.Name] = $_.Value
@@ -1683,14 +1941,19 @@ function Start-PackageDetailJobs {
         if ($cmd) { $wingetExe = $cmd.Source }
     }
 
+    # Pass parser source text (not the module-bound ScriptBlock) so ThreadJob runspaces do not deadlock on caller state
+    $parseCode = if (${function:Parse-WingetShowOutput}) { ${function:Parse-WingetShowOutput}.ToString() } else { $null }
+
     $jobScript = {
-        param($packageList, $cacheDir, $ParseSB, $WingetPath)
+        param($packageList, $cacheDir, $ParseCode, $WingetPath)
         $results = @{}
 
-        # Define Parse-WingetShowOutput in the job scope from the passed script block
-        if ($ParseSB) {
-            Set-Item -Path function:Parse-WingetShowOutput -Value $ParseSB
+        # Define Parse-WingetShowOutput cleanly in this runspace/process
+        if ($ParseCode) {
+            Set-Item -Path function:Parse-WingetShowOutput -Value ([scriptblock]::Create($ParseCode))
         }
+
+        try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch { }
 
         $cacheFile = Join-Path $cacheDir "package_cache.json"
         $localCache = @{}
@@ -1698,7 +1961,7 @@ function Start-PackageDetailJobs {
         # Read cache once at start of job
         if (Test-Path $cacheFile) {
             try {
-                $cacheJson = Get-Content $cacheFile -Raw | ConvertFrom-Json
+                $cacheJson = Get-Content $cacheFile -Raw -Encoding UTF8 | ConvertFrom-Json
                 if ($cacheJson) {
                     $cacheJson.PSObject.Properties | ForEach-Object {
                         $localCache[$_.Name] = $_.Value
@@ -1708,8 +1971,9 @@ function Start-PackageDetailJobs {
             catch { }
         }
 
-        foreach ($pkgIdItem in $packageList) {
+        foreach ($pkgIdItem in @($packageList)) {
             $packageId = [string]$pkgIdItem
+            if ([string]::IsNullOrWhiteSpace($packageId)) { continue }
             $cachedInfo = $null
 
             # Try to get from cache first
@@ -1738,7 +2002,7 @@ function Start-PackageDetailJobs {
 
             if ($WingetPath -and (Test-Path $WingetPath)) {
                 try {
-                    $output = & $WingetPath show --id $packageId --no-progress --disable-interactivity 2>&1 | Out-String
+                    $output = & $WingetPath show --id $packageId -e --no-progress --disable-interactivity --accept-source-agreements 2>&1 | Out-String
                     $info = Parse-WingetShowOutput -Output $output -PackageId $packageId
                 }
                 catch {
@@ -1800,9 +2064,9 @@ function Start-PackageDetailJobs {
         $endIndex = [Math]::Min($startIndex + $packagesPerJob - 1, $totalPackages - 1)
         if ($startIndex -gt $endIndex) { break }
 
-        $packageBatch = $PackageIds[$startIndex..$endIndex]
+        $packageBatch = @($PackageIds[$startIndex..$endIndex])
 
-        $job = Start-WingetBatchJob -ScriptBlock $jobScript -ArgumentList (,$packageBatch), $ConfigDir, ${function:Parse-WingetShowOutput}, $wingetExe
+        $job = Start-WingetBatchJob -ScriptBlock $jobScript -ArgumentList @($packageBatch, $ConfigDir, $parseCode, $wingetExe)
         $jobs.Add($job)
         $jobPackageMap[$job.Id] = $packageBatch
     }
@@ -2470,11 +2734,7 @@ function Find-WingetDuplicate {
                 return
             }
         }
-        if (-not (Get-Module -Name PwshSpectreConsole)) {
-            if (Get-Module -ListAvailable -Name PwshSpectreConsole) {
-                Import-Module PwshSpectreConsole -ErrorAction SilentlyContinue
-            }
-        }
+        $null = Import-WingetBatchSpectre
     }
 
     process {
@@ -3618,11 +3878,7 @@ function Get-WingetHistory {
     )
 
     begin {
-        if (-not (Get-Module -Name PwshSpectreConsole)) {
-            if (Get-Module -ListAvailable -Name PwshSpectreConsole) {
-                Import-Module PwshSpectreConsole -ErrorAction SilentlyContinue
-            }
-        }
+        $null = Import-WingetBatchSpectre
     }
 
     process {
@@ -4372,12 +4628,8 @@ function Get-WingetNewPackages {
         [switch]$AllowHashMismatch
     )
 
-    # Ensure PwshSpectreConsole is available
-    if (-not (Get-Module -Name PwshSpectreConsole)) {
-        if (Get-Module -ListAvailable -Name PwshSpectreConsole) {
-            Import-Module PwshSpectreConsole -ErrorAction SilentlyContinue
-        }
-    }
+    # Ensure PwshSpectreConsole is available on PS 7.4+ (without encoding warnings)
+    $null = Import-WingetBatchSpectre
 
     # Determine time period
     if ($PSCmdlet.ParameterSetName -eq 'Days') {
@@ -4676,27 +4928,33 @@ function Get-WingetNewPackages {
             if ($cmd) { $wingetExe = $cmd.Source }
         }
 
+        $parseCode = if (${function:Parse-WingetShowOutput}) { ${function:Parse-WingetShowOutput}.ToString() } else { $null }
+
         for ($i = 0; $i -lt $actualJobCount; $i++) {
             $startIndex = $i * $packagesPerJob
             $endIndex = [Math]::Min($startIndex + $packagesPerJob - 1, $totalPackagesToFetch - 1)
-            $packageBatch = $packagesToFetch[$startIndex..$endIndex]
+            $packageBatch = @($packagesToFetch[$startIndex..$endIndex])
 
             $job = Start-WingetBatchJob -ScriptBlock {
-                param($packageList, $cacheDir, $ParseSB, $WingetPath)
+                param($packageList, $cacheDir, $ParseCode, $WingetPath)
                 $results = @{}
 
-                # Define Parse-WingetShowOutput in the job scope from the passed script block
-                if ($ParseSB) {
-                    Set-Item -Path function:Parse-WingetShowOutput -Value $ParseSB
+                # Define Parse-WingetShowOutput cleanly in this runspace/process
+                if ($ParseCode) {
+                    Set-Item -Path function:Parse-WingetShowOutput -Value ([scriptblock]::Create($ParseCode))
                 }
 
-                foreach ($packageId in $packageList) {
+                try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch { }
+
+                foreach ($packageIdItem in @($packageList)) {
+                    $packageId = [string]$packageIdItem
+                    if ([string]::IsNullOrWhiteSpace($packageId)) { continue }
                     $info = $null
 
                     # Try winget.exe for rich details
                     if ($WingetPath -and (Test-Path $WingetPath)) {
                         try {
-                            $output = & $WingetPath show --id $packageId --no-progress --disable-interactivity 2>&1 | Out-String
+                            $output = & $WingetPath show --id $packageId -e --no-progress --disable-interactivity --accept-source-agreements 2>&1 | Out-String
                             $info = Parse-WingetShowOutput -Output $output -PackageId $packageId
                         }
                         catch { }
@@ -4732,7 +4990,7 @@ function Get-WingetNewPackages {
                 }
 
                 return $results
-            } -ArgumentList (,$packageBatch), $configDir, ${function:Parse-WingetShowOutput}, $wingetExe
+            } -ArgumentList @($packageBatch, $configDir, $parseCode, $wingetExe)
 
             $jobs.Add($job)
             $jobPackageMap[$job.Id] = $packageBatch
@@ -4761,39 +5019,47 @@ function Get-WingetNewPackages {
             }
         }
 
-        # Interactive selection using Spectre Console
-        if ($IWantToLiterallyInstallAllFuckingResults -or (Get-Module -Name PwshSpectreConsole)) {
-            Write-Host ""
+        # Interactive selection (PwshSpectreConsole on PS 7.4+, numbered console fallback on 5.1)
+        Write-Host ""
 
-            try {
+        try {
                 # Create choices with package name and version for display
-                $choices = $newPackages | ForEach-Object {
+                $choices = @($newPackages | ForEach-Object {
                     "$($_.Name) (v$($_.Version))"
-                }
+                })
 
                 if ($IWantToLiterallyInstallAllFuckingResults) {
                     Write-Host "Aggressive Install Mode Activated! Selecting ALL packages..." -ForegroundColor Magenta
                     $selectedChoices = $choices
-                } else {
-                    # Show multi-selection prompt (while jobs run in background)
-                    $selectedChoices = Read-SpectreMultiSelection -Title "[cyan]Select packages to install (Space to toggle, Enter to confirm)[/]" `
-                        -Choices $choices `
-                        -PageSize 20 `
-                        -Color "Green"
+                }
+                elseif (Import-WingetBatchSpectre) {
+                    try {
+                        # Show multi-selection prompt (while jobs run in background)
+                        $selectedChoices = Read-SpectreMultiSelection -Title "[cyan]Select packages to install (Space to toggle, Enter to confirm)[/]" `
+                            -Choices $choices `
+                            -PageSize 20 `
+                            -Color "Green"
+                    }
+                    catch {
+                        $selectedChoices = Read-WingetConsoleSelection -Title "Select packages to install" -Choices $choices -MultiSelect
+                    }
+                }
+                else {
+                    $selectedChoices = Read-WingetConsoleSelection -Title "Select packages to install" -Choices $choices -MultiSelect
                 }
 
-                if ($selectedChoices.Count -gt 0) {
-                            Write-Host "  - " -ForegroundColor Green -NoNewline
-                    Write-Host "$($selectedChoices.Count)" -ForegroundColor White -NoNewline
+                if (@($selectedChoices).Count -gt 0) {
+                    Write-Host "  - " -ForegroundColor Green -NoNewline
+                    Write-Host "$(@($selectedChoices).Count)" -ForegroundColor White -NoNewline
                     Write-Host " package(s) for installation" -ForegroundColor Green
                     Write-Host ""
 
                     # Extract package IDs from the selections (remove version suffix)
-                    $packagesToInstall = $selectedChoices | ForEach-Object {
+                    $packagesToInstall = @($selectedChoices | ForEach-Object {
                         if ($_ -match '^(.+?)\s+\(v') {
                             $matches[1]
                         }
-                    }
+                    })
 
                     # Determine which jobs contain the selected packages
                     Write-Host ""
@@ -4825,7 +5091,11 @@ function Get-WingetNewPackages {
                     if ($runningRelevantJobs.Count -gt 0) {
                         Write-Host "[WAIT] Waiting for $($runningRelevantJobs.Count) background jobs with selected packages..." -ForegroundColor DarkGray
                         $timeout = 30
-                        $runningRelevantJobs | Wait-Job -Timeout $timeout | Out-Null
+                        $null = $runningRelevantJobs | Wait-Job -Timeout $timeout
+                        $stillRunning = @($runningRelevantJobs | Where-Object { $_.State -eq 'Running' })
+                        if ($stillRunning.Count -gt 0) {
+                            $stillRunning | Stop-Job -ErrorAction SilentlyContinue
+                        }
                     }
                     else {
                         Write-Host "[OK] Selected package details already fetched!" -ForegroundColor Green
@@ -4849,14 +5119,16 @@ function Get-WingetNewPackages {
 
                     foreach ($job in $relevantJobs) {
                         if ($job.State -eq 'Completed') {
-                            $jobResults = Receive-Job -Job $job
-                            # Merge job results into master hashtable
-                            foreach ($key in $jobResults.Keys) {
-                                $allPackageDetails[$key] = $jobResults[$key]
-                                $newResults[$key] = $jobResults[$key]
+                            $jobResults = Receive-Job -Job $job -ErrorAction SilentlyContinue
+                            if ($jobResults -is [System.Collections.IDictionary]) {
+                                # Merge job results into master hashtable
+                                foreach ($key in $jobResults.Keys) {
+                                    $allPackageDetails[$key] = $jobResults[$key]
+                                    $newResults[$key] = $jobResults[$key]
+                                }
                             }
                         }
-                        Remove-Job -Job $job -Force
+                        Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
                     }
 
                     # Update cache with new results
@@ -4938,7 +5210,9 @@ function Get-WingetNewPackages {
                         Write-Host ""
                         Write-Host "Press any key to continue to selection menu..." -ForegroundColor DarkGray
                         try {
-                            $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+                            if (-not [Console]::IsInputRedirected) {
+                                $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+                            }
                         }
                         catch {
                             Start-Sleep -Seconds 2
@@ -4947,13 +5221,23 @@ function Get-WingetNewPackages {
 
                         # Re-run the selection
                         try {
-                            $packagesToInstall = Read-SpectreMultiSelection `
-                                -Title "[cyan]Select packages to install (Space to select, Enter to confirm)[/]" `
-                                -Choices $choices `
-                                -PageSize 20 `
-                                -Color "Green"
+                            if (Import-WingetBatchSpectre) {
+                                try {
+                                    $packagesToInstall = Read-SpectreMultiSelection `
+                                        -Title "[cyan]Select packages to install (Space to select, Enter to confirm)[/]" `
+                                        -Choices $choices `
+                                        -PageSize 20 `
+                                        -Color "Green"
+                                }
+                                catch {
+                                    $packagesToInstall = Read-WingetConsoleSelection -Title "Select packages to install" -Choices $choices -MultiSelect
+                                }
+                            }
+                            else {
+                                $packagesToInstall = Read-WingetConsoleSelection -Title "Select packages to install" -Choices $choices -MultiSelect
+                            }
 
-                            if ($packagesToInstall.Count -eq 0) {
+                            if (@($packagesToInstall).Count -eq 0) {
                                 Write-Host "`nNo packages selected." -ForegroundColor Yellow
                                 # Clean up background jobs
                                 Write-Host "Cleaning up background jobs..." -ForegroundColor DarkGray
@@ -5064,7 +5348,9 @@ function Get-WingetNewPackages {
                                 Write-Host " to install, or " -NoNewline -ForegroundColor Yellow
                                 Write-Host "Ctrl+C" -NoNewline -ForegroundColor Red
                                 Write-Host " to cancel..." -ForegroundColor Yellow
-                                $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+                                if (-not [Console]::IsInputRedirected) {
+                                    $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+                                }
                                 $userChoice = "Install selected packages"
                             }
                         }
@@ -5143,21 +5429,6 @@ function Get-WingetNewPackages {
                     $jobs | Remove-Job -Force -ErrorAction SilentlyContinue | Out-Null
                 }
             }
-        }
-        else {
-            Write-Host "`nTo install a package: " -ForegroundColor Cyan -NoNewline
-            Write-Host "winget install " -ForegroundColor White -NoNewline
-            Write-Host "<PackageName>" -ForegroundColor Yellow
-
-            Write-Host "Note: Install PwshSpectreConsole for interactive package selection." -ForegroundColor DarkGray
-
-            # Clean up background jobs since interactive selection not available
-            if ($jobs) {
-                Write-Host "Cleaning up background jobs..." -ForegroundColor DarkGray
-                $jobs | Stop-Job -ErrorAction SilentlyContinue | Out-Null
-                $jobs | Remove-Job -Force -ErrorAction SilentlyContinue | Out-Null
-            }
-        }
     }
     catch {
         Write-Error "Failed to fetch new packages from GitHub: $_"
@@ -5250,11 +5521,7 @@ function Get-WingetPackageInfo {
                 return
             }
         }
-        if (-not (Get-Module -Name PwshSpectreConsole)) {
-            if (Get-Module -ListAvailable -Name PwshSpectreConsole) {
-                Import-Module PwshSpectreConsole -ErrorAction SilentlyContinue
-            }
-        }
+        $null = Import-WingetBatchSpectre
     }
 
     process {
@@ -5912,18 +6179,16 @@ function Get-WingetRecommend {
         $choices = @($recommendations | ForEach-Object { $_.Key })
         $selected = @()
 
-        try {
-            $selected = @(Read-SpectreMultiSelection -Choices $choices -Title "[cyan]Select packages to install[/]" -PageSize 20 -Color "Green")
-        }
-        catch {
-            Write-Host "  Enter numbers to install (comma-separated, or 'all'): " -NoNewline -ForegroundColor Yellow
-            $answer = Read-Host
-            if ($answer -eq 'all') {
-                $selected = $choices
-            } else {
-                $selected = @($answer -split '[,\s]+' | Where-Object { $_ -match '^\d+$' -and [int]$_ -ge 1 -and [int]$_ -le $choices.Count } |
-                    ForEach-Object { $choices[[int]$_ - 1] } | Select-Object -Unique)
+        if (Import-WingetBatchSpectre) {
+            try {
+                $selected = @(Read-SpectreMultiSelection -Choices $choices -Title "[cyan]Select packages to install[/]" -PageSize 20 -Color "Green")
             }
+            catch {
+                $selected = @(Read-WingetConsoleSelection -Title "Select packages to install" -Choices $choices -MultiSelect)
+            }
+        }
+        else {
+            $selected = @(Read-WingetConsoleSelection -Title "Select packages to install" -Choices $choices -MultiSelect)
         }
 
         if ($selected.Count -gt 0) {
@@ -6147,7 +6412,7 @@ function Get-WingetUpdates {
     if ($IWantToLiterallyUpdateAllFuckingResults) {
         $selectedPackages = @($updatesAvailable)
     }
-    else {
+    elseif (Import-WingetBatchSpectre) {
         try {
             $displayToPkg = @{}
             $displayLines = foreach ($u in $updatesAvailable) {
@@ -6174,16 +6439,30 @@ function Get-WingetUpdates {
             $selectedPackages = @($selectedLines | ForEach-Object { $displayToPkg[$_] })
         }
         catch {
-            Write-Warning "Interactive selection error: $_"
-            Write-Host "Packages with updates available:" -ForegroundColor Cyan
-            $updatesAvailable | ForEach-Object {
-                Write-Host "  - $($_.Id) ($($_.InstalledVersion) -> $($_.AvailableVersion))" -ForegroundColor White
+            Write-Warning "Spectre selection failed: $_. Using numbered console selection."
+            $plainLines = @($updatesAvailable | ForEach-Object {
+                $src = if ($_.Source -and $_.Source -ne 'winget') { " [$($_.Source)]" } else { '' }
+                "$($_.Name) ($($_.Id)) $($_.InstalledVersion) -> $($_.AvailableVersion)$src"
+            })
+            $indices = @(Read-WingetConsoleSelection -Title "Select packages to update" -Choices $plainLines -MultiSelect -ReturnIndex)
+            if ($indices.Count -eq 0) {
+                Write-Host "No packages selected." -ForegroundColor Yellow
+                return
             }
-            Write-Host ""
-            Write-Host "To update all: " -ForegroundColor Cyan -NoNewline
-            Write-Host "Get-WingetUpdates -IWantToLiterallyUpdateAllFuckingResults" -ForegroundColor Yellow
+            $selectedPackages = @($indices | ForEach-Object { $updatesAvailable[$_] })
+        }
+    }
+    else {
+        $plainLines = @($updatesAvailable | ForEach-Object {
+            $src = if ($_.Source -and $_.Source -ne 'winget') { " [$($_.Source)]" } else { '' }
+            "$($_.Name) ($($_.Id)) $($_.InstalledVersion) -> $($_.AvailableVersion)$src"
+        })
+        $indices = @(Read-WingetConsoleSelection -Title "Select packages to update" -Choices $plainLines -MultiSelect -ReturnIndex)
+        if ($indices.Count -eq 0) {
+            Write-Host "No packages selected." -ForegroundColor Yellow
             return
         }
+        $selectedPackages = @($indices | ForEach-Object { $updatesAvailable[$_] })
     }
 
     Write-Host ""
@@ -6608,44 +6887,61 @@ function Install-WingetAll {
 
         $packagesToInstall = @()
 
-        # Interactive Selection using PwshSpectreConsole
+        # Interactive Selection (PwshSpectreConsole on PowerShell 7.4+, numbered console fallback on 5.1)
         if ($IWantToLiterallyInstallAllFuckingResults -or $Silent) {
             $packagesToInstall = $foundPackages.Id
         }
-        elseif (-not $Silent -and (Get-Module -Name PwshSpectreConsole)) {
-            Write-Host ""
+        else {
+            $hasSpectre = Import-WingetBatchSpectre
+            $usedSpectre = $false
 
-            try {
-                # Create multi-selection prompt
-                $selectedChoices = Read-SpectreMultiSelection -Title "[cyan]Select packages to install[/]" `
-                    -Choices $packageChoices `
-                    -PageSize 20 `
-                    -Color "Green"
+            if ($hasSpectre) {
+                Write-Host ""
+                try {
+                    # Create multi-selection prompt
+                    $selectedChoices = Read-SpectreMultiSelection -Title "[cyan]Select packages to install[/]" `
+                        -Choices $packageChoices `
+                        -PageSize 20 `
+                        -Color "Green"
 
-                if ($selectedChoices.Count -eq 0) {
+                    $usedSpectre = $true
+
+                    if (@($selectedChoices).Count -eq 0) {
+                        Write-Host "`nNo packages selected. Exiting." -ForegroundColor Yellow
+                        return
+                    }
+
+                    # Map back to IDs
+                    $packagesToInstall = @($selectedChoices | ForEach-Object { $packageMap[$_] })
+
+                    Write-Host "`nSelected " -ForegroundColor Green -NoNewline
+                    Write-Host "$($packagesToInstall.Count)" -ForegroundColor White -NoNewline
+                    Write-Host " package(s) for installation" -ForegroundColor Green
+                }
+                catch {
+                    Write-Warning "Spectre interactive selection failed. Using numbered console selection."
+                }
+            }
+
+            if (-not $usedSpectre) {
+                $plainChoices = foreach ($pkg in $foundPackages) {
+                    $verText = if ($pkg.Version -ne "Unknown") { " v$($pkg.Version)" } else { "" }
+                    $srcText = if ($pkg.Source -and $pkg.Source -ne "Unknown") { " [$($pkg.Source)]" } else { "" }
+                    "[$($pkg.SearchTerm)] $($pkg.Name) ($($pkg.Id))$verText$srcText"
+                }
+
+                $selectedIndices = @(Read-WingetConsoleSelection -Title "Select packages to install" -Choices $plainChoices -MultiSelect -ReturnIndex)
+                if ($selectedIndices.Count -eq 0) {
                     Write-Host "`nNo packages selected. Exiting." -ForegroundColor Yellow
                     return
                 }
 
-                # Map back to IDs
-                $packagesToInstall = $selectedChoices | ForEach-Object { $packageMap[$_] }
+                $packagesToInstall = @($selectedIndices | ForEach-Object { $foundPackages[$_].Id })
 
                 Write-Host "`nSelected " -ForegroundColor Green -NoNewline
                 Write-Host "$($packagesToInstall.Count)" -ForegroundColor White -NoNewline
                 Write-Host " package(s) for installation" -ForegroundColor Green
             }
-            catch {
-                Write-Warning "Failed to show interactive selection. Falling back to confirmation prompt."
-                $packagesToInstall = $foundPackages.Id
-            }
-        }
-        elseif (-not $Silent) {
-            # Fallback for when Spectre Console is not available
-            $packagesToInstall = $foundPackages.Id
-        }
-        else {
-             # Silent mode
-             $packagesToInstall = $foundPackages.Id
         }
 
         if (-not ($Silent -or $IWantToLiterallyInstallAllFuckingResults) -and $packagesToInstall.Count -gt 0) {
@@ -6654,19 +6950,29 @@ function Install-WingetAll {
 
             $jobsResult = Start-PackageDetailJobs -PackageIds $packagesToInstall -ConfigDir $configDir
             $jobs = $jobsResult[0]
+            $allPackageDetails = @{}
 
             if ($jobs.Count -gt 0) {
                 Write-Host "Waiting for background jobs..." -ForegroundColor DarkGray
-                $jobs | Wait-Job | Out-Null
+                $null = $jobs | Wait-Job -Timeout 60
 
-                $allPackageDetails = @{}
+                $timedOutJobs = @($jobs | Where-Object { $_.State -eq 'Running' })
+                if ($timedOutJobs.Count -gt 0) {
+                    Write-Warning "Timed out waiting for $($timedOutJobs.Count) package detail job(s); continuing with available details."
+                    $timedOutJobs | Stop-Job -ErrorAction SilentlyContinue
+                }
+
                 foreach ($job in $jobs) {
-                    $jobResults = Receive-Job -Job $job
-                    foreach ($key in $jobResults.Keys) {
-                        $allPackageDetails[$key] = $jobResults[$key]
-                        Set-PackageDetailsCache -PackageId $key -Details $jobResults[$key]
+                    if ($job.State -eq 'Completed') {
+                        $jobResults = Receive-Job -Job $job -ErrorAction SilentlyContinue
+                        if ($jobResults -is [System.Collections.IDictionary]) {
+                            foreach ($key in $jobResults.Keys) {
+                                $allPackageDetails[$key] = $jobResults[$key]
+                                Set-PackageDetailsCache -PackageId $key -Details $jobResults[$key]
+                            }
+                        }
                     }
-                    Remove-Job -Job $job -Force
+                    Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
                 }
 
                 # Fill missing
@@ -6682,13 +6988,31 @@ function Install-WingetAll {
                 Write-Host "Press " -NoNewline -ForegroundColor Yellow
                 Write-Host "Enter" -NoNewline -ForegroundColor White
                 Write-Host " to install, or " -NoNewline -ForegroundColor Yellow
-                Write-Host "Ctrl+C" -NoNewline -ForegroundColor Red
+                Write-Host "Esc / Ctrl+C" -NoNewline -ForegroundColor Red
                 Write-Host " to cancel..." -ForegroundColor Yellow
                 try {
-                    $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+                    if (-not [Console]::IsInputRedirected) {
+                        while ($true) {
+                            $key = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+                            if ($key.VirtualKeyCode -eq 13 -or $key.Character -in 'y', 'Y') {
+                                break
+                            }
+                            if ($key.VirtualKeyCode -eq 27 -or $key.Character -in 'q', 'Q', 'n', 'N') {
+                                Write-Host "`nInstallation cancelled." -ForegroundColor Yellow
+                                return
+                            }
+                        }
+                    }
+                    else {
+                        $confirmAnswer = Read-Host
+                        if ($confirmAnswer -match '^(n|no|q|quit|cancel)$') {
+                            Write-Host "`nInstallation cancelled." -ForegroundColor Yellow
+                            return
+                        }
+                    }
                 }
                 catch {
-                    # Ignore
+                    # Non-interactive / unsupported RawUI host fallback
                 }
             }
         }
@@ -6742,7 +7066,7 @@ function Install-WingetAll {
             }
 
             # Use Spectre Console table if available for better formatting
-            if (Get-Module -Name PwshSpectreConsole) {
+            if (Import-WingetBatchSpectre) {
                 Write-Host ""
                 Write-Host "Package Installation Summary ($($summaryList.Count) packages)" -ForegroundColor Cyan
 
@@ -7836,7 +8160,7 @@ function Invoke-WingetFleet {
                 }
                 $output = Receive-Job $job -ErrorAction Stop
                 if ($output) {
-                    $parsed = @($output)[-1] | ConvertFrom-Json -AsHashtable
+                    $parsed = @($output)[-1] | ConvertFrom-Json | ConvertTo-WingetHashtable
                     # Report under the name we targeted (the remote COMPUTERNAME may differ, e.g. IPs)
                     $parsed['Computer'] = $computer
                     $results.Add($parsed)
@@ -7863,7 +8187,7 @@ function Invoke-WingetFleet {
                 $idx = $results.FindIndex([Predicate[hashtable]] { param($r) $r.Computer -eq $computer })
                 try {
                     $output = & $invokeRemote -Computer $computer
-                    $parsed = @($output)[-1] | ConvertFrom-Json -AsHashtable
+                    $parsed = @($output)[-1] | ConvertFrom-Json | ConvertTo-WingetHashtable
                     $parsed['Computer'] = $computer
                     if ($idx -ge 0) { $results[$idx] = $parsed }
                 } catch {
@@ -8464,15 +8788,18 @@ exit `$(if (`$report.FailedCount -gt 0 -or `$report.Errors.Count -gt 0) { 1 } el
     $scriptPath = Join-Path $configDir "maintenance_task.ps1"
     $maintenanceScript | Set-Content -Path $scriptPath -Encoding UTF8
 
-    # Build scheduled task
-    $pwshPath = (Get-Command pwsh -ErrorAction SilentlyContinue).Source
-    if (-not $pwshPath) {
-        Write-Error "pwsh.exe (PowerShell 7) was not found in PATH. The maintenance task requires PowerShell 7."
+    # Build scheduled task (prefer pwsh if installed, fall back to powershell.exe)
+    $psExe = (Get-Command pwsh -ErrorAction SilentlyContinue).Source
+    if (-not $psExe) {
+        $psExe = (Get-Command powershell -ErrorAction SilentlyContinue).Source
+    }
+    if (-not $psExe) {
+        Write-Error "Neither pwsh.exe nor powershell.exe was found in PATH."
         return
     }
 
     $taskAction = New-ScheduledTaskAction `
-        -Execute $pwshPath `
+        -Execute $psExe `
         -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$scriptPath`""
 
     # Trigger
@@ -8681,34 +9008,48 @@ function Remove-WingetRecent {
     Write-Host " package(s) installed in the last $Days day$plural" -ForegroundColor Green
     Write-Host ""
 
-    try {
-        $displayToPkg = @{}
-        $displayLines = foreach ($p in $installedPackages) {
-            $display = "($($p.InstallDate.ToString('yyyy-MM-dd'))) $(ConvertTo-SpectreEscaped $p.Name) [grey]$(ConvertTo-SpectreEscaped $p.Id)[/]"
-            $displayToPkg[$display] = $p
-            $display
+    $selectedPackages = @()
+    if (Import-WingetBatchSpectre) {
+        try {
+            $displayToPkg = @{}
+            $displayLines = foreach ($p in $installedPackages) {
+                $display = "($($p.InstallDate.ToString('yyyy-MM-dd'))) $(ConvertTo-SpectreEscaped $p.Name) [grey]$(ConvertTo-SpectreEscaped $p.Id)[/]"
+                $displayToPkg[$display] = $p
+                $display
+            }
+
+            $selectedLines = Read-SpectreMultiSelection -Title "[red]Select packages to UNINSTALL (Space to toggle, Enter to confirm)[/]" `
+                -Choices $displayLines `
+                -PageSize 20 `
+                -Color "Red"
+
+            if (@($selectedLines).Count -eq 0) {
+                Write-Host "No packages selected." -ForegroundColor Yellow
+                return
+            }
+
+            $selectedPackages = @($selectedLines | ForEach-Object { $displayToPkg[$_] })
         }
-
-        $selectedLines = Read-SpectreMultiSelection -Title "[red]Select packages to UNINSTALL (Space to toggle, Enter to confirm)[/]" `
-            -Choices $displayLines `
-            -PageSize 20 `
-            -Color "Red"
-    }
-    catch {
-        Write-Warning "Interactive selection error: $_"
-        Write-Host "Recently installed packages:" -ForegroundColor Cyan
-        $installedPackages | ForEach-Object {
-            Write-Host "  - ($($_.InstallDate.ToString('yyyy-MM-dd'))) $($_.Name) [$($_.Id)]" -ForegroundColor White
+        catch {
+            Write-Warning "Spectre selection error: $_. Using numbered console selection."
+            $plainLines = @($installedPackages | ForEach-Object { "($($_.InstallDate.ToString('yyyy-MM-dd'))) $($_.Name) [$($_.Id)]" })
+            $indices = @(Read-WingetConsoleSelection -Title "Select packages to UNINSTALL" -Choices $plainLines -MultiSelect -ReturnIndex)
+            if ($indices.Count -eq 0) {
+                Write-Host "No packages selected." -ForegroundColor Yellow
+                return
+            }
+            $selectedPackages = @($indices | ForEach-Object { $installedPackages[$_] })
         }
-        return
     }
-
-    if (@($selectedLines).Count -eq 0) {
-        Write-Host "No packages selected." -ForegroundColor Yellow
-        return
+    else {
+        $plainLines = @($installedPackages | ForEach-Object { "($($_.InstallDate.ToString('yyyy-MM-dd'))) $($_.Name) [$($_.Id)]" })
+        $indices = @(Read-WingetConsoleSelection -Title "Select packages to UNINSTALL" -Choices $plainLines -MultiSelect -ReturnIndex)
+        if ($indices.Count -eq 0) {
+            Write-Host "No packages selected." -ForegroundColor Yellow
+            return
+        }
+        $selectedPackages = @($indices | ForEach-Object { $installedPackages[$_] })
     }
-
-    $selectedPackages = @($selectedLines | ForEach-Object { $displayToPkg[$_] })
 
     Write-Host ""
     Write-Host "WARNING: " -ForegroundColor Red -NoNewline
@@ -9758,8 +10099,10 @@ function Start-WingetServer {
 
     # Generate or validate API key
     if ([string]::IsNullOrEmpty($ApiKey)) {
-        # Cryptographically random key (Get-Random is predictable)
-        $bytes = [System.Security.Cryptography.RandomNumberGenerator]::GetBytes(24)
+        # Cryptographically random key (Get-Random is predictable; Create()+GetBytes works on PS 5.1 & 7+)
+        $bytes = New-Object byte[] 24
+        $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+        try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
         $ApiKey = [Convert]::ToBase64String($bytes).Replace('+', 'A').Replace('/', 'B').TrimEnd('=')
         Write-Host "  Generated API Key: " -NoNewline -ForegroundColor DarkGray
         Write-Host $ApiKey -ForegroundColor Yellow
@@ -9823,10 +10166,17 @@ function Start-WingetServer {
         if (-not $disableAuth) {
             Add-PodeMiddleware -Name 'ApiAuth' -ScriptBlock {
                 $apiKey = [string](Get-PodeHeader -Name 'X-API-Key')
-                # Constant-time comparison so response timing does not leak the key
+                # Constant-time comparison so response timing does not leak the key (PS 5.1 & 7+ compatible)
                 $given = [System.Text.Encoding]::UTF8.GetBytes($apiKey)
                 $expected = [System.Text.Encoding]::UTF8.GetBytes([string]$using:ApiKey)
-                if (-not [System.Security.Cryptography.CryptographicOperations]::FixedTimeEquals($given, $expected)) {
+                $diff = $given.Length -bxor $expected.Length
+                $maxLen = [Math]::Max($given.Length, $expected.Length)
+                for ($idx = 0; $idx -lt $maxLen; $idx++) {
+                    $a = if ($idx -lt $given.Length) { $given[$idx] } else { 0 }
+                    $b = if ($idx -lt $expected.Length) { $expected[$idx] } else { 0 }
+                    $diff = $diff -bor ($a -bxor $b)
+                }
+                if ($diff -ne 0) {
                     Set-PodeResponseStatus -Code 401
                     Write-PodeJsonResponse -Value @{ error = "Unauthorized"; message = "Invalid or missing X-API-Key header" }
                     return $false
@@ -10341,9 +10691,9 @@ function Test-WingetCompliance {
         }
         $policyName = if ($policy.name) { $policy.name } else { Split-Path $PolicyPath -Leaf }
     } else {
-        $required = $RequiredPackages ?? @()
-        $banned = $BannedPackages ?? @()
-        $floors = $VersionFloors ?? @{}
+        $required = if ($null -ne $RequiredPackages) { $RequiredPackages } else { @() }
+        $banned = if ($null -ne $BannedPackages) { $BannedPackages } else { @() }
+        $floors = if ($null -ne $VersionFloors) { $VersionFloors } else { @{} }
         $policyName = "Inline Policy"
     }
 
@@ -10581,11 +10931,7 @@ function Watch-WingetPackages {
                 return
             }
         }
-        if (-not (Get-Module -Name PwshSpectreConsole)) {
-            if (Get-Module -ListAvailable -Name PwshSpectreConsole) {
-                Import-Module PwshSpectreConsole -ErrorAction SilentlyContinue
-            }
-        }
+        $null = Import-WingetBatchSpectre
     }
 
     process {
@@ -10759,4 +11105,3 @@ function Watch-WingetPackages {
 }
 
 # EndRegion
-

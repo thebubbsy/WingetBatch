@@ -23,9 +23,16 @@ function Install-WingetBatchDependency {
         }
     }
     elseif ($Update) {
-        Update-Module -Name $Name -Force -AcceptLicense -ErrorAction Stop
+        $cmd = Get-Command Update-Module -ErrorAction Stop
+        $params = @{ Name = $Name; Force = $true; ErrorAction = 'Stop' }
+        if ($cmd.Parameters.ContainsKey('AcceptLicense')) { $params['AcceptLicense'] = $true }
+        Update-Module @params
     }
     else {
-        Install-Module -Name $Name -Scope CurrentUser -Force -SkipPublisherCheck -AllowClobber -ErrorAction Stop
+        $cmd = Get-Command Install-Module -ErrorAction Stop
+        $params = @{ Name = $Name; Scope = 'CurrentUser'; Force = $true; ErrorAction = 'Stop' }
+        if ($cmd.Parameters.ContainsKey('SkipPublisherCheck')) { $params['SkipPublisherCheck'] = $true }
+        if ($cmd.Parameters.ContainsKey('AllowClobber')) { $params['AllowClobber'] = $true }
+        Install-Module @params
     }
 }

@@ -1,5 +1,5 @@
 BeforeAll {
-    $modulePath = Join-Path $PSScriptRoot ".." "WingetBatch.psd1"
+    $modulePath = Join-Path (Join-Path $PSScriptRoot "..") "WingetBatch.psd1"
     Import-Module $modulePath -Force -ErrorAction Stop
 }
 
@@ -259,12 +259,147 @@ Describe "Source hygiene" {
     }
 
     It "keeps release notes under the PowerShell Gallery's 10,600 character limit" {
-        $manifest = Import-PowerShellDataFile (Join-Path $PSScriptRoot ".." "WingetBatch.psd1")
+        $manifest = Import-PowerShellDataFile (Join-Path (Join-Path $PSScriptRoot "..") "WingetBatch.psd1")
         $manifest.PrivateData.PSData.ReleaseNotes.Length | Should -BeLessOrEqual 10600
     }
 
-    It "declares the PowerShell version its dependencies actually need" {
-        $manifest = Import-PowerShellDataFile (Join-Path $PSScriptRoot ".." "WingetBatch.psd1")
-        [version]$manifest.PowerShellVersion | Should -BeGreaterOrEqual ([version]'7.4')
+    It "supports Windows PowerShell 5.1 and PowerShell 7+ without requiring PwshSpectreConsole" {
+        $manifest = Import-PowerShellDataFile (Join-Path (Join-Path $PSScriptRoot "..") "WingetBatch.psd1")
+        [version]$manifest.PowerShellVersion | Should -Be ([version]'5.1')
+        $manifest.CompatiblePSEditions | Should -Contain 'Desktop'
+        $manifest.CompatiblePSEditions | Should -Contain 'Core'
+        $manifest.RequiredModules | Should -Not -Contain 'PwshSpectreConsole'
+        $manifest.RequiredModules | Should -Contain 'Microsoft.WinGet.Client'
+    }
+
+    It "ensures any file with non-ASCII characters has a UTF-8 BOM for Windows PowerShell 5.1" {
+        $root = Join-Path $PSScriptRoot ".."
+        $allScripts = @(Get-ChildItem (Join-Path $root 'Public'), (Join-Path $root 'Private') -Filter *.ps1) +
+            @(Get-Item (Join-Path $root 'WingetBatch.psm1'), (Join-Path $root 'WingetBatch.psd1'))
+        foreach ($f in $allScripts) {
+            $bytes = [System.IO.File]::ReadAllBytes($f.FullName)
+            $hasNonAscii = $false
+            foreach ($b in $bytes) { if ($b -gt 0x7F) { $hasNonAscii = $true; break } }
+            if ($hasNonAscii) {
+                $hasBom = ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)
+                $hasBom | Should -BeTrue -Because "$($f.Name) contains non-ASCII characters and needs a UTF-8 BOM for PS 5.1"
+            }
+        }
+    }
+}
+
+Describe "Start-PackageDetailJobs deadlock & batch regression" {
+    It "completes background detail jobs without deadlocking and handles multi-package batches" {
+        InModuleScope WingetBatch {
+            $cacheDir = Join-Path $TestDrive 'wb_cache'
+            New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null
+            $now = (Get-Date).ToString('o')
+            $cacheObj = @{
+                'Pkg.One' = @{ CachedDate = $now; Details = @{ Id = 'Pkg.One'; Version = '1.0.0'; Description = 'First pkg' } }
+                'Pkg.Two' = @{ CachedDate = $now; Details = @{ Id = 'Pkg.Two'; Version = '2.0.0'; Description = 'Second pkg' } }
+            }
+            [System.IO.File]::WriteAllText((Join-Path $cacheDir 'package_cache.json'), ($cacheObj | ConvertTo-Json -Depth 5), [System.Text.Encoding]::UTF8)
+
+            $res = Start-PackageDetailJobs -PackageIds @('Pkg.One', 'Pkg.Two') -ConfigDir $cacheDir
+            $jobs = $res[0]
+            $jobs.Count | Should -BeGreaterThan 0
+            $completed = $jobs | Wait-Job -Timeout 15
+            @($completed).Count | Should -Be $jobs.Count
+
+            $merged = @{}
+            foreach ($j in $jobs) {
+                $out = Receive-Job -Job $j
+                foreach ($k in $out.Keys) { $merged[$k] = $out[$k] }
+                Remove-Job -Job $j -Force
+            }
+            $merged['Pkg.One'].Version | Should -Be '1.0.0'
+            $merged['Pkg.Two'].Version | Should -Be '2.0.0'
+        }
+    }
+
+    It "executes Parse-WingetShowOutput cleanly inside a background job without module-runspace deadlock" {
+        InModuleScope WingetBatch {
+            $parseCode = ${function:Parse-WingetShowOutput}.ToString()
+            $job = Start-WingetBatchJob -ScriptBlock {
+                param($code)
+                Set-Item -Path function:Parse-WingetShowOutput -Value ([scriptblock]::Create($code))
+                $sample = "Found PowerShell [Microsoft.PowerShell]`nVersion: 7.7.0.0`nPublisher: Microsoft Corporation`nDescription:`n  Cross-platform shell"
+                return Parse-WingetShowOutput -Output $sample -PackageId 'Microsoft.PowerShell'
+            } -ArgumentList @($parseCode)
+            $done = $job | Wait-Job -Timeout 15
+            $done | Should -Not -BeNullOrEmpty
+            $parsed = Receive-Job -Job $job
+            Remove-Job -Job $job -Force
+            $parsed.Version | Should -Be '7.7.0.0'
+            $parsed.PublisherName | Should -Be 'Microsoft Corporation'
+            $parsed.Description | Should -Be 'Cross-platform shell'
+        }
+    }
+}
+
+Describe "PS 5.1 compatibility helpers" {
+    It "Read-WingetConsoleSelection parses single, list, range, all, and cancel" {
+        InModuleScope WingetBatch {
+            Mock Write-Host {}
+            $choices = @('Alpha', 'Beta', 'Gamma', 'Delta')
+
+            Mock Read-Host { '1, 3-4' }
+            $idx = @(Read-WingetConsoleSelection -Title 'Pick' -Choices $choices -MultiSelect -ReturnIndex)
+            $idx | Should -Be @(0, 2, 3)
+
+            Mock Read-Host { 'all' }
+            $all = @(Read-WingetConsoleSelection -Title 'Pick' -Choices $choices -MultiSelect -ReturnIndex)
+            $all | Should -Be @(0, 1, 2, 3)
+
+            Mock Read-Host { '' }
+            $none = @(Read-WingetConsoleSelection -Title 'Pick' -Choices $choices -MultiSelect -ReturnIndex)
+            $none.Count | Should -Be 0
+
+            Mock Read-Host { 'y' }
+            $single = @(Read-WingetConsoleSelection -Title 'Pick' -Choices @('OnlyOne') -MultiSelect -ReturnIndex)
+            $single | Should -Be @(0)
+        }
+    }
+
+    It "ConvertTo-WingetHashtable converts nested PSCustomObjects into hashtables" {
+        InModuleScope WingetBatch {
+            $ht = '{"computer":"pc1","errors":["e1"],"nested":{"k":1}}' | ConvertFrom-Json | ConvertTo-WingetHashtable
+            ($ht -is [hashtable]) | Should -BeTrue
+            $ht['computer'] | Should -Be 'pc1'
+            $ht['errors'] | Should -Be @('e1')
+            ($ht['nested'] -is [hashtable]) | Should -BeTrue
+            $ht['nested']['k'] | Should -Be 1
+        }
+    }
+
+    It "Set-PackageDetailsCache and Get-PackageDetailsCache handle PSCustomObject details" {
+        InModuleScope WingetBatch {
+            Mock Get-WingetBatchConfigDir { Join-Path $TestDrive 'cache_dir' }
+            $psObj = '{"Id":"Test.Pkg","Version":"1.2.3","Description":"Hello"}' | ConvertFrom-Json
+            { Set-PackageDetailsCache -PackageId 'Test.Pkg' -Details $psObj } | Should -Not -Throw
+            $got = Get-PackageDetailsCache -PackageId 'Test.Pkg'
+            $got | Should -Not -BeNullOrEmpty
+            $got.Version | Should -Be '1.2.3'
+        }
+    }
+
+    It "Import-WingetBatchSpectre does not emit a PwshSpectreConsole Warning under CP437" {
+        $modulePath = Join-Path (Join-Path $PSScriptRoot "..") "WingetBatch.psd1"
+        if ($PSVersionTable.PSEdition -eq 'Core') {
+            $out = pwsh -NoProfile -Command {
+                param($mp)
+                [System.Text.Encoding]::RegisterProvider([System.Text.CodePagesEncodingProvider]::Instance)
+                [Console]::OutputEncoding = [System.Text.Encoding]::GetEncoding(437)
+                Import-Module $mp -Force
+                $m = Get-Module WingetBatch
+                & $m { $null = Import-WingetBatchSpectre -Force }
+            } -Args $modulePath 2>&1 | Out-String
+            $out | Should -Not -Match 'PwshSpectreConsole Warning'
+        }
+        else {
+            InModuleScope WingetBatch {
+                (Import-WingetBatchSpectre) | Should -BeFalse
+            }
+        }
     }
 }

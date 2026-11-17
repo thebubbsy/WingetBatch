@@ -446,18 +446,16 @@
         $choices = @($recommendations | ForEach-Object { $_.Key })
         $selected = @()
 
-        try {
-            $selected = @(Read-SpectreMultiSelection -Choices $choices -Title "[cyan]Select packages to install[/]" -PageSize 20 -Color "Green")
-        }
-        catch {
-            Write-Host "  Enter numbers to install (comma-separated, or 'all'): " -NoNewline -ForegroundColor Yellow
-            $answer = Read-Host
-            if ($answer -eq 'all') {
-                $selected = $choices
-            } else {
-                $selected = @($answer -split '[,\s]+' | Where-Object { $_ -match '^\d+$' -and [int]$_ -ge 1 -and [int]$_ -le $choices.Count } |
-                    ForEach-Object { $choices[[int]$_ - 1] } | Select-Object -Unique)
+        if (Import-WingetBatchSpectre) {
+            try {
+                $selected = @(Read-SpectreMultiSelection -Choices $choices -Title "[cyan]Select packages to install[/]" -PageSize 20 -Color "Green")
             }
+            catch {
+                $selected = @(Read-WingetConsoleSelection -Title "Select packages to install" -Choices $choices -MultiSelect)
+            }
+        }
+        else {
+            $selected = @(Read-WingetConsoleSelection -Title "Select packages to install" -Choices $choices -MultiSelect)
         }
 
         if ($selected.Count -gt 0) {

@@ -186,7 +186,7 @@ function Get-WingetUpdates {
     if ($IWantToLiterallyUpdateAllFuckingResults) {
         $selectedPackages = @($updatesAvailable)
     }
-    else {
+    elseif (Import-WingetBatchSpectre) {
         try {
             $displayToPkg = @{}
             $displayLines = foreach ($u in $updatesAvailable) {
@@ -213,16 +213,30 @@ function Get-WingetUpdates {
             $selectedPackages = @($selectedLines | ForEach-Object { $displayToPkg[$_] })
         }
         catch {
-            Write-Warning "Interactive selection error: $_"
-            Write-Host "Packages with updates available:" -ForegroundColor Cyan
-            $updatesAvailable | ForEach-Object {
-                Write-Host "  - $($_.Id) ($($_.InstalledVersion) -> $($_.AvailableVersion))" -ForegroundColor White
+            Write-Warning "Spectre selection failed: $_. Using numbered console selection."
+            $plainLines = @($updatesAvailable | ForEach-Object {
+                $src = if ($_.Source -and $_.Source -ne 'winget') { " [$($_.Source)]" } else { '' }
+                "$($_.Name) ($($_.Id)) $($_.InstalledVersion) -> $($_.AvailableVersion)$src"
+            })
+            $indices = @(Read-WingetConsoleSelection -Title "Select packages to update" -Choices $plainLines -MultiSelect -ReturnIndex)
+            if ($indices.Count -eq 0) {
+                Write-Host "No packages selected." -ForegroundColor Yellow
+                return
             }
-            Write-Host ""
-            Write-Host "To update all: " -ForegroundColor Cyan -NoNewline
-            Write-Host "Get-WingetUpdates -IWantToLiterallyUpdateAllFuckingResults" -ForegroundColor Yellow
+            $selectedPackages = @($indices | ForEach-Object { $updatesAvailable[$_] })
+        }
+    }
+    else {
+        $plainLines = @($updatesAvailable | ForEach-Object {
+            $src = if ($_.Source -and $_.Source -ne 'winget') { " [$($_.Source)]" } else { '' }
+            "$($_.Name) ($($_.Id)) $($_.InstalledVersion) -> $($_.AvailableVersion)$src"
+        })
+        $indices = @(Read-WingetConsoleSelection -Title "Select packages to update" -Choices $plainLines -MultiSelect -ReturnIndex)
+        if ($indices.Count -eq 0) {
+            Write-Host "No packages selected." -ForegroundColor Yellow
             return
         }
+        $selectedPackages = @($indices | ForEach-Object { $updatesAvailable[$_] })
     }
 
     Write-Host ""

@@ -21,10 +21,11 @@
     }
 
     try {
-        $cache = Get-Content $cacheFile -Raw | ConvertFrom-Json
-        $packageCache = $cache.PSObject.Properties[$PackageId]
+        $cache = Get-Content $cacheFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        $packageProp = $cache.PSObject.Properties[$PackageId]
 
-        if ($packageCache) {
+        if ($packageProp -and $packageProp.Value) {
+            $packageCache = $packageProp.Value
             $cachedDate = [DateTime]$packageCache.CachedDate
             $daysSinceCached = ((Get-Date) - $cachedDate).TotalDays
 

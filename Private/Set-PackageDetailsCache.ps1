@@ -13,7 +13,7 @@
         [string]$PackageId,
 
         [Parameter(Mandatory=$true)]
-        [hashtable]$Details
+        [object]$Details
     )
 
     $configDir = Get-WingetBatchConfigDir
@@ -28,7 +28,7 @@
     $cache = @{}
     if (Test-Path $cacheFile) {
         try {
-            $cacheJson = Get-Content $cacheFile -Raw | ConvertFrom-Json
+            $cacheJson = Get-Content $cacheFile -Raw -Encoding UTF8 | ConvertFrom-Json
             # Convert PSCustomObject to hashtable
             $cacheJson.PSObject.Properties | ForEach-Object {
                 $cache[$_.Name] = $_.Value

@@ -1,6 +1,6 @@
 BeforeAll {
     # Import the module
-    $modulePath = Join-Path $PSScriptRoot ".." "WingetBatch.psd1"
+    $modulePath = Join-Path (Join-Path $PSScriptRoot "..") "WingetBatch.psd1"
     Import-Module $modulePath -Force -ErrorAction Stop
 }
 

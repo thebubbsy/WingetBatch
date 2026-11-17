@@ -1,4 +1,4 @@
-function Send-WingetWebhook {
+﻿function Send-WingetWebhook {
     <#
     .SYNOPSIS
         Send package event notifications to Discord, Slack, or Teams webhooks.

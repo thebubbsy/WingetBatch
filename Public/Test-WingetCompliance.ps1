@@ -126,9 +126,9 @@
         }
         $policyName = if ($policy.name) { $policy.name } else { Split-Path $PolicyPath -Leaf }
     } else {
-        $required = $RequiredPackages ?? @()
-        $banned = $BannedPackages ?? @()
-        $floors = $VersionFloors ?? @{}
+        $required = if ($null -ne $RequiredPackages) { $RequiredPackages } else { @() }
+        $banned = if ($null -ne $BannedPackages) { $BannedPackages } else { @() }
+        $floors = if ($null -ne $VersionFloors) { $VersionFloors } else { @{} }
         $policyName = "Inline Policy"
     }
 

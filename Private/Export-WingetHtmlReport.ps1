@@ -1,4 +1,4 @@
-function Export-WingetHtmlReport {
+﻿function Export-WingetHtmlReport {
     <#
     .SYNOPSIS
         Exports an array of objects to a highly styled, interactive HTML report.

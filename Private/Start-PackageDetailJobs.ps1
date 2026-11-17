@@ -32,14 +32,19 @@
         if ($cmd) { $wingetExe = $cmd.Source }
     }
 
+    # Pass parser source text (not the module-bound ScriptBlock) so ThreadJob runspaces do not deadlock on caller state
+    $parseCode = if (${function:Parse-WingetShowOutput}) { ${function:Parse-WingetShowOutput}.ToString() } else { $null }
+
     $jobScript = {
-        param($packageList, $cacheDir, $ParseSB, $WingetPath)
+        param($packageList, $cacheDir, $ParseCode, $WingetPath)
         $results = @{}
 
-        # Define Parse-WingetShowOutput in the job scope from the passed script block
-        if ($ParseSB) {
-            Set-Item -Path function:Parse-WingetShowOutput -Value $ParseSB
+        # Define Parse-WingetShowOutput cleanly in this runspace/process
+        if ($ParseCode) {
+            Set-Item -Path function:Parse-WingetShowOutput -Value ([scriptblock]::Create($ParseCode))
         }
+
+        try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch { }
 
         $cacheFile = Join-Path $cacheDir "package_cache.json"
         $localCache = @{}
@@ -47,7 +52,7 @@
         # Read cache once at start of job
         if (Test-Path $cacheFile) {
             try {
-                $cacheJson = Get-Content $cacheFile -Raw | ConvertFrom-Json
+                $cacheJson = Get-Content $cacheFile -Raw -Encoding UTF8 | ConvertFrom-Json
                 if ($cacheJson) {
                     $cacheJson.PSObject.Properties | ForEach-Object {
                         $localCache[$_.Name] = $_.Value
@@ -57,8 +62,9 @@
             catch { }
         }
 
-        foreach ($pkgIdItem in $packageList) {
+        foreach ($pkgIdItem in @($packageList)) {
             $packageId = [string]$pkgIdItem
+            if ([string]::IsNullOrWhiteSpace($packageId)) { continue }
             $cachedInfo = $null
 
             # Try to get from cache first
@@ -87,7 +93,7 @@
 
             if ($WingetPath -and (Test-Path $WingetPath)) {
                 try {
-                    $output = & $WingetPath show --id $packageId --no-progress --disable-interactivity 2>&1 | Out-String
+                    $output = & $WingetPath show --id $packageId -e --no-progress --disable-interactivity --accept-source-agreements 2>&1 | Out-String
                     $info = Parse-WingetShowOutput -Output $output -PackageId $packageId
                 }
                 catch {
@@ -149,9 +155,9 @@
         $endIndex = [Math]::Min($startIndex + $packagesPerJob - 1, $totalPackages - 1)
         if ($startIndex -gt $endIndex) { break }
 
-        $packageBatch = $PackageIds[$startIndex..$endIndex]
+        $packageBatch = @($PackageIds[$startIndex..$endIndex])
 
-        $job = Start-WingetBatchJob -ScriptBlock $jobScript -ArgumentList (,$packageBatch), $ConfigDir, ${function:Parse-WingetShowOutput}, $wingetExe
+        $job = Start-WingetBatchJob -ScriptBlock $jobScript -ArgumentList @($packageBatch, $ConfigDir, $parseCode, $wingetExe)
         $jobs.Add($job)
         $jobPackageMap[$job.Id] = $packageBatch
     }

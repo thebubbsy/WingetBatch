@@ -121,8 +121,9 @@ Get-WingetMachineState -Reconcile -Path ".\golden.json"  # On new PC
 ## Requirements
 
 - Windows 10/11 with winget
-- PowerShell 7.4+ (required by PwshSpectreConsole)
-- Auto-installed: Microsoft.WinGet.Client, PwshSpectreConsole, Pode (for API server)
+- Windows PowerShell 5.1 or PowerShell 7+ (`pwsh`)
+- Required: `Microsoft.WinGet.Client`
+- Optional: `PwshSpectreConsole` (for enhanced TUI on PowerShell 7.4+; automatic numbered console fallback on 5.1), `Pode` (for `Start-WingetServer`)
 
 ## Architecture
 
@@ -142,7 +143,9 @@ Architected and maintained by **Matthew Bubb**.
 
 ## Version History
 
-- **2.9.0** (Current) — AI Recommender, Fleet Management, Rollback Engine, Compliance, Health Scores, Webhooks, Offline Deploy, Profiles, Changelog
+- **2.11.0** (Current) — Windows PowerShell 5.1 support, background detail job deadlock fix, encoding warning elimination, numbered console selection fallback
+- **2.10.0** — Reliability release (verified package operations, command fixes)
+- **2.9.0** — AI Recommender, Fleet Management, Rollback Engine, Compliance, Health Scores, Webhooks, Offline Deploy, Profiles, Changelog
 - **2.8.0** — Scheduled Maintenance, Dependency Graphs, REST API Server
 - **2.7.0** — Machine-as-Code, Live Dashboard, Package Intelligence, Security Hardening
 - **2.5.0** — COM API Migration

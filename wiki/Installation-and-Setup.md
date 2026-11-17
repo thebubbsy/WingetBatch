@@ -85,12 +85,12 @@ Repair-WingetBatchManager
 
 ## Dependencies
 
-WingetBatch automatically installs these required modules:
+WingetBatch installs `Microsoft.WinGet.Client` automatically and integrates with optional modules when available:
 
-| Module | Purpose |
-|:---|:---|
-| `Microsoft.WinGet.Client` | COM API access for package operations |
-| `PwshSpectreConsole` | Rich interactive terminal UI |
+| Module | Requirement | Purpose |
+|:---|:---|:---|
+| `Microsoft.WinGet.Client` | Required | COM API access for package operations |
+| `PwshSpectreConsole` | Optional (PowerShell 7.4+) | Rich interactive terminal UI (falls back to numbered console selection on 5.1) |
 
 ---
 
@@ -114,8 +114,8 @@ This ensures update notifications display immediately when you open a new termin
 
 | Environment | Support Level |
 |:---|:---|
-| PowerShell 7.4+ (pwsh) | Full support (required) |
-| Windows PowerShell 5.1 | Not supported (PwshSpectreConsole needs 7.4+). `Invoke-WingetFleet` targets and the `Install-Offline.ps1` script from `Export-WingetOffline` do run on 5.1. |
+| PowerShell 7.4+ (pwsh) | Full support (uses `PwshSpectreConsole` when installed, or built-in console fallback) |
+| Windows PowerShell 5.1 | Full support with built-in interactive console selection (ideal for bootstrapping `pwsh` on fresh Windows installs) |
 | Windows Terminal | Optimal experience |
 | VS Code Integrated Terminal | Supported |
 | ConEmu / Cmder | Supported |

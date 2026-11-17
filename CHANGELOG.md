@@ -1,5 +1,14 @@
 # WingetBatch Changelog
 
+## v2.11.0 - Windows PowerShell 5.1 Support & Background Job / Encoding Fixes
+- FIXED: Hang at "Waiting for background jobs..." in `Install-WingetAll` and `Get-WingetNewPackages`. Passing a module-bound `Parse-WingetShowOutput` scriptblock into `Start-ThreadJob` deadlocked against the caller waiting in `Wait-Job`; background jobs now pass plain function source text, fix nested-array argument wrapping on multi-package batches, set UTF-8 output encoding for `winget.exe`, and use `winget show --id <id> -e --accept-source-agreements`.
+- FIXED: Eliminated the `PwshSpectreConsole Warning` panel on terminals using non-UTF-8 encodings (e.g. OEM United States / CP437) by configuring UTF-8 console encoding on PowerShell 7+ and guarding `PwshSpectreConsole` import via `Import-WingetBatchSpectre`.
+- NEW: Full Windows PowerShell 5.1 (`Desktop`) compatibility so WingetBatch works out of the box on a fresh Windows install (including installing `pwsh` via `Install-WingetAll pwsh`):
+  * Lowered `PowerShellVersion` to `5.1`, added `Desktop` to `CompatiblePSEditions`, and made `PwshSpectreConsole` optional (auto-used on PowerShell 7.4+ when installed).
+  * Added `Read-WingetConsoleSelection` interactive numbered selection fallback (supports single picks, comma/space lists, `1-3` ranges, `all`, and cancellation) for `Install-WingetAll`, `Get-WingetUpdates`, `Get-WingetNewPackages`, `Get-WingetRecommend`, and `Remove-WingetRecent`.
+  * Replaced PowerShell 7-only syntax and .NET 6+ APIs in `Test-WingetCompliance`, `Invoke-WingetFleet`, `Start-WingetServer`, `Register-WingetMaintenance`, `Send-WingetWebhook`, and `Install-WingetBatchDependency`, and enabled TLS 1.2 on Windows PowerShell 5.1.
+- FIXED: `Set-PackageDetailsCache` and `Get-PackageDetailsCache` handling of cached `PSCustomObject` detail entries.
+
 ## v2.10.0 - Reliability Release
 - REQUIREMENT: PowerShell 7.4+ is now declared (PwshSpectreConsole already required it; 11 commands never parsed on 5.1).
 - FIXED: Installs/updates/uninstalls reported success when the installer failed. WinGet returns a Status instead of throwing; every command now checks it and shows the real error and reboot requirement.

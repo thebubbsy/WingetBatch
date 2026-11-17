@@ -95,12 +95,8 @@
         [switch]$AllowHashMismatch
     )
 
-    # Ensure PwshSpectreConsole is available
-    if (-not (Get-Module -Name PwshSpectreConsole)) {
-        if (Get-Module -ListAvailable -Name PwshSpectreConsole) {
-            Import-Module PwshSpectreConsole -ErrorAction SilentlyContinue
-        }
-    }
+    # Ensure PwshSpectreConsole is available on PS 7.4+ (without encoding warnings)
+    $null = Import-WingetBatchSpectre
 
     # Determine time period
     if ($PSCmdlet.ParameterSetName -eq 'Days') {
@@ -399,27 +395,33 @@
             if ($cmd) { $wingetExe = $cmd.Source }
         }
 
+        $parseCode = if (${function:Parse-WingetShowOutput}) { ${function:Parse-WingetShowOutput}.ToString() } else { $null }
+
         for ($i = 0; $i -lt $actualJobCount; $i++) {
             $startIndex = $i * $packagesPerJob
             $endIndex = [Math]::Min($startIndex + $packagesPerJob - 1, $totalPackagesToFetch - 1)
-            $packageBatch = $packagesToFetch[$startIndex..$endIndex]
+            $packageBatch = @($packagesToFetch[$startIndex..$endIndex])
 
             $job = Start-WingetBatchJob -ScriptBlock {
-                param($packageList, $cacheDir, $ParseSB, $WingetPath)
+                param($packageList, $cacheDir, $ParseCode, $WingetPath)
                 $results = @{}
 
-                # Define Parse-WingetShowOutput in the job scope from the passed script block
-                if ($ParseSB) {
-                    Set-Item -Path function:Parse-WingetShowOutput -Value $ParseSB
+                # Define Parse-WingetShowOutput cleanly in this runspace/process
+                if ($ParseCode) {
+                    Set-Item -Path function:Parse-WingetShowOutput -Value ([scriptblock]::Create($ParseCode))
                 }
 
-                foreach ($packageId in $packageList) {
+                try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch { }
+
+                foreach ($packageIdItem in @($packageList)) {
+                    $packageId = [string]$packageIdItem
+                    if ([string]::IsNullOrWhiteSpace($packageId)) { continue }
                     $info = $null
 
                     # Try winget.exe for rich details
                     if ($WingetPath -and (Test-Path $WingetPath)) {
                         try {
-                            $output = & $WingetPath show --id $packageId --no-progress --disable-interactivity 2>&1 | Out-String
+                            $output = & $WingetPath show --id $packageId -e --no-progress --disable-interactivity --accept-source-agreements 2>&1 | Out-String
                             $info = Parse-WingetShowOutput -Output $output -PackageId $packageId
                         }
                         catch { }
@@ -455,7 +457,7 @@
                 }
 
                 return $results
-            } -ArgumentList (,$packageBatch), $configDir, ${function:Parse-WingetShowOutput}, $wingetExe
+            } -ArgumentList @($packageBatch, $configDir, $parseCode, $wingetExe)
 
             $jobs.Add($job)
             $jobPackageMap[$job.Id] = $packageBatch
@@ -484,39 +486,47 @@
             }
         }
 
-        # Interactive selection using Spectre Console
-        if ($IWantToLiterallyInstallAllFuckingResults -or (Get-Module -Name PwshSpectreConsole)) {
-            Write-Host ""
+        # Interactive selection (PwshSpectreConsole on PS 7.4+, numbered console fallback on 5.1)
+        Write-Host ""
 
-            try {
+        try {
                 # Create choices with package name and version for display
-                $choices = $newPackages | ForEach-Object {
+                $choices = @($newPackages | ForEach-Object {
                     "$($_.Name) (v$($_.Version))"
-                }
+                })
 
                 if ($IWantToLiterallyInstallAllFuckingResults) {
                     Write-Host "Aggressive Install Mode Activated! Selecting ALL packages..." -ForegroundColor Magenta
                     $selectedChoices = $choices
-                } else {
-                    # Show multi-selection prompt (while jobs run in background)
-                    $selectedChoices = Read-SpectreMultiSelection -Title "[cyan]Select packages to install (Space to toggle, Enter to confirm)[/]" `
-                        -Choices $choices `
-                        -PageSize 20 `
-                        -Color "Green"
+                }
+                elseif (Import-WingetBatchSpectre) {
+                    try {
+                        # Show multi-selection prompt (while jobs run in background)
+                        $selectedChoices = Read-SpectreMultiSelection -Title "[cyan]Select packages to install (Space to toggle, Enter to confirm)[/]" `
+                            -Choices $choices `
+                            -PageSize 20 `
+                            -Color "Green"
+                    }
+                    catch {
+                        $selectedChoices = Read-WingetConsoleSelection -Title "Select packages to install" -Choices $choices -MultiSelect
+                    }
+                }
+                else {
+                    $selectedChoices = Read-WingetConsoleSelection -Title "Select packages to install" -Choices $choices -MultiSelect
                 }
 
-                if ($selectedChoices.Count -gt 0) {
-                            Write-Host "  - " -ForegroundColor Green -NoNewline
-                    Write-Host "$($selectedChoices.Count)" -ForegroundColor White -NoNewline
+                if (@($selectedChoices).Count -gt 0) {
+                    Write-Host "  - " -ForegroundColor Green -NoNewline
+                    Write-Host "$(@($selectedChoices).Count)" -ForegroundColor White -NoNewline
                     Write-Host " package(s) for installation" -ForegroundColor Green
                     Write-Host ""
 
                     # Extract package IDs from the selections (remove version suffix)
-                    $packagesToInstall = $selectedChoices | ForEach-Object {
+                    $packagesToInstall = @($selectedChoices | ForEach-Object {
                         if ($_ -match '^(.+?)\s+\(v') {
                             $matches[1]
                         }
-                    }
+                    })
 
                     # Determine which jobs contain the selected packages
                     Write-Host ""
@@ -548,7 +558,11 @@
                     if ($runningRelevantJobs.Count -gt 0) {
                         Write-Host "[WAIT] Waiting for $($runningRelevantJobs.Count) background jobs with selected packages..." -ForegroundColor DarkGray
                         $timeout = 30
-                        $runningRelevantJobs | Wait-Job -Timeout $timeout | Out-Null
+                        $null = $runningRelevantJobs | Wait-Job -Timeout $timeout
+                        $stillRunning = @($runningRelevantJobs | Where-Object { $_.State -eq 'Running' })
+                        if ($stillRunning.Count -gt 0) {
+                            $stillRunning | Stop-Job -ErrorAction SilentlyContinue
+                        }
                     }
                     else {
                         Write-Host "[OK] Selected package details already fetched!" -ForegroundColor Green
@@ -572,14 +586,16 @@
 
                     foreach ($job in $relevantJobs) {
                         if ($job.State -eq 'Completed') {
-                            $jobResults = Receive-Job -Job $job
-                            # Merge job results into master hashtable
-                            foreach ($key in $jobResults.Keys) {
-                                $allPackageDetails[$key] = $jobResults[$key]
-                                $newResults[$key] = $jobResults[$key]
+                            $jobResults = Receive-Job -Job $job -ErrorAction SilentlyContinue
+                            if ($jobResults -is [System.Collections.IDictionary]) {
+                                # Merge job results into master hashtable
+                                foreach ($key in $jobResults.Keys) {
+                                    $allPackageDetails[$key] = $jobResults[$key]
+                                    $newResults[$key] = $jobResults[$key]
+                                }
                             }
                         }
-                        Remove-Job -Job $job -Force
+                        Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
                     }
 
                     # Update cache with new results
@@ -661,7 +677,9 @@
                         Write-Host ""
                         Write-Host "Press any key to continue to selection menu..." -ForegroundColor DarkGray
                         try {
-                            $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+                            if (-not [Console]::IsInputRedirected) {
+                                $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+                            }
                         }
                         catch {
                             Start-Sleep -Seconds 2
@@ -670,13 +688,23 @@
 
                         # Re-run the selection
                         try {
-                            $packagesToInstall = Read-SpectreMultiSelection `
-                                -Title "[cyan]Select packages to install (Space to select, Enter to confirm)[/]" `
-                                -Choices $choices `
-                                -PageSize 20 `
-                                -Color "Green"
+                            if (Import-WingetBatchSpectre) {
+                                try {
+                                    $packagesToInstall = Read-SpectreMultiSelection `
+                                        -Title "[cyan]Select packages to install (Space to select, Enter to confirm)[/]" `
+                                        -Choices $choices `
+                                        -PageSize 20 `
+                                        -Color "Green"
+                                }
+                                catch {
+                                    $packagesToInstall = Read-WingetConsoleSelection -Title "Select packages to install" -Choices $choices -MultiSelect
+                                }
+                            }
+                            else {
+                                $packagesToInstall = Read-WingetConsoleSelection -Title "Select packages to install" -Choices $choices -MultiSelect
+                            }
 
-                            if ($packagesToInstall.Count -eq 0) {
+                            if (@($packagesToInstall).Count -eq 0) {
                                 Write-Host "`nNo packages selected." -ForegroundColor Yellow
                                 # Clean up background jobs
                                 Write-Host "Cleaning up background jobs..." -ForegroundColor DarkGray
@@ -787,7 +815,9 @@
                                 Write-Host " to install, or " -NoNewline -ForegroundColor Yellow
                                 Write-Host "Ctrl+C" -NoNewline -ForegroundColor Red
                                 Write-Host " to cancel..." -ForegroundColor Yellow
-                                $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+                                if (-not [Console]::IsInputRedirected) {
+                                    $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+                                }
                                 $userChoice = "Install selected packages"
                             }
                         }
@@ -866,21 +896,6 @@
                     $jobs | Remove-Job -Force -ErrorAction SilentlyContinue | Out-Null
                 }
             }
-        }
-        else {
-            Write-Host "`nTo install a package: " -ForegroundColor Cyan -NoNewline
-            Write-Host "winget install " -ForegroundColor White -NoNewline
-            Write-Host "<PackageName>" -ForegroundColor Yellow
-
-            Write-Host "Note: Install PwshSpectreConsole for interactive package selection." -ForegroundColor DarkGray
-
-            # Clean up background jobs since interactive selection not available
-            if ($jobs) {
-                Write-Host "Cleaning up background jobs..." -ForegroundColor DarkGray
-                $jobs | Stop-Job -ErrorAction SilentlyContinue | Out-Null
-                $jobs | Remove-Job -Force -ErrorAction SilentlyContinue | Out-Null
-            }
-        }
     }
     catch {
         Write-Error "Failed to fetch new packages from GitHub: $_"

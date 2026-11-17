@@ -326,44 +326,61 @@
 
         $packagesToInstall = @()
 
-        # Interactive Selection using PwshSpectreConsole
+        # Interactive Selection (PwshSpectreConsole on PowerShell 7.4+, numbered console fallback on 5.1)
         if ($IWantToLiterallyInstallAllFuckingResults -or $Silent) {
             $packagesToInstall = $foundPackages.Id
         }
-        elseif (-not $Silent -and (Get-Module -Name PwshSpectreConsole)) {
-            Write-Host ""
+        else {
+            $hasSpectre = Import-WingetBatchSpectre
+            $usedSpectre = $false
 
-            try {
-                # Create multi-selection prompt
-                $selectedChoices = Read-SpectreMultiSelection -Title "[cyan]Select packages to install[/]" `
-                    -Choices $packageChoices `
-                    -PageSize 20 `
-                    -Color "Green"
+            if ($hasSpectre) {
+                Write-Host ""
+                try {
+                    # Create multi-selection prompt
+                    $selectedChoices = Read-SpectreMultiSelection -Title "[cyan]Select packages to install[/]" `
+                        -Choices $packageChoices `
+                        -PageSize 20 `
+                        -Color "Green"
 
-                if ($selectedChoices.Count -eq 0) {
+                    $usedSpectre = $true
+
+                    if (@($selectedChoices).Count -eq 0) {
+                        Write-Host "`nNo packages selected. Exiting." -ForegroundColor Yellow
+                        return
+                    }
+
+                    # Map back to IDs
+                    $packagesToInstall = @($selectedChoices | ForEach-Object { $packageMap[$_] })
+
+                    Write-Host "`nSelected " -ForegroundColor Green -NoNewline
+                    Write-Host "$($packagesToInstall.Count)" -ForegroundColor White -NoNewline
+                    Write-Host " package(s) for installation" -ForegroundColor Green
+                }
+                catch {
+                    Write-Warning "Spectre interactive selection failed. Using numbered console selection."
+                }
+            }
+
+            if (-not $usedSpectre) {
+                $plainChoices = foreach ($pkg in $foundPackages) {
+                    $verText = if ($pkg.Version -ne "Unknown") { " v$($pkg.Version)" } else { "" }
+                    $srcText = if ($pkg.Source -and $pkg.Source -ne "Unknown") { " [$($pkg.Source)]" } else { "" }
+                    "[$($pkg.SearchTerm)] $($pkg.Name) ($($pkg.Id))$verText$srcText"
+                }
+
+                $selectedIndices = @(Read-WingetConsoleSelection -Title "Select packages to install" -Choices $plainChoices -MultiSelect -ReturnIndex)
+                if ($selectedIndices.Count -eq 0) {
                     Write-Host "`nNo packages selected. Exiting." -ForegroundColor Yellow
                     return
                 }
 
-                # Map back to IDs
-                $packagesToInstall = $selectedChoices | ForEach-Object { $packageMap[$_] }
+                $packagesToInstall = @($selectedIndices | ForEach-Object { $foundPackages[$_].Id })
 
                 Write-Host "`nSelected " -ForegroundColor Green -NoNewline
                 Write-Host "$($packagesToInstall.Count)" -ForegroundColor White -NoNewline
                 Write-Host " package(s) for installation" -ForegroundColor Green
             }
-            catch {
-                Write-Warning "Failed to show interactive selection. Falling back to confirmation prompt."
-                $packagesToInstall = $foundPackages.Id
-            }
-        }
-        elseif (-not $Silent) {
-            # Fallback for when Spectre Console is not available
-            $packagesToInstall = $foundPackages.Id
-        }
-        else {
-             # Silent mode
-             $packagesToInstall = $foundPackages.Id
         }
 
         if (-not ($Silent -or $IWantToLiterallyInstallAllFuckingResults) -and $packagesToInstall.Count -gt 0) {
@@ -372,19 +389,29 @@
 
             $jobsResult = Start-PackageDetailJobs -PackageIds $packagesToInstall -ConfigDir $configDir
             $jobs = $jobsResult[0]
+            $allPackageDetails = @{}
 
             if ($jobs.Count -gt 0) {
                 Write-Host "Waiting for background jobs..." -ForegroundColor DarkGray
-                $jobs | Wait-Job | Out-Null
+                $null = $jobs | Wait-Job -Timeout 60
 
-                $allPackageDetails = @{}
+                $timedOutJobs = @($jobs | Where-Object { $_.State -eq 'Running' })
+                if ($timedOutJobs.Count -gt 0) {
+                    Write-Warning "Timed out waiting for $($timedOutJobs.Count) package detail job(s); continuing with available details."
+                    $timedOutJobs | Stop-Job -ErrorAction SilentlyContinue
+                }
+
                 foreach ($job in $jobs) {
-                    $jobResults = Receive-Job -Job $job
-                    foreach ($key in $jobResults.Keys) {
-                        $allPackageDetails[$key] = $jobResults[$key]
-                        Set-PackageDetailsCache -PackageId $key -Details $jobResults[$key]
+                    if ($job.State -eq 'Completed') {
+                        $jobResults = Receive-Job -Job $job -ErrorAction SilentlyContinue
+                        if ($jobResults -is [System.Collections.IDictionary]) {
+                            foreach ($key in $jobResults.Keys) {
+                                $allPackageDetails[$key] = $jobResults[$key]
+                                Set-PackageDetailsCache -PackageId $key -Details $jobResults[$key]
+                            }
+                        }
                     }
-                    Remove-Job -Job $job -Force
+                    Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
                 }
 
                 # Fill missing
@@ -400,13 +427,31 @@
                 Write-Host "Press " -NoNewline -ForegroundColor Yellow
                 Write-Host "Enter" -NoNewline -ForegroundColor White
                 Write-Host " to install, or " -NoNewline -ForegroundColor Yellow
-                Write-Host "Ctrl+C" -NoNewline -ForegroundColor Red
+                Write-Host "Esc / Ctrl+C" -NoNewline -ForegroundColor Red
                 Write-Host " to cancel..." -ForegroundColor Yellow
                 try {
-                    $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+                    if (-not [Console]::IsInputRedirected) {
+                        while ($true) {
+                            $key = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+                            if ($key.VirtualKeyCode -eq 13 -or $key.Character -in 'y', 'Y') {
+                                break
+                            }
+                            if ($key.VirtualKeyCode -eq 27 -or $key.Character -in 'q', 'Q', 'n', 'N') {
+                                Write-Host "`nInstallation cancelled." -ForegroundColor Yellow
+                                return
+                            }
+                        }
+                    }
+                    else {
+                        $confirmAnswer = Read-Host
+                        if ($confirmAnswer -match '^(n|no|q|quit|cancel)$') {
+                            Write-Host "`nInstallation cancelled." -ForegroundColor Yellow
+                            return
+                        }
+                    }
                 }
                 catch {
-                    # Ignore
+                    # Non-interactive / unsupported RawUI host fallback
                 }
             }
         }
@@ -460,7 +505,7 @@
             }
 
             # Use Spectre Console table if available for better formatting
-            if (Get-Module -Name PwshSpectreConsole) {
+            if (Import-WingetBatchSpectre) {
                 Write-Host ""
                 Write-Host "Package Installation Summary ($($summaryList.Count) packages)" -ForegroundColor Cyan
 

@@ -79,8 +79,10 @@
 
     # Generate or validate API key
     if ([string]::IsNullOrEmpty($ApiKey)) {
-        # Cryptographically random key (Get-Random is predictable)
-        $bytes = [System.Security.Cryptography.RandomNumberGenerator]::GetBytes(24)
+        # Cryptographically random key (Get-Random is predictable; Create()+GetBytes works on PS 5.1 & 7+)
+        $bytes = New-Object byte[] 24
+        $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+        try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
         $ApiKey = [Convert]::ToBase64String($bytes).Replace('+', 'A').Replace('/', 'B').TrimEnd('=')
         Write-Host "  Generated API Key: " -NoNewline -ForegroundColor DarkGray
         Write-Host $ApiKey -ForegroundColor Yellow
@@ -144,10 +146,17 @@
         if (-not $disableAuth) {
             Add-PodeMiddleware -Name 'ApiAuth' -ScriptBlock {
                 $apiKey = [string](Get-PodeHeader -Name 'X-API-Key')
-                # Constant-time comparison so response timing does not leak the key
+                # Constant-time comparison so response timing does not leak the key (PS 5.1 & 7+ compatible)
                 $given = [System.Text.Encoding]::UTF8.GetBytes($apiKey)
                 $expected = [System.Text.Encoding]::UTF8.GetBytes([string]$using:ApiKey)
-                if (-not [System.Security.Cryptography.CryptographicOperations]::FixedTimeEquals($given, $expected)) {
+                $diff = $given.Length -bxor $expected.Length
+                $maxLen = [Math]::Max($given.Length, $expected.Length)
+                for ($idx = 0; $idx -lt $maxLen; $idx++) {
+                    $a = if ($idx -lt $given.Length) { $given[$idx] } else { 0 }
+                    $b = if ($idx -lt $expected.Length) { $expected[$idx] } else { 0 }
+                    $diff = $diff -bor ($a -bxor $b)
+                }
+                if ($diff -ne 0) {
                     Set-PodeResponseStatus -Code 401
                     Write-PodeJsonResponse -Value @{ error = "Unauthorized"; message = "Invalid or missing X-API-Key header" }
                     return $false

@@ -281,7 +281,7 @@
                 }
                 $output = Receive-Job $job -ErrorAction Stop
                 if ($output) {
-                    $parsed = @($output)[-1] | ConvertFrom-Json -AsHashtable
+                    $parsed = @($output)[-1] | ConvertFrom-Json | ConvertTo-WingetHashtable
                     # Report under the name we targeted (the remote COMPUTERNAME may differ, e.g. IPs)
                     $parsed['Computer'] = $computer
                     $results.Add($parsed)
@@ -308,7 +308,7 @@
                 $idx = $results.FindIndex([Predicate[hashtable]] { param($r) $r.Computer -eq $computer })
                 try {
                     $output = & $invokeRemote -Computer $computer
-                    $parsed = @($output)[-1] | ConvertFrom-Json -AsHashtable
+                    $parsed = @($output)[-1] | ConvertFrom-Json | ConvertTo-WingetHashtable
                     $parsed['Computer'] = $computer
                     if ($idx -ge 0) { $results[$idx] = $parsed }
                 } catch {

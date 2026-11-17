@@ -72,11 +72,7 @@
     )
 
     begin {
-        if (-not (Get-Module -Name PwshSpectreConsole)) {
-            if (Get-Module -ListAvailable -Name PwshSpectreConsole) {
-                Import-Module PwshSpectreConsole -ErrorAction SilentlyContinue
-            }
-        }
+        $null = Import-WingetBatchSpectre
     }
 
     process {

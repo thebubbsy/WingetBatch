@@ -115,34 +115,48 @@ function Remove-WingetRecent {
     Write-Host " package(s) installed in the last $Days day$plural" -ForegroundColor Green
     Write-Host ""
 
-    try {
-        $displayToPkg = @{}
-        $displayLines = foreach ($p in $installedPackages) {
-            $display = "($($p.InstallDate.ToString('yyyy-MM-dd'))) $(ConvertTo-SpectreEscaped $p.Name) [grey]$(ConvertTo-SpectreEscaped $p.Id)[/]"
-            $displayToPkg[$display] = $p
-            $display
+    $selectedPackages = @()
+    if (Import-WingetBatchSpectre) {
+        try {
+            $displayToPkg = @{}
+            $displayLines = foreach ($p in $installedPackages) {
+                $display = "($($p.InstallDate.ToString('yyyy-MM-dd'))) $(ConvertTo-SpectreEscaped $p.Name) [grey]$(ConvertTo-SpectreEscaped $p.Id)[/]"
+                $displayToPkg[$display] = $p
+                $display
+            }
+
+            $selectedLines = Read-SpectreMultiSelection -Title "[red]Select packages to UNINSTALL (Space to toggle, Enter to confirm)[/]" `
+                -Choices $displayLines `
+                -PageSize 20 `
+                -Color "Red"
+
+            if (@($selectedLines).Count -eq 0) {
+                Write-Host "No packages selected." -ForegroundColor Yellow
+                return
+            }
+
+            $selectedPackages = @($selectedLines | ForEach-Object { $displayToPkg[$_] })
         }
-
-        $selectedLines = Read-SpectreMultiSelection -Title "[red]Select packages to UNINSTALL (Space to toggle, Enter to confirm)[/]" `
-            -Choices $displayLines `
-            -PageSize 20 `
-            -Color "Red"
-    }
-    catch {
-        Write-Warning "Interactive selection error: $_"
-        Write-Host "Recently installed packages:" -ForegroundColor Cyan
-        $installedPackages | ForEach-Object {
-            Write-Host "  - ($($_.InstallDate.ToString('yyyy-MM-dd'))) $($_.Name) [$($_.Id)]" -ForegroundColor White
+        catch {
+            Write-Warning "Spectre selection error: $_. Using numbered console selection."
+            $plainLines = @($installedPackages | ForEach-Object { "($($_.InstallDate.ToString('yyyy-MM-dd'))) $($_.Name) [$($_.Id)]" })
+            $indices = @(Read-WingetConsoleSelection -Title "Select packages to UNINSTALL" -Choices $plainLines -MultiSelect -ReturnIndex)
+            if ($indices.Count -eq 0) {
+                Write-Host "No packages selected." -ForegroundColor Yellow
+                return
+            }
+            $selectedPackages = @($indices | ForEach-Object { $installedPackages[$_] })
         }
-        return
     }
-
-    if (@($selectedLines).Count -eq 0) {
-        Write-Host "No packages selected." -ForegroundColor Yellow
-        return
+    else {
+        $plainLines = @($installedPackages | ForEach-Object { "($($_.InstallDate.ToString('yyyy-MM-dd'))) $($_.Name) [$($_.Id)]" })
+        $indices = @(Read-WingetConsoleSelection -Title "Select packages to UNINSTALL" -Choices $plainLines -MultiSelect -ReturnIndex)
+        if ($indices.Count -eq 0) {
+            Write-Host "No packages selected." -ForegroundColor Yellow
+            return
+        }
+        $selectedPackages = @($indices | ForEach-Object { $installedPackages[$_] })
     }
-
-    $selectedPackages = @($selectedLines | ForEach-Object { $displayToPkg[$_] })
 
     Write-Host ""
     Write-Host "WARNING: " -ForegroundColor Red -NoNewline
