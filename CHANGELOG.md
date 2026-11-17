@@ -1,5 +1,9 @@
 # WingetBatch Changelog
 
+## v2.11.1 - Search Diagnostics & Safer Spectre Fallback
+- FIXED: `Install-WingetAll` now surfaces the underlying WinGet COM search exception (and flags Windows Safe Mode / catalog unavailability clearly) instead of hiding it or printing a trailing `, ` when `-Id` is omitted.
+- FIXED: `Import-WingetBatchSpectre` catches module load errors across installed `PwshSpectreConsole` copies and falls back cleanly without noisy error output.
+
 ## v2.11.0 - Windows PowerShell 5.1 Support & Background Job / Encoding Fixes
 - FIXED: Hang at "Waiting for background jobs..." in `Install-WingetAll` and `Get-WingetNewPackages`. Passing a module-bound `Parse-WingetShowOutput` scriptblock into `Start-ThreadJob` deadlocked against the caller waiting in `Wait-Job`; background jobs now pass plain function source text, fix nested-array argument wrapping on multi-package batches, set UTF-8 output encoding for `winget.exe`, and use `winget show --id <id> -e --accept-source-agreements`.
 - FIXED: Eliminated the `PwshSpectreConsole Warning` panel on terminals using non-UTF-8 encodings (e.g. OEM United States / CP437) by configuring UTF-8 console encoding on PowerShell 7+ and guarding `PwshSpectreConsole` import via `Import-WingetBatchSpectre`.

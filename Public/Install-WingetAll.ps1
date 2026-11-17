@@ -145,6 +145,23 @@
         }
 
         $allPackages = [System.Collections.Generic.List[Object]]::new()
+        $searchHadError = $false
+        $warnedTerms = 0
+
+        $formatSearchError = {
+            param([string]$Kind, [string]$Term, $ErrorRecord)
+            $msg = $ErrorRecord.Exception.Message
+            $inner = if ($ErrorRecord.Exception.InnerException) { $ErrorRecord.Exception.InnerException.Message } else { $null }
+            $detail = if ($inner -and $msg -notmatch [regex]::Escape($inner)) { "$msg ($inner)" } else { $msg }
+            Write-Warning "Failed to search for $Kind '$Term': $detail"
+            $inSafeMode = Test-Path 'HKLM:\SYSTEM\CurrentControlSet\Control\SafeBoot\Option'
+            if ($inSafeMode -or $detail -match '0x80073CFC|0x8007043C|Safe Mode') {
+                Write-Warning "WinGet's local 'winget' catalog cannot start in Windows Safe Mode (AppXSvc is disabled). Reboot into normal Windows, or run Repair-WingetBatchManager."
+            }
+            elseif ($detail -match 'catalog|0x80') {
+                Write-Warning "Run Repair-WingetBatchManager (or 'winget source reset --force') if WinGet's catalog is unavailable."
+            }
+        }
 
         # Handle Explicit IDs
         if ($Id) {
@@ -167,7 +184,12 @@
                             SearchTerm = $i
                         })
                     }
-                } catch { Write-Warning "Failed to search for ID: $i" }
+                }
+                catch {
+                    $searchHadError = $true
+                    $warnedTerms++
+                    & $formatSearchError 'ID' $i $_
+                }
             }
         }
 
@@ -184,6 +206,7 @@
 
                 $searchWords = $q -split '\s+' | Where-Object { $_ -ne '' }
                 $queryPackages = [System.Collections.Generic.List[PSCustomObject]]::new()
+                $queryError = $false
 
                 try {
                     $comArgs = @{ Count = $LimitResult; ErrorAction = 'Stop'; MatchOption = $matchOptionEnum }
@@ -235,11 +258,18 @@
                         }
                     }
                 }
-                catch { Write-Warning "Failed to search for query: $q" }
+                catch {
+                    $queryError = $true
+                    $searchHadError = $true
+                    $warnedTerms++
+                    & $formatSearchError 'query' $q $_
+                }
 
                 if ($queryPackages.Count -gt 0) {
                     $allPackages.AddRange([array]$queryPackages)
-                } else {
+                }
+                elseif (-not $queryError) {
+                    $warnedTerms++
                     Write-Warning "No packages found matching '$q'"
                 }
             }
@@ -268,7 +298,10 @@
         }
 
         if ($foundPackages.Count -eq 0) {
-            Write-Warning "No packages found matching '$(@($Query) + @($Id) -join ", ")'"
+            $searchedTerms = @(@($Query) + @($Id) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join ", "
+            if ($warnedTerms -eq 0 -or ($searchedTerms -and $warnedTerms -gt 1)) {
+                Write-Warning "No packages found matching '$searchedTerms'"
+            }
             return
         }
 

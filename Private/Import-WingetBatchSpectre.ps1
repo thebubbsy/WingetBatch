@@ -32,7 +32,11 @@ function Import-WingetBatchSpectre {
     }
     $script:WingetBatchSpectreChecked = $true
 
-    if (-not (Get-Module -ListAvailable -Name PwshSpectreConsole)) {
+    $candidates = @()
+    try {
+        $candidates = @(Get-Module -ListAvailable -Name PwshSpectreConsole -ErrorAction SilentlyContinue | Sort-Object Version -Descending)
+    } catch { }
+    if ($candidates.Count -eq 0) {
         return $false
     }
 
@@ -49,7 +53,16 @@ function Import-WingetBatchSpectre {
         if (-not $hadIgnore) {
             $env:IgnoreSpectreEncoding = 'True'
         }
-        Import-Module PwshSpectreConsole -ErrorAction SilentlyContinue
+        foreach ($candidate in $candidates) {
+            try {
+                $target = if ($candidate.Path) { $candidate.Path } else { 'PwshSpectreConsole' }
+                Import-Module -Name $target -ErrorAction Stop
+                break
+            }
+            catch {
+                # Fall through to next installed copy or console fallback
+            }
+        }
     }
     finally {
         if (-not $hadIgnore) {

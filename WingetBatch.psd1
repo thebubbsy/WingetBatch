@@ -3,7 +3,7 @@
     RootModule = 'WingetBatch.psm1'
 
     # Version number of this module.
-    ModuleVersion = '2.11.0'
+    ModuleVersion = '2.11.1'
 
     # ID used to uniquely identify this module
     GUID = 'b9e8f5d2-4c3f-4a6b-8d9e-2f7a8b5c6e4f'
@@ -92,6 +92,10 @@
 
             # ReleaseNotes of this module
             ReleaseNotes = @'
+v2.11.1 - Better Search Error Diagnostics & Safer Spectre Fallback
+- FIXED: Install-WingetAll no longer hides WinGet catalog errors behind generic "Failed to search for query" warnings or appends a trailing ", " when -Id is omitted; Safe Mode (AppXSvc disabled / 0x80073CFC) and catalog errors are reported clearly.
+- FIXED: Import-WingetBatchSpectre now catches import errors across candidate PwshSpectreConsole copies so a broken/unhydrated copy cleanly falls back to another version or console mode without throwing.
+
 v2.11.0 - Windows PowerShell 5.1 Support & Background Job / Encoding Fixes
 - FIXED: Hang at "Waiting for background jobs..." in Install-WingetAll and Get-WingetNewPackages. Passing a module-bound Parse-WingetShowOutput scriptblock into Start-ThreadJob deadlocked against the caller runspace waiting in Wait-Job; jobs now receive plain function source text and exact-match winget show (-e --accept-source-agreements) without nested-array wrapping on multi-package batches.
 - FIXED: Eliminated the large PwshSpectreConsole Warning panel on terminals with non-UTF-8 encoding (e.g. OEM United States / CP437) by enabling UTF-8 console encoding on PowerShell 7+ and guarding PwshSpectreConsole import.

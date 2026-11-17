@@ -935,7 +935,11 @@ function Import-WingetBatchSpectre {
     }
     $script:WingetBatchSpectreChecked = $true
 
-    if (-not (Get-Module -ListAvailable -Name PwshSpectreConsole)) {
+    $candidates = @()
+    try {
+        $candidates = @(Get-Module -ListAvailable -Name PwshSpectreConsole -ErrorAction SilentlyContinue | Sort-Object Version -Descending)
+    } catch { }
+    if ($candidates.Count -eq 0) {
         return $false
     }
 
@@ -952,7 +956,16 @@ function Import-WingetBatchSpectre {
         if (-not $hadIgnore) {
             $env:IgnoreSpectreEncoding = 'True'
         }
-        Import-Module PwshSpectreConsole -ErrorAction SilentlyContinue
+        foreach ($candidate in $candidates) {
+            try {
+                $target = if ($candidate.Path) { $candidate.Path } else { 'PwshSpectreConsole' }
+                Import-Module -Name $target -ErrorAction Stop
+                break
+            }
+            catch {
+                # Fall through to next installed copy or console fallback
+            }
+        }
     }
     finally {
         if (-not $hadIgnore) {
@@ -2088,7 +2101,41 @@ function Start-WingetBatchJob {
         [Object[]]$ArgumentList
     )
 
-    if (Get-Command Start-ThreadJob -ErrorAction SilentlyContinue) {
+    $threadJobReady = $false
+    $threadJobCmd = Get-Command -Name 'Start-ThreadJob' -ErrorAction SilentlyContinue
+    if ($threadJobCmd) {
+        if ($threadJobCmd.CommandType -eq 'Function' -or $null -ne $threadJobCmd.Module -or (Get-Module -Name 'Microsoft.PowerShell.ThreadJob', 'ThreadJob' -ErrorAction SilentlyContinue)) {
+            $threadJobReady = $true
+        }
+    }
+
+    if (-not $threadJobReady) {
+        $candidates = @()
+        if ($PSVersionTable.PSEdition -eq 'Core') {
+            foreach ($rel in @('Modules\Microsoft.PowerShell.ThreadJob', 'Modules\ThreadJob')) {
+                $builtInPath = Join-Path -Path $PSHOME -ChildPath $rel
+                if (Test-Path -LiteralPath $builtInPath) {
+                    $candidates += $builtInPath
+                }
+            }
+        }
+        $candidates += @(Get-Module -ListAvailable -Name 'Microsoft.PowerShell.ThreadJob', 'ThreadJob' -ErrorAction SilentlyContinue | ForEach-Object { $_.Path })
+        foreach ($candidatePath in ($candidates | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)) {
+            try {
+                Import-Module -Name $candidatePath -Global -ErrorAction Stop | Out-Null
+                $loadedCmd = Get-Command -Name 'Start-ThreadJob' -ErrorAction SilentlyContinue
+                if ($loadedCmd -and ($null -ne $loadedCmd.Module -or (Get-Module -Name 'Microsoft.PowerShell.ThreadJob', 'ThreadJob' -ErrorAction SilentlyContinue))) {
+                    $threadJobReady = $true
+                    break
+                }
+            }
+            catch {
+                Write-Verbose "Skipping ThreadJob candidate '$candidatePath': $($_.Exception.Message)"
+            }
+        }
+    }
+
+    if ($threadJobReady) {
         return Start-ThreadJob -Name 'WingetBatchDetails' -ScriptBlock $ScriptBlock -ArgumentList $ArgumentList
     }
     else {
@@ -6706,6 +6753,23 @@ function Install-WingetAll {
         }
 
         $allPackages = [System.Collections.Generic.List[Object]]::new()
+        $searchHadError = $false
+        $warnedTerms = 0
+
+        $formatSearchError = {
+            param([string]$Kind, [string]$Term, $ErrorRecord)
+            $msg = $ErrorRecord.Exception.Message
+            $inner = if ($ErrorRecord.Exception.InnerException) { $ErrorRecord.Exception.InnerException.Message } else { $null }
+            $detail = if ($inner -and $msg -notmatch [regex]::Escape($inner)) { "$msg ($inner)" } else { $msg }
+            Write-Warning "Failed to search for $Kind '$Term': $detail"
+            $inSafeMode = Test-Path 'HKLM:\SYSTEM\CurrentControlSet\Control\SafeBoot\Option'
+            if ($inSafeMode -or $detail -match '0x80073CFC|0x8007043C|Safe Mode') {
+                Write-Warning "WinGet's local 'winget' catalog cannot start in Windows Safe Mode (AppXSvc is disabled). Reboot into normal Windows, or run Repair-WingetBatchManager."
+            }
+            elseif ($detail -match 'catalog|0x80') {
+                Write-Warning "Run Repair-WingetBatchManager (or 'winget source reset --force') if WinGet's catalog is unavailable."
+            }
+        }
 
         # Handle Explicit IDs
         if ($Id) {
@@ -6728,7 +6792,12 @@ function Install-WingetAll {
                             SearchTerm = $i
                         })
                     }
-                } catch { Write-Warning "Failed to search for ID: $i" }
+                }
+                catch {
+                    $searchHadError = $true
+                    $warnedTerms++
+                    & $formatSearchError 'ID' $i $_
+                }
             }
         }
 
@@ -6745,6 +6814,7 @@ function Install-WingetAll {
 
                 $searchWords = $q -split '\s+' | Where-Object { $_ -ne '' }
                 $queryPackages = [System.Collections.Generic.List[PSCustomObject]]::new()
+                $queryError = $false
 
                 try {
                     $comArgs = @{ Count = $LimitResult; ErrorAction = 'Stop'; MatchOption = $matchOptionEnum }
@@ -6796,11 +6866,18 @@ function Install-WingetAll {
                         }
                     }
                 }
-                catch { Write-Warning "Failed to search for query: $q" }
+                catch {
+                    $queryError = $true
+                    $searchHadError = $true
+                    $warnedTerms++
+                    & $formatSearchError 'query' $q $_
+                }
 
                 if ($queryPackages.Count -gt 0) {
                     $allPackages.AddRange([array]$queryPackages)
-                } else {
+                }
+                elseif (-not $queryError) {
+                    $warnedTerms++
                     Write-Warning "No packages found matching '$q'"
                 }
             }
@@ -6829,7 +6906,10 @@ function Install-WingetAll {
         }
 
         if ($foundPackages.Count -eq 0) {
-            Write-Warning "No packages found matching '$(@($Query) + @($Id) -join ", ")'"
+            $searchedTerms = @(@($Query) + @($Id) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join ", "
+            if ($warnedTerms -eq 0 -or ($searchedTerms -and $warnedTerms -gt 1)) {
+                Write-Warning "No packages found matching '$searchedTerms'"
+            }
             return
         }
 

@@ -396,10 +396,35 @@ Describe "PS 5.1 compatibility helpers" {
             } -Args $modulePath 2>&1 | Out-String
             $out | Should -Not -Match 'PwshSpectreConsole Warning'
         }
-        else {
+            else {
             InModuleScope WingetBatch {
                 (Import-WingetBatchSpectre) | Should -BeFalse
             }
+        }
+    }
+
+    It "Import-WingetBatchSpectre gracefully returns false if PwshSpectreConsole fails to load" {
+        InModuleScope WingetBatch {
+            if ($PSVersionTable.PSEdition -eq 'Core') {
+                Mock Get-Module { $null } -ParameterFilter { $Name -eq 'PwshSpectreConsole' -and -not $ListAvailable }
+                Mock Get-Module { @([PSCustomObject]@{ Version = [version]'2.7.0'; Path = 'C:\nonexistent\PwshSpectreConsole.psd1' }) } -ParameterFilter { $Name -eq 'PwshSpectreConsole' -and $ListAvailable }
+                Mock Import-Module { throw [System.IO.IOException]::new('Simulated placeholder failure') }
+                (Import-WingetBatchSpectre -Force) | Should -BeFalse
+            }
+        }
+    }
+
+    It "Install-WingetAll surfaces WinGet search exceptions instead of generic warnings" {
+        InModuleScope WingetBatch {
+            Mock Import-Module {} -ParameterFilter { $Name -eq 'Microsoft.WinGet.Client' }
+            Mock Get-Module { [PSCustomObject]@{ Name = 'Microsoft.WinGet.Client' } } -ParameterFilter { $Name -eq 'Microsoft.WinGet.Client' }
+            Mock Get-WingetSourceIndexAge { $null }
+            Mock Microsoft.WinGet.Client\Find-WinGetPackage { throw [System.Exception]::new('An error occurred while connecting to the catalog (0x80073CFC)') }
+            $warnings = @()
+            Install-WingetAll -Query 'pwsh' -WarningVariable warnings 3>$null 6>$null
+            $joined = ($warnings | ForEach-Object { [string]$_ }) -join "`n"
+            $joined | Should -Match '0x80073CFC'
+            $joined | Should -Not -Match "matching 'pwsh, '"
         }
     }
 }
